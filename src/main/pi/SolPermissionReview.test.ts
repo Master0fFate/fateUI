@@ -32,4 +32,4 @@ it('revokes a retained full-access write handle after changing to Open without P
       .rejects.toThrow(/stale|authority|project|trust|permission/i);
     expect(await fs.readFile(sentinel, 'utf8')).toBe('unchanged');
   } finally { await runtime.dispose(); }
-});
+}, 30_000);

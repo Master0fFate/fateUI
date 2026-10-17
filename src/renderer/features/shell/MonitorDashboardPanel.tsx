@@ -170,7 +170,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
     <section className="monitor-dashboard monitor-panel activity-panel" aria-label="Monitoring dashboard">
       <header className="monitor-dashboard-header activity-head">
         <strong>Monitor</strong>
-        {shown ? <span className={`monitor-state monitor-state--${shown.overall}`}>{shown.overall}</span> : null}
+        {shown?.overall === 'unknown' ? <span className="monitor-state monitor-state--unknown">unknown</span> : null}
         {shown ? <span className="monitor-dashboard-metrics activity-counts" aria-label="Work status">
           <span data-tone={shown.counts.attention > 0 ? 'attention' : undefined}><strong>{shown.counts.attention}</strong> attention</span>
           {' '}<span data-tone={shown.counts.active > 0 ? 'active' : undefined}><strong>{shown.counts.active}</strong> active</span>
@@ -193,7 +193,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
           {shown.items.map((item) => {
             const kind = 'ref' in item ? item.ref.kind : 'navigation' in item && item.navigation ? item.navigation.kind : null;
             const Icon = kind ? ROW_ICONS[kind] : Activity;
-            const detailText = !webScope && 'detail' in item && typeof item.detail === 'string' ? item.detail : '';
+            const detailText = !webScope && 'detail' in item && typeof item.detail === 'string' && item.detail !== item.state ? item.detail : '';
             return <li key={item.id} className={`monitor-dashboard-row monitor-dashboard-row--${item.state} activity-row`}>
               <span className="monitor-dashboard-row-state">{item.state}</span>
               <span className="activity-kind"><Icon size={12} aria-hidden="true" /></span>

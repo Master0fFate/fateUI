@@ -131,7 +131,7 @@ describe('native durable state repositories', () => {
     db.exec("CREATE TRIGGER synthetic_disk_failure BEFORE INSERT ON document_revisions BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END");
     db.close();
     await expect(store.createTasks().save(tasks(2), 1)).rejects.toThrow(/synthetic disk failure/u);
-    await expect(store.createTasks().load('/project', 'session')).rejects.toThrow(/poisoned/u);
+    await expect(store.createTasks().load('/project', 'session')).rejects.toThrow(/Session failed after a storage error/u);
     await store.close();
     const repair = new DatabaseSync(store.filename); repair.exec('DROP TRIGGER synthetic_disk_failure'); repair.close();
     const reopened = await open();

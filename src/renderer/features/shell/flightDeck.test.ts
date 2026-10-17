@@ -60,7 +60,7 @@ describe('Flight Deck selectors', () => {
       undefined,
       undefined,
     ]);
-    expect(result.rows.at(-1)?.detail).toBe('Runtime error target is no longer retained');
+    expect(result.rows.at(-1)?.detail).toBe('No longer retained');
     expect(result.rows.at(-1)?.detail).not.toContain('secret');
   });
 

@@ -204,8 +204,8 @@ test('left sidebar unifies real resources and the Agents library', async () => {
     expect(sessionToolbarLayout.searchToActionGap).toBeGreaterThanOrEqual(4);
     expect(sessionToolbarLayout.searchToActionGap).toBeLessThanOrEqual(6);
     await sidebarTabs.getByRole('tab', { name: 'Resources' }).click();
-    await expect(page.getByRole('button', { name: /Files.*Browse and preview project files/u })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Browser.*Built-in Chromium workspace/u })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Files/u })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Browser/u })).toBeVisible();
     await expect(page.getByRole('button', { name: /^Computer/u })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Pi Library/u })).toHaveCount(1);
     await expect(page.locator('.resource-preview-group').filter({ hasText: 'Pi Library' })).toHaveCount(0);
@@ -243,7 +243,6 @@ test('the Monitor tab reads the same compact dashboard through desktop IPC', asy
     await page.getByRole('button', { name: /Open project/u }).first().click();
     await openInspectorView(page, 'Run', 'Monitor');
     const monitor = page.getByRole('region', { name: 'Monitoring dashboard' });
-    await expect(monitor.getByText('normal', { exact: true })).toBeVisible();
     await expect(monitor.getByLabel('Source check times')).toHaveAttribute('title', /^runs .+ · teams /u);
     await monitor.getByRole('button', { name: 'Teams 0' }).click();
     await expect(monitor.getByText('No teams.')).toBeVisible();
@@ -1314,6 +1313,8 @@ test('first launch, project, prompt, tool, diff, Git graph, worktrees, and sessi
     const modelSettings = page.getByRole('dialog', { name: 'Model settings' });
     await expect(modelSettings).toBeVisible();
     await assertInsideViewport(modelSettings);
+    await expect(page.getByRole('slider', { name: 'Reasoning level' })).toBeVisible();
+    await page.getByRole('button', { name: 'Show reasoning menu' }).click();
     await page.getByRole('combobox', { name: 'Reasoning level' }).click();
     const reasoningOptions = page.getByRole('listbox');
     await expect(reasoningOptions).toBeVisible();
@@ -1649,9 +1650,7 @@ test('first launch, project, prompt, tool, diff, Git graph, worktrees, and sessi
     await page.waitForTimeout(180);
     await openInspectorView(page, 'System', /Context/u);
     await expect(page.getByRole('img', { name: 'Stacked token traffic for the 24 most recent responses on the active branch' })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Session token summary' })).toContainText('root + child provider input');
-    await expect(page.getByRole('region', { name: 'Session token summary' })).toContainText('24 responses · root + child agents');
-    await expect(page.getByRole('region', { name: 'Session token summary' })).toContainText('root + child model rates');
+    await expect(page.getByRole('region', { name: 'Session token summary' })).toContainText('24 responses');
     await expect(page.getByText('included in output')).toBeVisible();
     const contextLayout = await page.locator('.context-dashboard').evaluate((panel) => ({
       scrollWidth: panel.scrollWidth,

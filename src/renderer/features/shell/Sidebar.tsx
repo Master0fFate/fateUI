@@ -1433,7 +1433,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
               <div className="empty-sessions">
                 <FileText size={19} />
                 <p>No sessions yet</p>
-                <span>{runtime.status === 'auth-required' ? 'Saved sessions remain available; authenticate to prompt Pi.' : runtime.project ? 'Create a session to start working with Pi.' : 'Open a project to start working with Pi.'}</span>
+                {runtime.status === 'auth-required' && <span>Saved sessions remain available; authenticate to prompt Pi.</span>}
               </div>
             )}
           </div>

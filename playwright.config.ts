@@ -1,6 +1,18 @@
 import { defineConfig } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
+
+if (process.platform === 'win32') {
+  const privateTemp = path.join(homedir(), '.fate-e2e-tmp');
+  mkdirSync(privateTemp, { recursive: true });
+  process.env.TEMP = privateTemp;
+  process.env.TMP = privateTemp;
+}
 
 export default defineConfig({
+  // Windows: fixtures under the system Temp inherit sandbox ACEs on some hosts, which the
+  // native state backend's private-ACL gate rejects. A folder directly under the profile stays private.
   testDir: 'tests/e2e',
   testMatch: '*.spec.ts',
   workers: 1,

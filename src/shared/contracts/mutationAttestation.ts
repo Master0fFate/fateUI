@@ -45,13 +45,14 @@ export const mutationAttestationSchema = z
     actor: toolActorSchema,
     /** Null only when the permission level is genuinely unavailable; never inferred. */
     permissionLevel: permissionLevelSchema.nullable(),
-    operation: z.enum(['write', 'edit']),
+    operation: z.enum(['write', 'edit', 'restore']),
     path: projectRelativePathSchema,
     /** Null when the prior state was missing or oversize. */
     preHash: sha256HexSchema.nullable(),
-    postHash: sha256HexSchema,
+    postHash: sha256HexSchema.nullable(),
     preState: z.enum(['missing', 'hashed', 'oversize']),
-    captureKind: z.literal('direct-file-tool'),
+    postState: z.enum(['written', 'missing']).default('written'),
+    captureKind: z.enum(['direct-file-tool', 'checkpoint-restore']),
   })
   .strict()
   .superRefine((value, context) => {
@@ -63,7 +64,24 @@ export const mutationAttestationSchema = z
     } else if (value.preHash !== null) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'A missing or oversize preState requires a null preHash.', path: ['preHash'] });
     }
+    if ((value.postState === 'missing') !== (value.postHash === null)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Only a missing postState has a null postHash.', path: ['postHash'] });
+    }
+    if ((value.operation === 'restore') !== (value.captureKind === 'checkpoint-restore')) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'Restore rows and checkpoint-restore capture must agree.', path: ['captureKind'] });
+    }
   });
+
+export const checkpointRestoreRequestSchema = z.object({
+  attestationId: z.string().min(1).max(ATTESTATION_ID_MAX),
+}).strict();
+
+export const checkpointSkipReasons = ['changed', 'oversize', 'evicted', 'unavailable'] as const;
+
+export const checkpointRestoreResultSchema = z.object({
+  restored: z.array(projectRelativePathSchema).max(ATTESTATION_QUERY_LIMIT_MAX),
+  skipped: z.array(z.object({ path: projectRelativePathSchema, reason: z.enum(checkpointSkipReasons) }).strict()).max(ATTESTATION_QUERY_LIMIT_MAX),
+}).strict();
 
 export const attestationQueryInputSchema = z
   .object({
@@ -99,3 +117,6 @@ export type AttestationQueryRequest = z.infer<typeof attestationQueryRequestSche
 /** Input shape for the renderer request (limit is optional and defaulted on parse). */
 export type AttestationQueryRequestInput = z.input<typeof attestationQueryRequestSchema>;
 export type AttestationQueryResult = z.infer<typeof attestationQueryResultSchema>;
+export type CheckpointRestoreRequest = z.infer<typeof checkpointRestoreRequestSchema>;
+export type CheckpointRestoreResult = z.infer<typeof checkpointRestoreResultSchema>;
+export type CheckpointSkipReason = typeof checkpointSkipReasons[number];

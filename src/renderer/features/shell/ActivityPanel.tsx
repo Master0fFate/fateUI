@@ -1,4 +1,5 @@
-import { getFateApi } from '../../platform/api';
+import { getDesktopApiOptional, getFateApi } from '../../platform/api';
+import { ipcErrorMessage } from '../../lib/ipcError';
 import {
   Bot,
   CircleAlert,
@@ -10,6 +11,7 @@ import {
   RefreshCw,
   Send,
   TriangleAlert,
+  Undo2,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -81,7 +83,7 @@ function shortHash(hash: string): string {
 
 /** Honest hash summary: a real transition only when a prior hash was captured. */
 function hashSummary(attestation: MutationAttestation): string {
-  const post = shortHash(attestation.postHash);
+  const post = attestation.postHash ? shortHash(attestation.postHash) : 'removed';
   if (attestation.preState === 'hashed' && attestation.preHash) return `${shortHash(attestation.preHash)} → ${post}`;
   if (attestation.preState === 'oversize') return `oversize prior · ${post}`;
   return `new file · ${post}`;
@@ -194,7 +196,8 @@ function useAttestationLedger(projectPath: string | null, trusted: boolean) {
 const MATCH_WINDOW_MS = 10 * 60_000;
 
 interface LedgerInfo {
-  operation: 'write' | 'edit';
+  id: string;
+  operation: MutationAttestation['operation'];
   path: string;
   detail: string;
 }
@@ -311,7 +314,7 @@ export function mergeActivity(retained: readonly FlightRecorderRow[], attestatio
         title: `${attestation.operation} ${attestation.path}`,
         detail,
         ...(row.target ? { target: row.target } : {}),
-        ledger: { operation: attestation.operation, path: attestation.path, detail },
+        ledger: { id: attestation.id, operation: attestation.operation, path: attestation.path, detail },
       }];
     }
     return [{
@@ -335,7 +338,7 @@ export function mergeActivity(retained: readonly FlightRecorderRow[], attestatio
       kind: 'write',
       title: `${attestation.operation} ${attestation.path}`,
       detail: `${actorDetail(attestation.actor)} · ${permissionLabel(attestation.permissionLevel)} · ${hashSummary(attestation)}`,
-      ledger: { operation: attestation.operation, path: attestation.path, detail: '' },
+      ledger: { id: attestation.id, operation: attestation.operation, path: attestation.path, detail: '' },
     });
   }
   rows.sort((left, right) => left.timestamp - right.timestamp || left.rank - right.rank || left.id.localeCompare(right.id));
@@ -346,8 +349,20 @@ export function mergeActivity(retained: readonly FlightRecorderRow[], attestatio
 // Rows
 // ---------------------------------------------------------------------------
 
-function ActivityRowView({ row, onOpen }: { row: ActivityRow; onOpen: (target: FlightDeckTarget) => void }) {
+function ActivityRowView({ row, onOpen, onRewind }: { row: ActivityRow; onOpen: (target: FlightDeckTarget) => void; onRewind?: ((attestationId: string) => void) | undefined }) {
   const Icon = activityKindIcon(row.kind);
+  const ledgerInfo = row.ledger;
+  const rewind = ledgerInfo && onRewind ? (
+    <button
+      type="button"
+      className="activity-rewind"
+      title={`Restore ${ledgerInfo.path} to its state before this ${ledgerInfo.operation}`}
+      aria-label={`Rewind to before ${ledgerInfo.operation} ${ledgerInfo.path}`}
+      onClick={() => onRewind(ledgerInfo.id)}
+    >
+      <Undo2 size={11} aria-hidden="true" /> Rewind
+    </button>
+  ) : null;
   const sourceLabel = SOURCE_LABEL[row.source];
   const ledger = row.ledger ? <span className="activity-tag">ledger</span> : null;
   const body = (
@@ -356,34 +371,32 @@ function ActivityRowView({ row, onOpen }: { row: ActivityRow; onOpen: (target: F
       <span className="activity-kind"><Icon size={12} aria-hidden="true" /></span>
       <span className="activity-text">
         <strong>{row.title}</strong>
-        <small>{ledger}{ledger ? ` · ` : ''}{row.detail}</small>
+        {ledger || row.detail ? <small>{ledger}{ledger && row.detail ? ` · ` : ''}{row.detail}</small> : null}
       </span>
       <time className="activity-time" dateTime={new Date(row.timestamp).toISOString()} title={fullDateTime(row.timestamp)}>{formatClock(row.timestamp)}</time>
     </>
   );
-  const summary = `${sourceLabel} ${row.kind === 'write' ? `${row.ledger?.operation ?? 'write'} (ledger-backed)` : KIND_LABEL[row.kind]} · ${row.title} · ${row.detail}`;
-  if (row.target) {
-    const kindLabel = row.kind === 'write' ? `${row.ledger?.operation ?? 'write'}` : KIND_LABEL[row.kind];
-    return (
-      <button
-        type="button"
-        className="activity-row"
-        data-clickable="true"
-        data-source={row.source}
-        data-kind={row.kind}
-        title={summary}
-        aria-label={`Open ${sourceLabel} ${kindLabel}: ${row.title}`}
-        onClick={() => onOpen(row.target!)}
-      >
-        {body}
-      </button>
-    );
-  }
-  return (
+  const summary = `${sourceLabel} ${row.kind === 'write' ? `${row.ledger?.operation ?? 'write'} (ledger-backed)` : KIND_LABEL[row.kind]} · ${row.title}${row.detail ? ` · ${row.detail}` : ''}`;
+  const kindLabel = row.kind === 'write' ? `${row.ledger?.operation ?? 'write'}` : KIND_LABEL[row.kind];
+  const main = row.target ? (
+    <button
+      type="button"
+      className="activity-row"
+      data-clickable="true"
+      data-source={row.source}
+      data-kind={row.kind}
+      title={summary}
+      aria-label={`Open ${sourceLabel} ${kindLabel}: ${row.title}`}
+      onClick={() => onOpen(row.target!)}
+    >
+      {body}
+    </button>
+  ) : (
     <div className="activity-row" data-clickable="false" data-source={row.source} data-kind={row.kind} title={summary} role="listitem">
       {body}
     </div>
   );
+  return rewind ? <div className="activity-row-group">{main}{rewind}</div> : main;
 }
 
 function FilterBar({ source, writesOnly, onSource, onWrites }: {
@@ -483,6 +496,8 @@ export function ActivityPanel() {
 
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [writesOnly, setWritesOnly] = useState(false);
+  const [rewindNotice, setRewindNotice] = useState<string | null>(null);
+  const [rewinding, setRewinding] = useState(false);
 
   const sources = useMemo((): RecorderSources => {
     const { timelineById, messagesById, reasoningByMessageId, toolsById, visibleTimelineIds, subagentsById } = useRuntimeStore.getState();
@@ -507,6 +522,18 @@ export function ActivityPanel() {
   const ledgerCount = ledger.rows.length;
   const ledgerAvailable = Boolean(projectPath && trusted);
   const status = ledgerStatusLine(ledger.status, projectPath, trusted, ledger.refresh);
+  const restoreCheckpoint = getDesktopApiOptional()?.restoreCheckpoint;
+  const rewindTo = restoreCheckpoint && ledgerAvailable ? (attestationId: string) => {
+    if (rewinding) return;
+    setRewinding(true);
+    void restoreCheckpoint(attestationId).then((result) => {
+      const skipped = result.skipped.map((item) => `${item.path} (${item.reason})`);
+      setRewindNotice(`Rewound ${result.restored.length} file${result.restored.length === 1 ? '' : 's'}${skipped.length ? ` · skipped ${skipped.join(', ')}` : ''}.`);
+      ledger.refresh();
+    }).catch((error: unknown) => {
+      setRewindNotice(ipcErrorMessage(error, 'The checkpoint could not be restored.'));
+    }).finally(() => setRewinding(false));
+  } : undefined;
 
   if (merged.rows.length === 0) {
     return (
@@ -529,6 +556,12 @@ export function ActivityPanel() {
       <p className="activity-disclosure">{DISCLOSURE}</p>
       <FilterBar source={sourceFilter} writesOnly={writesOnly} onSource={setSourceFilter} onWrites={setWritesOnly} />
       {status}
+      {rewindNotice ? (
+        <div className="activity-status" role="status" aria-live="polite">
+          <Undo2 size={11} aria-hidden="true" />
+          <span>{rewindNotice}</span>
+        </div>
+      ) : null}
       {projection.omitted ? (
         <div className="activity-bounded" role="status">
           <TriangleAlert size={12} aria-hidden="true" />
@@ -553,7 +586,7 @@ export function ActivityPanel() {
           initialTopMostItemIndex={Math.max(0, filtered.length - 1)}
           followOutput="auto"
           computeItemKey={(_index, row) => row.id}
-          itemContent={(_index, row) => <ActivityRowView row={row} onOpen={openTarget} />}
+          itemContent={(_index, row) => <ActivityRowView row={row} onOpen={openTarget} onRewind={rewindTo} />}
         />
       )}
     </section>

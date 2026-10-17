@@ -79,7 +79,7 @@ export const builtInThemes: readonly ThemeDefinition[] = [
   },
   {
     id: 'monochrome', name: 'Monochrome', tone: 'dark',
-    colors: { canvas: '#090a0b', panel: '#0f1113', raised: '#16191c', raisedHover: '#202429', border: '#2c3136', borderStrong: '#4c535a', text: '#f0f1ef', textSoft: '#c8ccca', muted: '#929997', subtle: '#68706e', accent: '#d8ddda', accentHover: '#f3f5f2', accentSoft: '#292e2b', currentSession: '#343a36', lastActiveSession: '#16191c', onAccent: '#101211', success: '#b8c2ba', warning: '#c9c3b2', danger: '#c5b4b6', shadow: '#000000' },
+    colors: { canvas: '#050505', panel: '#0e0e0e', raised: '#171717', raisedHover: '#202020', border: '#292929', borderStrong: '#737373', text: '#eeeeee', textSoft: '#b8b8b8', muted: '#909090', subtle: '#858585', accent: '#eeeeee', accentHover: '#ffffff', accentSoft: '#1d1d1d', currentSession: '#171717', lastActiveSession: '#0e0e0e', onAccent: '#050505', success: '#b8b8b8', warning: '#d0d0d0', danger: '#eeeeee', shadow: '#000000' },
   },
   {
     id: 'm3-expressive', name: 'M3 Expressive', tone: 'dark',

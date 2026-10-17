@@ -10,6 +10,7 @@ import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useGoalMaxStore } from '../../stores/goalMaxStore';
 import { useBrowserStore } from '../../stores/browserStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { attachBrowserAnnotationToSession, clampComposerInputHeight, clearComposerSessionDrafts, Composer, uniqueAttachmentName } from './Composer';
 import { ContextWheel } from './ContextWheel';
 import { AssistantMarkdown, coalesceSubagentWaitPolls, ConversationTimeline, followsMessage, forkEntryForMessage, MessageRow } from './ConversationTimeline';
@@ -806,18 +807,63 @@ describe('conversation components', () => {
     const user = userEvent.setup();
     render(<Composer onOpenProject={vi.fn()} />);
 
-    expect(screen.getByRole('button', { name: 'Attach image' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Attach' }));
+    const attach = screen.getByRole('dialog', { name: 'Attach' });
+    expect(within(attach).getByRole('button', { name: 'Attach image' })).toBeDisabled();
+    await user.keyboard('{Escape}');
     await user.type(screen.getByLabelText('Message Pi'), '/rev');
     expect(screen.getByRole('option', { name: /review/i })).toBeInTheDocument();
     await user.click(screen.getByRole('option', { name: /review/i }));
     expect(screen.getByLabelText('Message Pi')).toHaveValue('/review ');
 
-    await user.click(screen.getByRole('button', { name: 'Tag project file or folder' }));
+    await user.click(screen.getByRole('button', { name: 'Attach' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Attach' })).getByRole('button', { name: 'Tag project file or folder' }));
+    expect(screen.queryByRole('dialog', { name: 'Attach' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Message Pi')).toHaveValue('/review #');
     await user.click(await screen.findByRole('option', { name: /#"src\/example file\.ts"/iu }));
     expect(screen.getByLabelText('Message Pi')).toHaveValue('/review #"src/example file.ts" ');
     await user.click(screen.getByRole('button', { name: 'Send message' }));
     expect(prompt).toHaveBeenCalledWith({ text: '/review #"src/example file.ts"', behavior: 'prompt' });
+  });
+
+  it('shows the branch chip for repositories, switches on an empty session, and locks once the session starts', async () => {
+    const gitStatus = { repository: true, branch: 'main', upstream: null, pushTarget: null, ahead: 0, behind: 0, changes: [], additions: 0, deletions: 0, truncated: false };
+    const switchGitBranch = vi.fn(async () => ({ ...gitStatus, branch: 'topic' }));
+    const listGitBranches = vi.fn(async () => [
+      { name: 'main', kind: 'local' as const, current: true, worktreePath: null, upstream: 'origin/main' },
+      { name: 'topic', kind: 'local' as const, current: false, worktreePath: null, upstream: null },
+    ]);
+    Object.defineProperty(window, 'piDesktop', { configurable: true, value: { listGitBranches, switchGitBranch } as unknown as PiDesktopApi });
+    useWorkspaceStore.setState({ projectPath: '/project', git: { ...gitStatus, repository: false } });
+    const user = userEvent.setup();
+    const { unmount } = render(<Composer onOpenProject={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /^Branch: / })).not.toBeInTheDocument();
+
+    act(() => useWorkspaceStore.setState({ git: gitStatus }));
+    const chip = screen.getByRole('button', { name: 'Branch: main' });
+    expect(chip).not.toHaveAttribute('data-locked');
+    await user.click(chip);
+    const picker = screen.getByRole('dialog', { name: 'Branch' });
+    expect(listGitBranches).toHaveBeenCalled();
+    await user.click(await within(picker).findByRole('button', { name: /^topic/ }));
+    expect(switchGitBranch).toHaveBeenCalledWith({ name: 'topic' });
+    await waitFor(() => expect(useUiStore.getState().toast).toMatchObject({ kind: 'success', message: 'Switched to topic' }));
+    expect(screen.getByRole('button', { name: 'Branch: topic' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Branch: topic' }));
+    await user.type(screen.getByRole('textbox', { name: 'Filter branches' }), 'feature/x');
+    expect(screen.getByRole('button', { name: /Create "feature\/x"/ })).toBeEnabled();
+    await user.keyboard('{Escape}');
+
+    act(() => useRuntimeStore.getState().applyEvents([{ type: 'message.started', messageId: 'm1', role: 'user', timestamp: 1 }]));
+    const locked = screen.getByRole('button', { name: 'Branch: topic' });
+    expect(locked).toHaveAttribute('data-locked', 'true');
+    await user.click(locked);
+    const readOnly = screen.getByRole('dialog', { name: 'Branch' });
+    for (const row of within(readOnly).getAllByRole('button')) expect(row).toBeDisabled();
+    await user.type(within(readOnly).getByRole('textbox', { name: 'Filter branches' }), 'feature/y');
+    expect(within(readOnly).queryByRole('button', { name: /Create "/ })).not.toBeInTheDocument();
+    unmount();
+    useWorkspaceStore.setState({ projectPath: null, git: null, branches: [] });
   });
 
   it('sends typed browser annotation references and clears only accepted attachments', async () => {
@@ -1745,13 +1791,13 @@ describe('conversation components', () => {
     expect(modelButton).toBeVisible();
     expect(modelButton).toBeEnabled();
     await user.click(modelButton);
-    expect(screen.getByLabelText('Current model: Model. Next model: Model.')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Current model:/)).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Model' })).toBeEnabled();
-    expect(screen.getByRole('combobox', { name: 'Reasoning level' })).toBeEnabled();
-    expect(screen.getByText('Stages for your next user message')).toBeInTheDocument();
+    const slider = screen.getByRole('slider', { name: 'Reasoning level' });
+    expect(slider).toHaveAttribute('aria-valuenow', '3');
+    expect(slider).toHaveAttribute('aria-valuetext', 'Medium');
 
-    await user.click(screen.getByRole('combobox', { name: 'Reasoning level' }));
-    await user.click(screen.getByRole('option', { name: 'High' }));
+    fireEvent.keyDown(slider, { key: 'ArrowRight' });
     await waitFor(() => expect(setThinkingLevel).toHaveBeenCalledWith('high'));
     expect(useRuntimeStore.getState().runtime.pendingThinkingLevel).toBe('high');
 
@@ -1762,7 +1808,9 @@ describe('conversation components', () => {
     expect(useRuntimeStore.getState().runtime.pendingModel?.id).toBe('fast');
     expect(modelButton).toHaveTextContent('Fast Model');
     expect(modelButton).not.toHaveTextContent('Next');
-    expect(screen.getByLabelText('Current model: Model. Next model: Fast Model.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current model: Model. Next model: Fast Model.')).toHaveTextContent('ModelFast Model');
+    act(() => useRuntimeStore.setState((state) => ({ runtime: { ...state.runtime, streaming: false, activeSessionRunning: false } })));
+    expect(screen.queryByLabelText(/^Current model:/)).not.toBeInTheDocument();
   });
 
   it('keeps model and reasoning selection in a compact composer popover', async () => {
@@ -1781,9 +1829,13 @@ describe('conversation components', () => {
     screen.getByLabelText('Model').focus();
     await user.keyboard('{Enter}{ArrowDown}{Enter}');
     expect(setModel).toHaveBeenCalledWith('test', 'fast');
-    screen.getByLabelText('Reasoning level').focus();
+    await user.click(screen.getByRole('button', { name: 'Show reasoning menu' }));
+    screen.getByRole('combobox', { name: 'Reasoning level' }).focus();
     await user.keyboard('{Enter}{ArrowDown}{Enter}');
     expect(setThinkingLevel).toHaveBeenCalledWith('high');
+    await user.click(screen.getByRole('button', { name: 'Show reasoning slider' }));
+    expect(screen.getByRole('slider', { name: 'Reasoning level' })).toBeInTheDocument();
+    useUiStore.setState({ reasoningMenu: false });
     expect(screen.queryByText('Ctrl/⌘ ↵')).not.toBeInTheDocument();
   });
 });

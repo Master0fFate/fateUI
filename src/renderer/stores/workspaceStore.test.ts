@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   GitCombinedDiff,
   GitCommitDetails,
+  GitBranchRef,
   GitDiff,
   GitHistory,
   GitOperationResult,
@@ -204,6 +205,36 @@ describe('workspaceStore Git request invalidation', () => {
     statusRequest.resolve(status('updated'));
     await refresh;
     expect(useWorkspaceStore.getState()).toMatchObject({ worktrees: [currentWorktree], worktreesLoading: false, git: status('updated') });
+  });
+
+  it('switches branches, drops derived Git state, and ignores a stale branch list', async () => {
+    const staleBranches = deferred<GitBranchRef[]>();
+    const freshBranches = deferred<GitBranchRef[]>();
+    const main: GitBranchRef = { name: 'main', kind: 'local', current: true, worktreePath: null, upstream: 'origin/main' };
+    const topic: GitBranchRef = { name: 'topic', kind: 'local', current: true, worktreePath: null, upstream: null };
+    let branchCall = 0;
+    const switchGitBranch = vi.fn(async () => status('topic'));
+    Object.defineProperty(window, 'piDesktop', {
+      configurable: true,
+      value: {
+        listGitBranches: vi.fn(() => branchCall++ === 0 ? staleBranches.promise : freshBranches.promise),
+        switchGitBranch,
+        getGitHistory: vi.fn(async () => history),
+      } as unknown as PiDesktopApi,
+    });
+    useWorkspaceStore.setState({ git: status('main'), history, selectedCommit: HASH, selectedChange: 'src/a.ts', diff: diff('src/a.ts') });
+
+    const staleLoad = useWorkspaceStore.getState().loadBranches();
+    expect(useWorkspaceStore.getState().branchesLoading).toBe(true);
+    await expect(useWorkspaceStore.getState().switchBranch({ name: 'topic' })).resolves.toEqual(status('topic'));
+    expect(switchGitBranch).toHaveBeenCalledWith({ name: 'topic' });
+    expect(useWorkspaceStore.getState()).toMatchObject({ git: status('topic'), history: null, selectedCommit: null, selectedChange: null, diff: null, branches: [], branchesLoading: true });
+
+    staleBranches.resolve([main]);
+    await staleLoad;
+    expect(useWorkspaceStore.getState().branches).toEqual([]);
+    freshBranches.resolve([topic]);
+    await vi.waitFor(() => expect(useWorkspaceStore.getState()).toMatchObject({ branches: [topic], branchesLoading: false }));
   });
 
   it('clears stale worktree loading after a successful Git operation and ignores the old error', async () => {

@@ -32,7 +32,7 @@ The selected upstream packages are pinned to **1.0.0**. See [SDK compatibility](
 | Retained Fate responsibilities | Project trust, host permissions, control, checkout/worktree review, Team mailbox/capacity, GoalMax evidence, bounded client data and explicit uncertainty review. |
 | Fresh unspecified profile | Defaults to `legacy-json`. Installing native packages does not change this default. |
 | Explicit or migrated native profile | Desktop startup accepts `FATE_STATE_PERSISTENCE=native-durable`; trusted core/server composition accepts `statePersistence`. Successful migration activates a namespace that later ordinary startup selects automatically. These selectors do not migrate existing data. New host profiles can explicitly select `init --state-persistence native-durable`; init never overwrites an existing profile. Unspecified profiles retain the legacy default. |
-| Native transport | `pi-client`, `pi-server` and `pi-protocol` are pinned dependencies, but production `src` does not import them. Fate still uses its version 1 JSON HTTP/WebSocket contract. Installing packages is not adoption of Pi's native transport. A compatible transport change requires separate design and validation. |
+| Native transport | Pi 1.2.0 removed `pi-client`, `pi-server` and `pi-protocol`, so Fate no longer depends on them. Fate uses its version 1 JSON HTTP/WebSocket contract. |
 
 Use the [migration guide](migration.md) and [host-local migration procedure](migration-cli.md) for existing state. A corrupt, incompatible or incomplete native namespace blocks startup rather than selecting legacy state. No selector authorizes automatic replay of uncertain work. See [workflow review](native-workflow-review.md).
 

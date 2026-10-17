@@ -13,6 +13,9 @@ This directory holds the focused guides referenced by the [project README](../RE
 - **Drive multi-agent work** — [Agent orchestration](agent-orchestration.md) (one executor for direct agents and dependency-based workflows).
 - **Manage longer objectives** — [GoalMax and durable work](goalmax.md).
 - **Connect external tools** — [MCP in Fate UI](mcp.md).
+- **Automate the tool lifecycle** — [Hooks](hooks.md).
+- **Give the agent compiler feedback** — [Code Intelligence](code-intelligence.md).
+- **Review by hunk, open pull requests, watch cost** — [Features](features.md#hunk-review).
 - **Understand the embedded runtime** — [Pi SDK compatibility](sdk-compatibility.md).
 - **Review trust, permissions, and isolation** — [Architecture and security](architecture.md) and [SECURITY.md](../SECURITY.md).
 - **Build, package, or cut a release** — [Development and release](development.md).

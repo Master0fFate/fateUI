@@ -43,6 +43,7 @@ import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
 import { LazyDiffViewer, LazyFileViewer } from '../files/LazyMonaco';
+import { HunkStrip } from './HunkStrip';
 import { RasterImagePreview } from '../files/RasterImagePreview';
 import { selectChangeOrigins, writerConflictState, type ChangeOrigin, type FlightDeckTarget } from '../shell/flightDeck';
 
@@ -299,11 +300,12 @@ function DiffPreview({ origins, onOrigin }: { origins: readonly ChangeOrigin[]; 
       <div className="preview-heading review-preview-heading">
         <AppTooltip content={diff.path}><span>{diff.path}</span></AppTooltip>
         {!deleted && diff.state === 'text' && diff.openable && <AppTooltip content="Open in the system editor"><button type="button" aria-label="Open in the system editor" onClick={() => void openPath(diff.path)}><ExternalLink size={13} aria-hidden="true" /></button></AppTooltip>}
-        <div className="change-origins" aria-label="Related activity">
+        {origins.length ? <div className="change-origins" aria-label="Related activity">
           {writerConflictState(origins) === 'ambiguous' ? <span className="change-origin-conflict">More than one agent touched this file. The chips are related activity, not proof of who wrote it.</span> : null}
-          {origins.length ? origins.slice(0, 4).map((origin) => <button type="button" key={origin.id} aria-label={`Open related activity from ${origin.actorLabel}`} onClick={() => onOrigin(origin)} title={`${origin.actorLabel} · ${origin.toolName}`}>{origin.actorLabel}</button>) : <span>No related activity</span>}
-        </div>
+          {origins.slice(0, 4).map((origin) => <button type="button" key={origin.id} aria-label={`Open related activity from ${origin.actorLabel}`} onClick={() => onOrigin(origin)} title={`${origin.actorLabel} · ${origin.toolName}`}>{origin.actorLabel}</button>)}
+        </div> : null}
       </div>
+      {diff.state === 'text' && <HunkStrip path={diff.path} />}
       <div className="preview-body">
         {diff.state === 'text' && <LazyDiffViewer original={diff.original ?? ''} modified={diff.modified ?? ''} language={diff.language} path={diff.path} />}
         {diff.state === 'image' && <RasterImagePreview data={diff.imageData} mimeType={diff.mimeType} path={diff.path} detail={diff.message} />}
@@ -473,7 +475,7 @@ export function ChangesPanel() {
       showToast({ kind: 'error', title: 'Worktree change failed', message: displayError(caught, 'The worktree could not be opened.') });
     } finally { setWorktreeBusy(false); }
   };
-  if (!project) return <div className="inspector-empty"><FileDiff size={24} /><strong>No changes</strong><p>Open a project to inspect Git changes.</p></div>;
+  if (!project) return <div className="inspector-empty"><FileDiff size={24} /><strong>No project</strong></div>;
   if (loading && !git) return <div className="preview-loading"><span className="preview-spinner" /><span className="icon-label">Reading Git status…</span></div>;
   if (git && !git.repository) return <div className="inspector-empty"><GitBranch size={24} /><strong>Not a Git repository</strong><p>File browsing is available, but there is no Git status for this project.</p></div>;
   const detached = git?.branch === '';
@@ -524,17 +526,17 @@ export function ChangesPanel() {
           <span className="git-remote-actions" aria-label="Git remote actions">
             <AppTooltip content="Fetch all remotes" wrapTrigger>
               <button className="git-remote-button" type="button" aria-label="Git fetch" disabled={controlsBusy || detached} onClick={() => void runRemoteGit('fetch')}>
-                <ActionContent text={gitOperation === 'fetch' ? 'fetch...' : 'fetch'}><CloudDownload className={gitOperation === 'fetch' ? 'tool-spinner' : ''} size={12} aria-hidden="true" /><span className="icon-label">Fetch</span></ActionContent>
+                <ActionContent text={gitOperation === 'fetch' ? 'fetch...' : 'fetch'}><CloudDownload className={gitOperation === 'fetch' ? 'tool-spinner' : ''} size={12} aria-hidden="true" /></ActionContent>
               </button>
             </AppTooltip>
             <AppTooltip content={detached ? 'Check out a branch before pull' : 'Pull with fast-forward only'} wrapTrigger>
               <button className="git-remote-button" type="button" aria-label="Git pull" disabled={controlsBusy || detached} onClick={() => void runRemoteGit('pull')}>
-                <ActionContent text={gitOperation === 'pull' ? 'pull...' : 'pull'}><ArrowDownToLine className={gitOperation === 'pull' ? 'tool-spinner' : ''} size={12} aria-hidden="true" /><span className="icon-label">Pull</span></ActionContent>
+                <ActionContent text={gitOperation === 'pull' ? 'pull...' : 'pull'}><ArrowDownToLine className={gitOperation === 'pull' ? 'tool-spinner' : ''} size={12} aria-hidden="true" /></ActionContent>
               </button>
             </AppTooltip>
             <AppTooltip content={detached ? 'Check out a branch before push' : 'Push current branch'} wrapTrigger>
               <button className="git-remote-button" type="button" aria-label="Git push" disabled={controlsBusy || detached} onClick={() => void runRemoteGit('push')}>
-                <ActionContent text={gitOperation === 'push' ? 'push...' : 'push'}><ArrowUpFromLine className={gitOperation === 'push' ? 'tool-spinner' : ''} size={12} aria-hidden="true" /><span className="icon-label">Push</span></ActionContent>
+                <ActionContent text={gitOperation === 'push' ? 'push...' : 'push'}><ArrowUpFromLine className={gitOperation === 'push' ? 'tool-spinner' : ''} size={12} aria-hidden="true" /></ActionContent>
               </button>
             </AppTooltip>
           </span>

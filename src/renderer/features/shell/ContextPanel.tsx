@@ -67,6 +67,11 @@ function boundedPercent(value: number | null | undefined): number {
   return Math.min(100, Math.max(0, value ?? 0));
 }
 
+/** Tokens processed once: cache reads re-send prior context every response, so they are excluded. */
+function uniqueTokens(usage: Pick<TokenMetrics, 'input' | 'output' | 'cacheWrite'>): number {
+  return usage.input + usage.cacheWrite + usage.output;
+}
+
 function trafficTotal(usage: Pick<TokenMetrics, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>): number {
   return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 }
@@ -271,19 +276,18 @@ export function ContextPanel({ runtime }: { runtime: ContextPanelRuntime }) {
 
       <section className="context-summary-strip" aria-label="Session token summary">
         <div>
-          <span>Session traffic</span>
-          <strong title={session ? exactTokens(session.totalTokens) : undefined}>{session ? formatTokens(session.totalTokens) : '—'}</strong>
-          <small>{session ? `${session.turns} ${session.turns === 1 ? 'response' : 'responses'} · root + child agents` : 'No usage yet'}</small>
+          <span>Session tokens</span>
+          <strong title={session ? `${exactTokens(uniqueTokens(session))} new (uncached input + cache write + output). Cache reads re-send earlier context each response and are not counted again.` : undefined}>{session ? formatTokens(uniqueTokens(session)) : '—'}</strong>
+          <small title={session ? `${exactTokens(session.totalTokens)} billed, including ${exactTokens(session.cacheRead)} cache reads` : undefined}>{session ? `${formatTokens(session.totalTokens)} billed · ${session.turns} ${session.turns === 1 ? 'response' : 'responses'}` : 'No usage yet'}</small>
         </div>
         <div>
           <span>Cache coverage</span>
           <strong>{formatPercent(coverage)}</strong>
-          <small>root + child provider input</small>
         </div>
         <div>
           <span>Session cost</span>
           <strong>{session ? formatCost(session.cost) : '—'}</strong>
-          <small>{session?.cost ? 'root + child model rates' : 'pricing unavailable'}</small>
+          {session?.cost ? null : <small>pricing unavailable</small>}
         </div>
       </section>
 

@@ -94,7 +94,7 @@ function BoundedWorkspace({ inspectorCollapsed, onToggleInspector }: WorkspacePr
     } catch { setExportError('Local text export is unavailable. No host files or configuration were requested.'); }
   };
   return <main className="workspace" aria-label="Fate web workspace">
-    <header className="workspace-header"><div className="workspace-header-identity"><span className="eyebrow">SESSION · BOUNDED NETWORK</span>
+    <header className="workspace-header"><div className="workspace-header-identity">
       <strong>{sessionView.label ?? 'Select a registered workspace'}</strong></div>
       <IconButton label={terminalOpen ? 'Close terminal' : 'Open terminal'} terminalLabel="term" aria-pressed={terminalOpen}
         disabled={!selected || !hasCapability('manualTerminal')} title={!hasCapability('manualTerminal') ? unavailableExplanation.manualTerminal : undefined}
@@ -295,13 +295,13 @@ function DesktopWorkspace({ inspectorCollapsed, onToggleInspector }: WorkspacePr
           </div>
           <div className="action-grid">
             <button className="action-card action-card--primary" type="button" onClick={() => setConnectRequest((request) => request + 1)}>
-              <span className="action-icon"><KeyRound size={19} /></span><strong>Connect your AI</strong><small>Sign in with OAuth or add an API key. No Pi terminal is needed.</small>
+              <span className="action-icon"><KeyRound size={19} /></span><strong>Connect your AI</strong>
             </button>
             <button className="action-card" type="button" disabled={projectPending} onClick={() => openProject()}>
-              <span className="action-icon"><FolderOpen size={19} /></span><strong>{projectPending ? 'Opening project…' : 'Open project'}</strong><small>Choose a local repository and establish its trust boundary.</small>
+              <span className="action-icon"><FolderOpen size={19} /></span><strong>{projectPending ? 'Opening project…' : 'Open project'}</strong>
             </button>
-            <button className="action-card" type="button" disabled={projectPending} onClick={() => openProject('inspect')}><span className="action-icon"><SearchCode size={19} /></span><strong>Inspect codebase</strong><small>Trace structure, symbols, dependencies, and behavior with Pi.</small></button>
-            <button className="action-card" type="button" disabled={projectPending} onClick={() => openProject('ship')}><span className="action-icon"><GitPullRequest size={19} /></span><strong>Ship a change</strong><small>Plan, edit, test, and review in one focused session.</small></button>
+            <button className="action-card" type="button" disabled={projectPending} onClick={() => openProject('inspect')}><span className="action-icon"><SearchCode size={19} /></span><strong>Inspect codebase</strong></button>
+            <button className="action-card" type="button" disabled={projectPending} onClick={() => openProject('ship')}><span className="action-icon"><GitPullRequest size={19} /></span><strong>Ship a change</strong></button>
           </div>
         </>
       ) : entryCount > 0 ? <ConversationTimeline expansionCommand={expansionCommand} /> : <div className="conversation conversation--empty" aria-hidden="true" />}
@@ -315,7 +315,6 @@ function DesktopWorkspace({ inspectorCollapsed, onToggleInspector }: WorkspacePr
       <header className="workspace-header">
         <div className="workspace-header-drag">
           <div className="workspace-header-identity">
-            <span className="eyebrow">SESSION</span>
             <strong>{activeSessionTitle ?? projectName ?? 'Welcome'}</strong>
             <WorkspaceActivityPulse />
           </div>

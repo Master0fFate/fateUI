@@ -58,7 +58,8 @@ describe('ContextPanel', () => {
 
     expect(screen.getByRole('meter', { name: 'Context usage 50.0%' })).toHaveAttribute('aria-valuenow', '50');
     const summary = screen.getByRole('region', { name: 'Session token summary' });
-    expect(within(summary).getByText('4.5k')).toBeVisible();
+    expect(within(summary).getByText('1.5k')).toBeVisible();
+    expect(within(summary).getByText('4.5k billed · 2 responses')).toBeVisible();
     expect(within(summary).getByText('75.0%')).toBeVisible();
     expect(within(summary).getByText('$0.08')).toBeVisible();
     expect(screen.getByRole('img', { name: 'Stacked token traffic for the 2 most recent responses on the active branch' })).toBeVisible();

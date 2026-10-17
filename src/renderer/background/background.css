@@ -4,6 +4,7 @@
   background: var(--theme-text); mask-size: cover; mask-position: center; mask-repeat: no-repeat; mask-mode: alpha;
   image-rendering: pixelated;
 }
+.workspace-backdrop[data-mode="color"] { background-color: transparent; background-size: cover; background-position: center; background-repeat: no-repeat; }
 :root[data-compact-mode="true"] .workspace-backdrop { top: var(--dreamcore-header-height, 36px); }
 .background-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0; }
 .background-help { color: var(--theme-muted); font-size: 11px; line-height: 1.5; }

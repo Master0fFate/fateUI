@@ -383,7 +383,17 @@ function DesktopInitializer() {
     let bufferedBytes = 0;
     let bufferOverflowed = false;
     const presentation = new RuntimeEventBuffer(applyEvents, streamPresentationDelay, (id) => Boolean(useRuntimeStore.getState().toolsById[id]));
+    let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleGitRefresh = () => {
+      if (gitRefreshTimer) clearTimeout(gitRefreshTimer);
+      gitRefreshTimer = setTimeout(() => {
+        gitRefreshTimer = null;
+        const workspace = useWorkspaceStore.getState();
+        void workspace.syncGit();
+      }, 300);
+    };
     const unsubscribePresentation = useRuntimeStore.subscribe((next, previous) => {
+      if (previous.runtime.streaming && !next.runtime.streaming) scheduleGitRefresh();
       if (next.runtime.sessionId !== previous.runtime.sessionId || next.runtime.project?.path !== previous.runtime.project?.path) {
         presentation.clear();
         // Clear browser data in the same state transition, before React can
@@ -393,6 +403,7 @@ function DesktopInitializer() {
     });
     const unsubscribe = getFateApi().onEvents((events) => {
       if (cancelled) return;
+      if (events.some((event) => event.type === 'tool.completed' && (event.name === 'git_branch' || event.name === 'bash'))) scheduleGitRefresh();
       if (!hydrating) {
         presentation.enqueue(events);
         return;
@@ -452,6 +463,7 @@ function DesktopInitializer() {
 
     return () => {
       cancelled = true;
+      if (gitRefreshTimer) clearTimeout(gitRefreshTimer);
       unsubscribe();
       unsubscribePresentation();
       presentation.clear();

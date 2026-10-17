@@ -142,7 +142,7 @@ function rootRecorderRows(sources: RecorderSources): { rows: FlightRecorderRow[]
       return [{
         id: `root:${id}`,
         source: 'root', sourceRank: 0, sourceIndex, timestamp: entry.timestamp,
-        kind: 'tool', title: tool.name, detail: tool.status === 'running' ? 'Root tool running' : tool.status === 'error' ? 'Root tool failed' : 'Root tool completed',
+        kind: 'tool', title: tool.name, detail: tool.status === 'running' ? 'Running' : tool.status === 'error' ? 'Failed' : 'Completed',
         target: { kind: 'tool', toolCallId: tool.id },
         ...(tool.provenance ? { provenance: tool.provenance } : {}),
       }];
@@ -162,7 +162,7 @@ function rootRecorderRows(sources: RecorderSources): { rows: FlightRecorderRow[]
         title: entry.kind === 'reasoning'
           ? 'Assistant reasoning'
           : message?.error ? 'Message failed' : `${message?.role === 'assistant' ? 'Assistant' : message?.role === 'user' ? 'User' : message?.role === 'system' ? 'System' : 'Conversation'} message`,
-        detail: retained ? 'Root conversation event' : 'Root conversation target is no longer retained',
+        detail: retained ? '' : 'No longer retained',
         ...(retained ? { target: { kind: 'message' as const, messageId: entry.messageId, ...(entry.kind === 'reasoning' ? { timelineId: id } : {}) } } : {}),
       }];
     }
@@ -171,7 +171,7 @@ function rootRecorderRows(sources: RecorderSources): { rows: FlightRecorderRow[]
       return [{
         id: `root:${id}`,
         source: 'root', sourceRank: 0, sourceIndex, timestamp: entry.timestamp,
-        kind: 'error', title: 'Runtime error', detail: retained ? 'Runtime error retained' : 'Runtime error target is no longer retained',
+        kind: 'error', title: 'Runtime error', detail: retained ? '' : 'No longer retained',
         ...(retained ? { target: { kind: 'error' as const, timelineId: id } } : {}),
       }];
     }

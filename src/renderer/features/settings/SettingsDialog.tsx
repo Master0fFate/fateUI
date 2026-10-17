@@ -22,6 +22,9 @@ import {
   Download,
   Trash2,
   LoaderCircle,
+  Webhook,
+  Braces,
+  Coins,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react';
@@ -35,6 +38,9 @@ import { builtInSkins, builtInSkinName, skinPackThemeId, type SkinId, type SkinC
 import { getSkinDefinitions, persistAppliedSkin, setSkinDefinitions } from '../../skin';
 import { SkinPackSettings, type RemovedSkin } from './SkinPackSettings';
 import { McpSettings } from './McpSettings';
+import { HookSettings } from './HookSettings';
+import { LspSettings } from './LspSettings';
+import { UsageSettings } from './UsageSettings';
 import { HostSettings } from '../connections/HostSettings';
 import { useExecutionHost } from '../../platform/executionHost';
 import type { ThemeDefinition } from '../../../shared/themes';
@@ -64,7 +70,7 @@ import { enabledModelIdentity, modelIdentity, visibleModels } from '../../../sha
 import { formatReleaseDisplayVersion } from '../../../shared/releaseMetadata';
 
 const fallback: AppSettings = {
-  appearance: 'dark', defaultModel: null, disabledModels: [], thinkingLevel: 'medium', agentTeamMode: 'v2', agentWorkspace: defaultAgentWorkspacePolicy, confirmRiskyCommands: true,
+  appearance: 'dark', defaultModel: null, disabledModels: [], thinkingLevel: 'medium', agentTeamMode: 'v2', agentWorkspace: defaultAgentWorkspacePolicy, confirmRiskyCommands: true, piCodemode: false, dailyBudgetUsd: null,
   terminalShell: null, reduceMotion: false, performanceMode: false, holyShitMode: false, musicPlayerEnabled: false, sendMessageWithModifier: false, compactMode: false, compactSessions: false, advancedPromptImprovement: false, crashTelemetryEnabled: false, skinId: 'default', themeId: 'midnight',
   interfaceFont: 'noto-sans', codeFont: 'jetbrains-mono',
   imageGeneration: { provider: 'auto', model: null, customProvider: null },
@@ -75,16 +81,19 @@ const fallback: AppSettings = {
 type SettingsToast = { kind: 'success' | 'error'; title: string; message: string };
 
 const sections = [
-  { id: 'general', label: 'General', detail: 'Performance', icon: SlidersHorizontal },
-  { id: 'skins', label: 'Skins', detail: 'Style, color & type', icon: Palette },
-  { id: 'compaction', label: 'Compaction', detail: 'Density controls', icon: Rows3 },
-  { id: 'agent', label: 'Agent', detail: 'Models & workspaces', icon: Bot },
-  { id: 'mcp', label: 'MCP', detail: 'External tools', icon: GitBranch },
-  { id: 'hosts', label: 'Hosts', detail: 'Remote execution', icon: Server },
-  { id: 'learning', label: 'Memory Learning', detail: 'Reviewed knowledge', icon: Brain },
-  { id: 'voice', label: 'Voice', detail: 'Local speech-to-text', icon: Mic2 },
-  { id: 'workspace', label: 'Workspace', detail: 'Trust & terminal', icon: ShieldCheck },
-  { id: 'system', label: 'System', detail: 'Health & logs', icon: Activity },
+  { id: 'general', label: 'General', icon: SlidersHorizontal },
+  { id: 'skins', label: 'Skins', icon: Palette },
+  { id: 'compaction', label: 'Compaction', icon: Rows3 },
+  { id: 'agent', label: 'Agent', icon: Bot },
+  { id: 'mcp', label: 'MCP', icon: GitBranch },
+  { id: 'hooks', label: 'Hooks', icon: Webhook },
+  { id: 'code', label: 'Code Intelligence', icon: Braces },
+  { id: 'usage', label: 'Usage', icon: Coins },
+  { id: 'hosts', label: 'Hosts', icon: Server },
+  { id: 'learning', label: 'Memory Learning', icon: Brain },
+  { id: 'voice', label: 'Voice', icon: Mic2 },
+  { id: 'workspace', label: 'Workspace', icon: ShieldCheck },
+  { id: 'system', label: 'System', icon: Activity },
 ] as const;
 
 const providerNames: Record<string, string> = {
@@ -665,7 +674,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
     <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="settings-dialog" aria-describedby="settings-description"
+        <Dialog.Content className="settings-dialog" aria-describedby={undefined}
           onOpenAutoFocus={() => { returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
           onCloseAutoFocus={(event) => {
             // Settings can be opened outside a Radix Trigger (sidebar/hotkey).
@@ -676,17 +685,17 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
             if (target?.isConnected) target.focus({ preventScroll: true });
           }}>
           <header className="settings-header">
-            <div><Dialog.Title>Settings</Dialog.Title><Dialog.Description id="settings-description">Appearance, agent, voice, and workspace preferences.</Dialog.Description></div>
+            <Dialog.Title>Settings</Dialog.Title>
             <Dialog.Close className="settings-close" aria-label="Close settings"><ActionContent text="close"><X size={17} /></ActionContent></Dialog.Close>
           </header>
 
           {desktopSettingsAvailable ? <>
           <div className="settings-layout">
             <nav className="settings-nav" aria-label="Settings categories" role="tablist" aria-orientation="vertical">
-              {sections.filter(({ id }) => id !== 'hosts' || executionHost !== null).map(({ id, label, detail, icon: Icon }) => (
+              {sections.filter(({ id }) => id !== 'hosts' || executionHost !== null).map(({ id, label, icon: Icon }) => (
                 <button key={id} type="button" role="tab" id={`settings-tab-${id}`} aria-selected={activeSection === id} aria-controls={`settings-panel-${id}`} onClick={() => chooseSection(id)}>
                   <Symbol text={activeSection === id ? '>' : ' '}><Icon size={14} aria-hidden="true" /></Symbol>
-                  <span><strong>{label}</strong><small>{detail}</small></span>
+                  <span><strong>{label}</strong></span>
                 </button>
               ))}
             </nav>
@@ -694,31 +703,31 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
             <div ref={settingsScroll} className="settings-scroll">
               {activeSection === 'general' && (
                 <div className="settings-panel" role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general">
-                  <div className="settings-title"><div><h3>Performance</h3><p>Lower rendering cost without disabling any app capability.</p></div></div>
+                  <div className="settings-title"><div><h3>Performance</h3></div></div>
                   <div className="settings-group">
-                    <label className="settings-toggle"><div><strong>Performance mode</strong><small>Includes Reduced Motion and disables transitions, entrance motion, ambient gradients, blur, and deep shadows.</small></div><input type="checkbox" checked={appearance.performanceMode || appearance.reduceMotion} onChange={(event) => setSettings(overrideSkinAppearance(settings, { performanceMode: event.target.checked, reduceMotion: event.target.checked }))} /><span aria-hidden="true" /></label>
-                    <label className="settings-toggle"><div><strong>Holy sh*t</strong><small>Bare-bones fallback for very weak hardware: removes gradients, shadows, blur, animation, and smooth scrolling. Turn it off to restore your visual settings.</small></div><input type="checkbox" checked={appearance.holyShitMode} onChange={(event) => setSettings(overrideSkinAppearance(settings, { holyShitMode: event.target.checked }))} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Performance mode</strong><small>Turns off motion, gradients, blur, and deep shadows.</small></div><input type="checkbox" checked={appearance.performanceMode || appearance.reduceMotion} onChange={(event) => setSettings(overrideSkinAppearance(settings, { performanceMode: event.target.checked, reduceMotion: event.target.checked }))} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Holy sh*t</strong><small>For very weak hardware: no gradients, shadows, blur, animation, or smooth scrolling.</small></div><input type="checkbox" checked={appearance.holyShitMode} onChange={(event) => setSettings(overrideSkinAppearance(settings, { holyShitMode: event.target.checked }))} /><span aria-hidden="true" /></label>
                   </div>
-                  <div className="settings-title settings-title--spaced"><div><h3>Ambient audio</h3><p>An optional player that stays separate from Pi and your project.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Ambient audio</h3></div></div>
                   <div className="settings-group">
-                    <label className="settings-toggle"><div><strong>Music player</strong><small>Shows the minimal lower-right dock. Uses bundled yt-dlp and accepts user-supplied HTTPS links or playlists.</small></div><input type="checkbox" checked={settings.musicPlayerEnabled} onChange={(event) => setSettings({ ...settings, musicPlayerEnabled: event.target.checked })} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Music player</strong><small>Lower-right dock. Plays HTTPS links and playlists through bundled yt-dlp.</small></div><input type="checkbox" checked={settings.musicPlayerEnabled} onChange={(event) => setSettings({ ...settings, musicPlayerEnabled: event.target.checked })} /><span aria-hidden="true" /></label>
                   </div>
                 </div>
               )}
 
               {activeSection === 'skins' && (
                 <div className="settings-panel" role="tabpanel" id="settings-panel-skins" aria-labelledby="settings-tab-skins">
-                  <div className="settings-title"><div><h3>Interface skin</h3><p>Change components and layout without changing your saved palette, density, or font choices.</p></div></div>
+                  <div className="settings-title"><div><h3>Interface skin</h3></div></div>
                   <div className="settings-group">
-                    <div className="settings-theme-row"><div><strong>Skin</strong><small>Default keeps the established workbench. Angelcore uses terminal-style controls. M3 Expressive uses a continuous tonal shell, shaped navigation, and a floating composer.</small></div><SelectControl compact={appearance.compactMode} label="Interface skin" value={settings.skinId} className="settings-theme-select" options={skinCatalog.skins.map((skin) => ({ value: skin.id, label: skin.name, detail: skin.origin === 'pack' ? `Installed pack · ${builtInSkinName(skin.base)} · ${skin.version}` : skin.description }))} onValueChange={(skinId) => setSettings({ ...settings, skinId: skinId as SkinId })} /></div>
+                    <div className="settings-theme-row"><div><strong>Skin</strong></div><SelectControl compact={appearance.compactMode} label="Interface skin" value={settings.skinId} className="settings-theme-select" options={skinCatalog.skins.map((skin) => ({ value: skin.id, label: skin.name, detail: skin.origin === 'pack' ? `Installed pack · ${builtInSkinName(skin.base)} · ${skin.version}` : skin.description }))} onValueChange={(skinId) => setSettings({ ...settings, skinId: skinId as SkinId })} /></div>
                   </div>
                   <SkinPackSettings catalog={skinCatalog} selectedId={settings.skinId} disabled={!settingsLoaded || saving} onSelect={(skinId) => setSettings((current) => ({ ...current, skinId }))} onCatalog={updateSkinCatalog} />
-                  <div className="settings-title settings-title--spaced"><div><h3>Color theme</h3><p>Palettes remain independent and work with every skin. Pack palettes are optional choices.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Color theme</h3></div></div>
                   <div className="settings-group">
-                    <div className="settings-theme-row"><div><strong>Palette</strong><small>Built-in, Fate custom, and Pi themes. Project themes load only after you trust the project.</small></div><SelectControl compact={appearance.compactMode} label="Interface theme" value={settings.themeId} className="settings-theme-select" options={themeCatalog.map((theme) => ({ value: theme.id, label: theme.name, detail: theme.tone === 'light' ? 'Light' : 'Dark' }))} onValueChange={(themeId) => setSettings({ ...settings, themeId })} /></div>
+                    <div className="settings-theme-row"><div><strong>Palette</strong><small>Project Pi themes load after you trust the project.</small></div><SelectControl compact={appearance.compactMode} label="Interface theme" value={settings.themeId} className="settings-theme-select" options={themeCatalog.map((theme) => ({ value: theme.id, label: theme.name, detail: theme.tone === 'light' ? 'Light' : 'Dark' }))} onValueChange={(themeId) => setSettings({ ...settings, themeId })} /></div>
                   </div>
                   <BackgroundSettings />
-                  <div className="settings-title settings-title--spaced"><div><h3>Typography</h3><p>Bundled typefaces with a Noto fallback chain for extended Unicode.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Typography</h3></div></div>
                   <button type="button" className="settings-inline-action" onClick={() => setSettings(resetSkinAppearance(settings))}>Reset to skin appearance defaults</button>
                   <p className="skin-pack-help">The selected skin supplies appearance defaults. Font and density changes override them for this skin only.</p>
                   {fontStatus.pending.length > 0 && <p className="skin-pack-help">Loading bundled skin font...</p>}
@@ -733,10 +742,10 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
 
               {activeSection === 'compaction' && (
                 <div className="settings-panel" role="tabpanel" id="settings-panel-compaction" aria-labelledby="settings-tab-compaction">
-                  <div className="settings-title"><div><h3>Compaction</h3><p>Density controls for the workbench. Compact mode is the master switch: it turns every option below on or off with it. Each option also works on its own.</p></div></div>
+                  <div className="settings-title"><div><h3>Compaction</h3></div></div>
                   <div className="settings-group">
-                    <label className="settings-toggle"><div><strong>Compact mode</strong><small>Dense workbench: Settings, chrome, chat, composer, inspector, and dialogs. Flips every option below to match this switch.</small></div><input type="checkbox" checked={appearance.compactMode} onChange={(event) => setSettings(overrideSkinAppearance(settings, { compactMode: event.target.checked, compactSessions: event.target.checked }))} /><span aria-hidden="true" /></label>
-                    <label className="settings-toggle"><div><strong>Compact sessions</strong><small>Group sessions by project folder and show them as one-line rows with actions in a ⋯ menu. Turn off for detailed session cards. Works on its own, without Compact mode.</small></div><input type="checkbox" checked={appearance.compactSessions} onChange={(event) => setSettings(overrideSkinAppearance(settings, { compactSessions: event.target.checked }))} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Compact mode</strong><small>Denser layout everywhere. Also sets every option below.</small></div><input type="checkbox" checked={appearance.compactMode} onChange={(event) => setSettings(overrideSkinAppearance(settings, { compactMode: event.target.checked, compactSessions: event.target.checked }))} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Compact sessions</strong><small>One-line rows grouped by folder, actions in a ⋯ menu. Works without Compact mode.</small></div><input type="checkbox" checked={appearance.compactSessions} onChange={(event) => setSettings(overrideSkinAppearance(settings, { compactSessions: event.target.checked }))} /><span aria-hidden="true" /></label>
                   </div>
                 </div>
               )}
@@ -767,9 +776,16 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                       <details className="workspace-preference-details"><summary>How it works</summary><p>Applies after saving to all newly created agents. Strict mode also applies to resumed work; running work stays in place.</p><p>No project restart is needed for workspace policy changes. Worktrees start from committed files, not uncommitted changes, and are not security sandboxes.</p></details>
                     </div>
                   </section>
+                  <div className="settings-title settings-title--spaced"><div><h3>Pi tools and budget</h3></div></div>
+                  <label className="settings-toggle">
+                    <div><strong>Codemode</strong><small>Lets the model script several tools in one call. Applies to new sessions.</small></div>
+                    <input type="checkbox" aria-label="Enable Pi codemode" checked={settings.piCodemode} onChange={(event) => setSettings({ ...settings, piCodemode: event.target.checked })} />
+                    <span aria-hidden="true" />
+                  </label>
+                  <label className="settings-input-row"><span>Daily budget (USD)</span><input aria-label="Daily budget in USD" inputMode="decimal" value={settings.dailyBudgetUsd ?? ''} placeholder="No limit" onChange={(event) => { const value = Number(event.target.value); setSettings({ ...settings, dailyBudgetUsd: event.target.value.trim() === '' || !Number.isFinite(value) || value < 0 ? null : value }); }} /></label>
                   <div className="settings-title settings-title--spaced"><div><h3>Agent defaults</h3><p>Fallbacks for the first Pi session opened in a project. Later sessions inherit the active composer settings.</p></div></div>
                   <div className="settings-model-picker">
-                    <div className="settings-model-heading"><div><strong>Default model</strong><small>Models are separated by provider so the catalog stays clear as it grows.</small></div>{selectedProvider && <span>{formatProviderName(selectedProvider)}</span>}</div>
+                    <div className="settings-model-heading"><div><strong>Default model</strong></div>{selectedProvider && <span>{formatProviderName(selectedProvider)}</span>}</div>
                     <div className="settings-model-controls">
                       <div className="settings-select-field"><span>Provider</span><SelectControl compact={appearance.compactMode} label="Default provider" value={selectedProvider} options={[{ value: '', label: 'Automatic · Pi default' }, ...pickerGroups.map((group) => ({ value: group.provider, label: group.title, detail: `${group.models.length} ${group.models.length === 1 ? 'model' : 'models'}` }))]} onValueChange={chooseProvider} /></div>
                       <div className="settings-select-field"><span>Model</span><SelectControl compact={appearance.compactMode} label="Default model" value={settings.defaultModel ?? ''} disabled={!selectedGroup} options={[{ value: '', label: 'Select a model' }, ...(selectedGroup?.models.map((model) => ({ value: modelIdentity(model.provider, model.id), label: model.name, ...(model.name === model.id ? {} : { detail: model.id }) })) ?? [])]} onValueChange={(value) => setSettings({ ...settings, defaultModel: value || null })} /></div>
@@ -814,7 +830,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                     <div className="settings-select-row"><div><strong>Thinking level</strong><small>Initial reasoning effort when a project starts without an active session.</small></div><SelectControl compact={appearance.compactMode} label="Default thinking level" value={settings.thinkingLevel} className="settings-thinking-select" options={['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map((level) => ({ value: level, label: level === 'xhigh' ? 'Extra high' : `${level[0]?.toUpperCase() ?? ''}${level.slice(1)}` }))} onValueChange={(value) => setSettings({ ...settings, thinkingLevel: value as AppSettings['thinkingLevel'] })} /></div>
                   </div>
 
-                  <div className="settings-title settings-title--spaced"><div><h3>Image generation</h3><p>A dedicated image route, independent from the chat model and secured by Fate UI’s embedded SDK provider connection.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Image generation</h3><p>Independent from the chat model.</p></div></div>
                   <div className="image-provider-config">
                     <div className="settings-model-controls">
                       <div className="settings-select-field"><span>Provider route</span><SelectControl compact={appearance.compactMode} label="Image generation provider" value={imageSettings.provider} options={[{ value: 'auto', label: 'Automatic', detail: 'Best authenticated Pi provider' }, ...imageGenerationProviderPresets.map((preset) => ({ value: preset.id, label: preset.name, detail: preset.auth })), { value: 'custom', label: 'Custom Pi provider', detail: 'OpenAI-compatible Images API' }]} onValueChange={chooseImageProvider} /></div>
@@ -859,7 +875,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   <div className="settings-group">
                     <label className="settings-toggle"><div><strong>Microphone button</strong><small>Show voice input beside Send. Audio stays on this device.</small></div><input type="checkbox" checked={settings.speech.enabled} onChange={(event) => setSettings({ ...settings, speech: { ...settings.speech, enabled: event.target.checked } })} /><span aria-hidden="true" /></label>
                   </div>
-                  <div className="settings-title settings-title--spaced"><div><h3>Input device</h3><p>Choose the microphone used for voice prompts on this computer.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Input device</h3></div></div>
                   <div className="settings-group voice-device-group">
                     <div className="settings-theme-row">
                       <div><strong>Microphone</strong><small>{inputDeviceDetail}</small></div>
@@ -903,8 +919,8 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   <p className="voice-license-note">Models download from pinned Hugging Face releases, are SHA-256 verified before installation, and retain their upstream licenses. Supported hardware acceleration is used when stable; otherwise transcription uses CPU safety mode.</p>
                   <div className="settings-title settings-title--spaced"><div><h3>Live transcription &amp; hotkey</h3><p>See voice input as you speak. Trigger it from any application with a global hotkey.</p></div></div>
                   <div className="settings-group">
-                    <label className="settings-toggle"><div><strong>Live transcription</strong><small>Show words in the composer while you speak when the selected model supports it. Long thinking pauses are not sent to the model, but recording stays open.</small></div><input type="checkbox" checked={settings.speech.liveTranscription} onChange={(event) => setSettings({ ...settings, speech: { ...settings.speech, liveTranscription: event.target.checked } })} /><span aria-hidden="true" /></label>
-                    <label className="settings-toggle"><div><strong>Final accuracy pass</strong><small>After you stop speaking, re-run the whole recording once for a cleaner transcript. Costs extra time and CPU; off by default.</small></div><input type="checkbox" checked={settings.speech.finalAccuracyPass} onChange={(event) => setSettings({ ...settings, speech: { ...settings.speech, finalAccuracyPass: event.target.checked } })} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Live transcription</strong><small>Shows words while you speak, when the model supports it. Pauses are not sent.</small></div><input type="checkbox" checked={settings.speech.liveTranscription} onChange={(event) => setSettings({ ...settings, speech: { ...settings.speech, liveTranscription: event.target.checked } })} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Final accuracy pass</strong><small>Re-runs the full recording once after you stop, for a cleaner transcript. Costs time and CPU.</small></div><input type="checkbox" checked={settings.speech.finalAccuracyPass} onChange={(event) => setSettings({ ...settings, speech: { ...settings.speech, finalAccuracyPass: event.target.checked } })} /><span aria-hidden="true" /></label>
                   </div>
                   <div className="settings-group">
                     <div className="settings-theme-row voice-hotkey-row">
@@ -924,26 +940,29 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
 
               {activeSection === 'workspace' && (
                 <div className="settings-panel" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace">
-                  <div className="settings-title"><div><h3>Project trust</h3><p>Clear boundaries between Pi actions and your manual tools.</p></div></div>
+                  <div className="settings-title"><div><h3>Project trust</h3></div></div>
                   <div className="settings-notice"><ShieldCheck size={14} /><div><strong>Project-confined by default</strong><p>Read only and Edit files stay inside the trusted project. Full access explicitly unlocks host files and shell execution, is saved per session, and is not sandboxed.</p></div></div>
-                  <div className="settings-title settings-title--spaced"><div><h3>Terminal</h3><p>Choose the shell opened by the manual integrated terminal.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Terminal</h3></div></div>
                   <label className="settings-input-row"><span>Shell executable</span><input value={settings.terminalShell ?? ''} onChange={(event) => setSettings({ ...settings, terminalShell: event.target.value || null })} placeholder="System default" /></label>
-                  <div className="settings-title settings-title--spaced"><div><h3>Message composer</h3><p>Tune sending and prompt improvement behavior.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Message composer</h3></div></div>
                   <div className="settings-group">
                     <label className="settings-toggle"><div><strong>Ctrl/⌘ Enter to send</strong><small>When enabled, Enter inserts a new line. When off, Enter sends and Shift+Enter inserts a new line.</small></div><input type="checkbox" checked={settings.sendMessageWithModifier} onChange={(event) => setSettings({ ...settings, sendMessageWithModifier: event.target.checked })} /><span aria-hidden="true" /></label>
-                    <label className="settings-toggle"><div><strong>Advanced improve prompt</strong><small>Before rewriting, the model first explores the project read-only — exact files, symbols, and conventions — then writes the improved prompt from that evidence. Slower and uses more tokens; the button turns accent-colored while active.</small></div><input type="checkbox" checked={settings.advancedPromptImprovement} onChange={(event) => setSettings({ ...settings, advancedPromptImprovement: event.target.checked })} /><span aria-hidden="true" /></label>
-                    <label className="settings-toggle"><div><strong>Opt-in crash reports</strong><small>Off by default. When on, Fate UI writes a local file with stack, app version, and OS only. No prompts or code are stored.</small></div><input type="checkbox" checked={settings.crashTelemetryEnabled} onChange={(event) => setSettings({ ...settings, crashTelemetryEnabled: event.target.checked })} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Advanced improve prompt</strong><small>Reads the project before rewriting the prompt. Slower and uses more tokens.</small></div><input type="checkbox" checked={settings.advancedPromptImprovement} onChange={(event) => setSettings({ ...settings, advancedPromptImprovement: event.target.checked })} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Opt-in crash reports</strong><small>Writes a local file with stack, app version, and OS. No prompts or code.</small></div><input type="checkbox" checked={settings.crashTelemetryEnabled} onChange={(event) => setSettings({ ...settings, crashTelemetryEnabled: event.target.checked })} /><span aria-hidden="true" /></label>
                   </div>
-                  <div className="settings-title settings-title--spaced"><div><h3>Keyboard shortcuts</h3><p>Fast paths that work anywhere in the workspace.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Keyboard shortcuts</h3></div></div>
                   <dl className="settings-shortcuts"><div><dt>Command palette</dt><dd>Ctrl/⌘ K</dd></div><div><dt>Terminal</dt><dd>Ctrl/⌘ `</dd></div><div><dt>New session</dt><dd>Ctrl/⌘ N</dd></div><div><dt>Settings</dt><dd>Ctrl/⌘ ,</dd></div><div><dt>Stop generation</dt><dd>Esc</dd></div></dl>
                 </div>
               )}
 
               {activeSection === 'mcp' && <McpSettings />}
+              {activeSection === 'hooks' && <HookSettings />}
+              {activeSection === 'code' && <LspSettings />}
+              {activeSection === 'usage' && <UsageSettings />}
               {activeSection === 'hosts' && <HostSettings />}
               {activeSection === 'system' && (
                 <div className="settings-panel" role="tabpanel" id="settings-panel-system" aria-labelledby="settings-tab-system">
-                  <div className="settings-title"><div><h3>Pi diagnostics</h3><p>Local runtime details for troubleshooting.</p></div></div>
+                  <div className="settings-title"><div><h3>Pi diagnostics</h3></div></div>
                   {diagnosticsError
                     ? <p className="settings-error">{diagnosticsError}</p>
                     : diagnostics
@@ -951,7 +970,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                       : systemLoading || !systemLoadStarted.current
                         ? <div className="settings-skeleton" aria-label="Loading diagnostics"><span /><span /><span /></div>
                         : <p className="settings-empty">No diagnostics were returned.</p>}
-                  <div className="settings-title settings-title--spaced"><div><h3>Application logs</h3><p>The latest local events, newest first.</p></div></div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Application logs</h3></div></div>
                   <div className="settings-logs">{logsError ? <p className="settings-error">{logsError}</p> : logs.length ? logs.slice(-100).reverse().map((entry) => <div key={`${entry.timestamp}-${entry.message}`}><time>{new Date(entry.timestamp).toLocaleTimeString()}</time><strong>{entry.level}</strong><span>{entry.scope}: {entry.message}</span></div>) : <p>{systemLoading ? 'Loading application logs…' : 'No application logs yet.'}</p>}</div>
                 </div>
               )}
@@ -985,7 +1004,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
           <footer>
             <div className="settings-footer-status" aria-live="polite">
               {releaseLabel ? <span className="settings-release-version" aria-label="Application version" title={releaseLabel}>{releaseLabel}</span> : null}
-              <span>{status ?? (settingsLoaded ? 'Changes apply after saving.' : 'Loading settings…')}</span>
+              {status || !settingsLoaded ? <span>{status ?? 'Loading settings…'}</span> : null}
               {updateResult && (updateResult.status === 'available'
                 ? (updateInstalling && updateProgress
                     ? <span className="update-check-result" role="status">Installing {updateProgress.version}… {Math.round(updateProgress.percent * 100)}%</span>

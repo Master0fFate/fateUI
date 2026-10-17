@@ -1,5 +1,6 @@
 import type { PermissionLevel } from '../../../shared/contracts/ipc';
 import type { AppLogService } from '../../logging/AppLogService';
+import type { CheckpointStore } from './CheckpointStore';
 import type { MutationAttestation } from '../../../shared/contracts/mutationAttestation';
 import {
   buildAttestation,
@@ -22,19 +23,21 @@ export type MutationRecorder = (input: AttestationRecordInput) => void;
  * attestation is best-effort. Logs follow the existing safe conventions (no
  * content, paths, or credentials).
  */
-export function createMutationRecorder(ledger: MutationAttestationLedger, logs: AppLogService): MutationRecorder {
+export function createMutationRecorder(ledger: MutationAttestationLedger, logs: AppLogService, checkpoints?: CheckpointStore): MutationRecorder {
+  const warn = (step: string) => (error: unknown) => {
+    logs.write('warn', 'attestations', `Attestation ${step} failed: ${error instanceof Error ? error.message : String(error)}`);
+  };
   return (input) => {
     let attestation: MutationAttestation | null;
     try {
       attestation = buildAttestation(input);
     } catch (error) {
-      logs.write('warn', 'attestations', `Attestation build failed: ${error instanceof Error ? error.message : String(error)}`);
+      warn('build')(error);
       return;
     }
     if (!attestation) return;
-    void ledger.record(attestation).catch((error) => {
-      logs.write('warn', 'attestations', `Attestation record failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    void ledger.record(attestation).catch(warn('record'));
+    if (checkpoints && attestation.preHash && input.priorContent) void checkpoints.put(attestation.projectPathHash, attestation.preHash, input.priorContent).catch(warn('checkpoint'));
   };
 }
 

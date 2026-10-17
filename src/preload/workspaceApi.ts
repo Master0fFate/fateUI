@@ -3,6 +3,7 @@ import {
   clipboardWriteResultSchema,
   emptyInputSchema,
   fileListInputSchema,
+  gitBranchListSchema,
   fileListSchema,
   filePathInputSchema,
   filePreviewSchema,
@@ -17,8 +18,11 @@ import {
   gitOperationResultSchema,
   gitRevertPathInputSchema,
   gitRevertPathResultSchema,
+  gitHunksResultSchema,
+  gitRevertHunkInputSchema,
   sessionExportResultSchema,
   gitStatusSchema,
+  gitSwitchBranchInputSchema,
   gitWorktreeInputSchema,
   gitWorktreeListSchema,
   gitWorktreeSessionResultSchema,
@@ -46,6 +50,8 @@ import {
 import {
   attestationQueryRequestSchema,
   attestationQueryResultSchema,
+  checkpointRestoreRequestSchema,
+  checkpointRestoreResultSchema,
 } from '../shared/contracts/mutationAttestation';
 import { invoke, subscribe, ignoreResult, discardResult } from './transport';
 
@@ -69,6 +75,8 @@ export const workspaceApi = {
   getGitDiff: (path) => invoke(ipcChannels.gitDiff, filePathInputSchema, gitDiffSchema, { path }),
   getGitCombinedDiff: () => invoke(ipcChannels.gitCombinedDiff, emptyInputSchema, gitCombinedDiffSchema),
   listGitWorktrees: () => invoke(ipcChannels.gitWorktrees, emptyInputSchema, gitWorktreeListSchema),
+  listGitBranches: () => invoke(ipcChannels.gitBranches, emptyInputSchema, gitBranchListSchema),
+  switchGitBranch: (input) => invoke(ipcChannels.gitSwitchBranch, gitSwitchBranchInputSchema, gitStatusSchema, input),
   switchGitWorktree: (path) => invoke(ipcChannels.gitSwitchWorktree, gitWorktreeInputSchema, runtimeStateSchema, { path }),
   createWorktreeSession: (entryId) => invoke(ipcChannels.gitCreateWorktreeSession, sessionEntryInputSchema, gitWorktreeSessionResultSchema, { entryId }),
   getGitHistory: () => invoke(ipcChannels.gitHistory, emptyInputSchema, gitHistorySchema),
@@ -82,5 +90,8 @@ export const workspaceApi = {
   resizeTerminal: (id, cols, rows) => invoke(ipcChannels.terminalResize, terminalResizeInputSchema, ignoreResult, { id, cols, rows }),
   closeTerminal: (id) => invoke(ipcChannels.terminalClose, terminalCloseInputSchema, ignoreResult, { id }),
   queryAttestations: (request) => invoke(ipcChannels.attestationsQuery, attestationQueryRequestSchema, attestationQueryResultSchema, request ?? {}),
+  restoreCheckpoint: (attestationId) => invoke(ipcChannels.checkpointsRestore, checkpointRestoreRequestSchema, checkpointRestoreResultSchema, { attestationId }),
+  getGitHunks: (path) => invoke(ipcChannels.gitHunks, filePathInputSchema, gitHunksResultSchema, { path }),
+  revertGitHunk: (input) => invoke(ipcChannels.gitRevertHunk, gitRevertHunkInputSchema, gitRevertPathResultSchema, input),
   onTerminalEvent: (listener) => subscribe(ipcChannels.terminalEvents, terminalEventSchema, listener),
 } satisfies Partial<PiDesktopApi>;

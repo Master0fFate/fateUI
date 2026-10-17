@@ -1,6 +1,7 @@
 import type { BrowserCdpClient } from './CdpClient';
 
 const POINTER_KEY = '__fateBrowserPointerV1__';
+const POINTER_IDLE_MS = 2_500;
 
 export interface BrowserPointerPoint {
   x: number;
@@ -14,7 +15,7 @@ export class BrowserPointerOverlay {
   async move(point: BrowserPointerPoint, target: string): Promise<void> {
     if (!this.cdp.supports('Runtime')) return;
     await this.cdp.send('Runtime.evaluate', {
-      expression: `(${movePointerFunction})(${JSON.stringify(POINTER_KEY)},${finite(point.x)},${finite(point.y)},${JSON.stringify(target.slice(0, 120))})`,
+      expression: `(${movePointerFunction})(${JSON.stringify(POINTER_KEY)},${finite(point.x)},${finite(point.y)},${JSON.stringify(target.slice(0, 120))},${POINTER_IDLE_MS})`,
       awaitPromise: true,
       silent: true,
       returnByValue: true,
@@ -44,7 +45,7 @@ function finite(value: number): number {
   return Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
 }
 
-const movePointerFunction = `async function(key, requestedX, requestedY, target) {
+const movePointerFunction = `async function(key, requestedX, requestedY, target, idleMs) {
   const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, Number.isFinite(value) ? value : minimum));
   const x = clamp(requestedX, 0, Math.max(0, innerWidth - 1));
   const y = clamp(requestedY, 0, Math.max(0, innerHeight - 1));
@@ -77,7 +78,7 @@ const movePointerFunction = `async function(key, requestedX, requestedY, target)
     (document.documentElement || document.body).appendChild(root);
     state = {
       root, cursor, label, x: Math.max(0, innerWidth * .5), y: Math.max(0, innerHeight * .5),
-      clear() { root.remove(); delete globalThis[key]; }
+      clear() { clearTimeout(state.idleTimer); root.remove(); delete globalThis[key]; }
     };
     cursor.style.transform = 'translate3d(' + (state.x - 7.5) + 'px,' + (state.y - 7.5) + 'px,0)';
     globalThis[key] = state;
@@ -88,6 +89,8 @@ const movePointerFunction = `async function(key, requestedX, requestedY, target)
   state.cursor.style.transform = 'translate3d(' + (x - 7.5) + 'px,' + (y - 7.5) + 'px,0)';
   state.x = x;
   state.y = y;
+  clearTimeout(state.idleTimer);
+  state.idleTimer = setTimeout(() => { state.cursor.style.opacity = '0'; }, idleMs);
   if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
     await new Promise((resolve) => setTimeout(resolve, 125));
   }

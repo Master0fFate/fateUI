@@ -29,6 +29,9 @@ import {
   diagnosticsSchema,
   type PiDesktopApi,
 } from '../shared/contracts/ipc';
+import { hookListSchema } from '../shared/contracts/hooks';
+import { lspServerListSchema } from '../shared/contracts/lsp';
+import { usageQueryInputSchema, usageQueryResultSchema } from '../shared/contracts/usage';
 import { invoke, subscribe, ignoreResult, discardResult } from './transport';
 
 export const preferencesApi = {
@@ -42,6 +45,11 @@ export const preferencesApi = {
   getMcpServers: () => invoke(ipcChannels.mcpGet, emptyInputSchema, mcpServerListSchema),
   setMcpServers: (servers) => invoke(ipcChannels.mcpSet, mcpServerListSchema, mcpServerListSchema, servers),
   testMcpServer: (name) => invoke(ipcChannels.mcpProbe, mcpProbeInputSchema, mcpProbeResultSchema, { name }),
+  getHooks: () => invoke(ipcChannels.hooksGet, emptyInputSchema, hookListSchema),
+  setHooks: (hooks) => invoke(ipcChannels.hooksSet, hookListSchema, hookListSchema, hooks),
+  getLspServers: () => invoke(ipcChannels.lspGet, emptyInputSchema, lspServerListSchema),
+  setLspServers: (servers) => invoke(ipcChannels.lspSet, lspServerListSchema, lspServerListSchema, servers),
+  queryUsage: (input) => invoke(ipcChannels.usageQuery, usageQueryInputSchema, usageQueryResultSchema, input ?? {}),
   inspectPiMigration: () => invoke(ipcChannels.piMigrationInspect, emptyInputSchema, piMigrationReportSchema),
   importPiMigration: () => invoke(ipcChannels.piMigrationImport, emptyInputSchema, piMigrationResultSchema),
   checkForUpdates: () => invoke(ipcChannels.updatesCheck, emptyInputSchema, updateCheckResultSchema),

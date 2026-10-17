@@ -24,15 +24,51 @@ So read these links as "related activity to investigate," never as proof of who 
 
 ### Direct-write ledger rows (limited)
 
-Activity's ledger rows list only successful direct `write`/`edit` tool calls for the current project: each row records the project-relative path, the actor (main agent, historical standalone agent, or team node), the permission level at write time, and a prior→post SHA-256 transition (or `new file` / `oversize prior` when no prior hash was captured). The list is virtualized and bounded to the most recent 1,000 rows shown.
+Activity's ledger rows list successful direct `write`/`edit` tool calls and checkpoint `restore` operations for the current project: each row records the project-relative path, the actor (main agent, historical standalone agent, or team node), the permission level at write time, and a prior→post SHA-256 transition (or `new file` / `oversize prior` when no prior hash was captured). The list is virtualized and bounded to the most recent 1,000 rows shown.
 
 It is deliberately narrow. It does **not** cover shell commands, formatters, scripts, external editor edits, manual terminal mutations, the current working-tree diff, or commit history. It records that a controlled write completed and produced the recorded written-content hash — not authorship, not causality, and not a durable audit log.
 
 The SHA-256 values fingerprint the file content Fate supplied to the tool; they are **not** a signature, and the local JSONL ledger is **not tamper-evident** — a stored row can be edited or removed on disk without detection. Retention is bounded to 4,096 records, 16 MiB, and 90 days per project, and rows are local to the current process/profile slot: each `--new-instance` process keeps its own ledger and rows are not merged across processes.
 
+### Checkpoints and Rewind
+
+Every attested `write`/`edit` also stores the file's **prior bytes** in a content-addressed checkpoint store under the Fate data directory (`checkpoints/v1/<project-hash>/<sha256>`). A ledger row therefore doubles as a restore point. **Rewind** on an Activity ledger row restores every file the ledger touched from that row onward to its state **before** that row: hashed priors are written back, files the agent created are removed. Each restored file is recorded as a `restore` row with its own prior blob, so a rewind can itself be rewound. Rewind is refused while the session is streaming.
+
+Rewind skips a file and reports why when its current content no longer matches the ledger (`changed`: a shell command, formatter, or external editor touched it), when the prior state was too large to capture (`oversize`, above 8 MiB), when the blob was evicted (`evicted`: the store keeps 256 MiB per project and 90 days), or when the path is not a regular file (`unavailable`). Bash, git, and formatters are invisible to the ledger and therefore to Rewind; Git remains the authority for anything outside direct tool writes.
+
+## Hunk review
+
+In the Review Runway, a text diff shows one row per hunk above the Monaco view. **Keep** marks a hunk as reviewed. **Reject** reverse-applies only that hunk with `git apply --reverse`, refreshes the diff, and drafts a feedback message with the rejected hunk for the agent. Untracked files have no hunks; revert the whole file instead. The hunk header is checked before the revert so a stale list never reverts the wrong lines.
+
+## Pull requests
+
+Full-access root sessions get `git_push`, `pr_create`, and `pr_status`. `git_push` pushes the current feature branch to `origin` with an upstream and refuses `main` and `master`. `pr_create` opens a GitHub pull request through the GitHub CLI and pushes first when the branch has no upstream. `pr_status` reports state, review decision, mergeability, every check, and the failed log tail of up to three failing workflow runs, so a "CI failed, fix it" prompt has the evidence in one call. The GitHub CLI must be installed and signed in; Fate never stores GitHub credentials.
+
+## Context inspector
+
+Before every provider request a Pi inline extension estimates what fills the context window: system prompt, active tool schemas, user and assistant messages, tool results, and the three largest tool results. It appears as the `context` widget in the extension status rail beside the composer. Token counts are UTF-8 byte estimates, not provider tokenization; the first line also shows the SDK's own context usage when it is known.
+
+## Usage and budget
+
+Every assistant turn records provider-reported tokens and cost into `usage/v1/<project-hash>.jsonl` under the Fate data directory, bounded to 20,000 rows and 8 MiB per project. **Settings → Usage** shows today, a 7 to 365 day window, cost per day, and the top models and sessions. **Settings → Agent → Daily budget** sets a per-device daily limit; when a project's spend for the day passes it, the root session shows a warning notice after the turn. The budget is an alarm, not a hard stop.
+
+## Codemode and tool search
+
+Root sessions load the Pi SDK's `tool_search` extension. Rarely used tools (agent orchestration, tasks, Monitor, session messages, image generation, branch, push and pull request tools, and `fate_mcp`) stay deferred until the model looks them up. **Settings → Agent → Codemode** also loads the `codemode` extension into new root sessions, so the model can run several tools from one script. Codemode is off by default.
+
+## Hooks and Code Intelligence
+
+**Hooks** (Settings → Hooks) run your own shell commands on the agent tool lifecycle: before a tool call, after a tool result, when the agent stops, and at session start. They apply to root agent sessions. See [Hooks](hooks.md).
+
+**Code Intelligence** (Settings → Code Intelligence) gives the agent `lsp_diagnostics`, `lsp_definition`, `lsp_references`, and `lsp_symbols`, backed by language servers found on PATH or in the project's `node_modules/.bin`. Every `write`/`edit` result also carries fresh errors and warnings for the touched file. See [Code Intelligence](code-intelligence.md).
+
 ## First-class Git and files
 
-Status, history, commits, Monaco diffs, and project-confined file browsing without leaving the app. Worktrees are switchable; the working-tree diff and branch history are both reachable.
+Status, history, commits, Monaco diffs, and project-confined file browsing without leaving the app. Worktrees are switchable; the working-tree diff and branch history are both reachable. Isolated session and agent worktrees are plain Git worktrees inside the project at `.fate/worktrees/`; that directory is added to `.git/info/exclude` and hidden from the file tree, so the parent checkout stays clean. The server profile keeps them under its data root instead.
+
+### Branches
+
+The composer shows a branch chip for repository projects. On an empty session it opens a picker: switch to a local or remote branch, or create a branch from the current one by typing its name. Branches checked out in another worktree are not listed. Once the session has a message the branch is fixed for that session and the picker is read-only. The agent names, switches, and renames branches through the `git_branch` tool (list, switch, create, rename), which runs with hooks and unsafe protocols disabled. Listing works at every permission level; switching, creating, and renaming need Edit files or Full access. Status, changes, and history refresh after the tool completes.
 
 ## Manual terminal and embedded browser
 

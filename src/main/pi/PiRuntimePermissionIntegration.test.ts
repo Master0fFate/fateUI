@@ -50,14 +50,15 @@ describe('real SDK root permission fencing (no provider requests)', () => {
     } finally { await service.dispose(); }
   });
 
-  it('starts edit, persists before escalation, and revokes retained write/bash handles on reduction', async () => {
+  it('starts full access, persists before escalation, and revokes retained write/bash handles on reduction', async () => {
     const root = await isolatedRoot();
     const permissions = new InMemorySessionPermissionStore();
     const service = new PiRuntimeService(undefined, undefined, permissions);
     try {
       const state = await service.openProject({ path: root, name: 'fixture', trusted: true });
       expect(state.status).toBe('auth-required');
-      expect(state.permissionLevel).toBe('edit');
+      expect(state.permissionLevel).toBe('full-access');
+      await service.setPermissionLevel('edit');
       const slot = (service as unknown as { selectedSlot: { runtime: AgentSessionRuntime } }).selectedSlot;
       const session = slot.runtime.session;
       expect(session.getActiveToolNames()).not.toContain('bash');
@@ -190,6 +191,7 @@ describe('real SDK root permission fencing (no provider requests)', () => {
     const service = new PiRuntimeService(undefined, undefined, permissions);
     try {
       await service.openProject({ path: root, name: 'fixture', trusted: true });
+      await service.setPermissionLevel('edit');
       vi.spyOn(permissions, 'set').mockRejectedValueOnce(new Error('deterministic disk failure'));
       await expect(service.setPermissionLevel('full-access')).rejects.toThrow(/blocked/);
       const session = (service as unknown as { selectedSlot: { runtime: AgentSessionRuntime } }).selectedSlot.runtime.session;

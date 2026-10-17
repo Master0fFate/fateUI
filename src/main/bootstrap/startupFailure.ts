@@ -1,4 +1,5 @@
 import { OwnershipConflict } from '../../core/ownership/OwnerLock';
+import { WindowsAclUnverifiedError } from '../../core/storage/WindowsPrivateAcl';
 
 export interface DesktopStartupFailure {
   readonly title: string;
@@ -15,8 +16,11 @@ export function desktopStartupFailure(error: unknown): DesktopStartupFailure {
         + 'A profile whose previous owner stopped, for example after a crash or a forced quit, is recovered automatically at the next start. '
         + 'Do not delete ownership records. If the conflict remains after all possible owners have stopped, '
         + 'request explicit operator recovery review. A separate Chromium profile does not authorize a second Pi runtime for this Fate profile.'
-      : 'Fate UI could not finish starting. This instance will close. Check your configuration before retrying. '
-        + 'If the problem persists, request help reviewing startup and recovery state.',
+      : error instanceof WindowsAclUnverifiedError
+        ? 'Fate UI could not verify that its data folder is private to this Windows account. Another account or group has access to it. '
+          + 'Remove that access from the Fate data folder, or start without the native state backend, then retry.'
+        : 'Fate UI could not finish starting. This instance will close. Check your configuration before retrying. '
+          + 'If the problem persists, request help reviewing startup and recovery state.',
   };
 }
 

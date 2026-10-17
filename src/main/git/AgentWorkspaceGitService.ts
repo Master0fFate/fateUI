@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { executeGitInWorktree, inheritedLineEndingConfig, parseGitWorktrees, safeFilterConfig, validateSelectedRoot } from './GitService';
+import { excludeManagedDirectory, executeGitInWorktree, inheritedLineEndingConfig, MANAGED_DIRECTORY, parseGitWorktrees, safeFilterConfig, validateSelectedRoot } from './GitService';
 import type { CheckoutOwnership } from '../../core/ownership/CheckoutOwnership';
 
 const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
@@ -54,7 +54,11 @@ function bounded(value: string): { value: string; truncated: boolean } {
 }
 
 export class AgentWorkspaceGitService {
-  constructor(private readonly managedRoot = path.join(homedir(), '.pi', 'fateGUI', 'agent-team-worktrees'), private readonly temporaryRoot = tmpdir(), private readonly ownership?: CheckoutOwnership) {}
+  constructor(private readonly managedRoot?: string, private readonly temporaryRoot = tmpdir(), private readonly ownership?: CheckoutOwnership) {}
+
+  private managedRootFor(parentRoot: string): string {
+    return this.managedRoot ?? path.join(parentRoot, MANAGED_DIRECTORY, 'worktrees');
+  }
 
   private async withConfig<T>(root: string, work: (config: string[]) => Promise<T>): Promise<T> {
     await fs.mkdir(this.temporaryRoot, { recursive: true, mode: 0o700 });
@@ -136,10 +140,11 @@ export class AgentWorkspaceGitService {
     });
   }
 
-  async assertManagedWorkspace(workspace: string): Promise<string> {
-    const [rootStat, workspaceStat] = await Promise.all([fs.lstat(this.managedRoot), fs.lstat(workspace)]);
+  async assertManagedWorkspace(workspace: string, parentRoot: string): Promise<string> {
+    const managedRoot = this.managedRootFor(parentRoot);
+    const [rootStat, workspaceStat] = await Promise.all([fs.lstat(managedRoot), fs.lstat(workspace)]);
     if (rootStat.isSymbolicLink() || workspaceStat.isSymbolicLink() || !workspaceStat.isDirectory()) throw new Error('Linked agent workspace directories are not supported.');
-    const managed = path.normalize(await fs.realpath(this.managedRoot));
+    const managed = path.normalize(await fs.realpath(managedRoot));
     const canonical = path.normalize(await fs.realpath(workspace));
     if (canonical !== path.resolve(workspace) || path.dirname(canonical) !== managed) throw new Error('Workspace is not inside Fate UI managed storage.');
     await validateSelectedRoot(canonical);
@@ -147,9 +152,9 @@ export class AgentWorkspaceGitService {
   }
 
   async validate(workspace: string, parentRoot: string, branch?: string, baseCommit?: string, commonDirectory?: string, owner?: string): Promise<string> {
-    const source = await this.assertManagedWorkspace(workspace);
-    if (owner && !path.basename(source).startsWith(ownerPrefix(owner))) throw new Error('Workspace belongs to a different agent owner.');
     const parent = await this.canonicalRoot(parentRoot);
+    const source = await this.assertManagedWorkspace(workspace, parent);
+    if (owner && !path.basename(source).startsWith(ownerPrefix(owner))) throw new Error('Workspace belongs to a different agent owner.');
     const common = await this.assertSameRepository(source, parent);
     if (commonDirectory && common !== path.normalize(commonDirectory)) throw new Error('Workspace Git repository identity changed.');
     const registered = parseGitWorktrees(await this.run(parent, ['worktree', 'list', '--porcelain', '-z']), parent)
@@ -175,9 +180,11 @@ export class AgentWorkspaceGitService {
       const baseCommit = (await this.run(parentRoot, ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`], config)).trim();
       if (!HASH.test(baseCommit)) throw new Error('Workspace base ref does not resolve to a commit.');
       await this.run(parentRoot, ['check-ref-format', '--branch', branch], config);
-      await fs.mkdir(this.managedRoot, { recursive: true, mode: 0o700 });
-      if ((await fs.lstat(this.managedRoot)).isSymbolicLink()) throw new Error('Linked managed workspace storage is not supported.');
-      const managed = path.normalize(await fs.realpath(this.managedRoot));
+      const managedRoot = this.managedRootFor(parentRoot);
+      if (!this.managedRoot) await excludeManagedDirectory(parentRoot);
+      await fs.mkdir(managedRoot, { recursive: true, mode: 0o700 });
+      if ((await fs.lstat(managedRoot)).isSymbolicLink()) throw new Error('Linked managed workspace storage is not supported.');
+      const managed = path.normalize(await fs.realpath(managedRoot));
       const destination = path.normalize(await fs.mkdtemp(path.join(managed, owner ? ownerPrefix(owner) : 'agent-')));
       let branchCreated = false;
       let checkoutCreated = false;
@@ -326,8 +333,8 @@ export class AgentWorkspaceGitService {
   }
 
   private async cleanupUnlocked(parentRoot: string, workspace: string): Promise<void> {
-    const canonical = await this.assertManagedWorkspace(workspace);
     parentRoot = await this.canonicalRoot(parentRoot);
+    const canonical = await this.assertManagedWorkspace(workspace, parentRoot);
     await this.assertSameRepository(canonical, parentRoot);
     const registered = parseGitWorktrees(await this.run(parentRoot, ['worktree', 'list', '--porcelain', '-z']), parentRoot);
     if (!registered.some((item) => path.normalize(item.path) === canonical && !item.bare)) throw new Error('Workspace is not registered with its parent repository.');

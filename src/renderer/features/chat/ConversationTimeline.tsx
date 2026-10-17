@@ -604,7 +604,8 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
         atBottomThreshold={BOTTOM_THRESHOLD_PX}
         initialTopMostItemIndex={hasHistoricalTimeline && visibleOrder.length > 0 ? { index: 'LAST', align: 'end', behavior: 'auto' } : undefined}
         followOutput={false}
-        increaseViewportBy={{ top: 300, bottom: 500 }}
+        increaseViewportBy={{ top: 1200, bottom: 1200 }}
+        defaultItemHeight={120}
       />
       <div
         ref={scrollbarTrackRef}

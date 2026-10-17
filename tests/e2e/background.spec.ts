@@ -34,6 +34,9 @@ test('local image backgrounds are really dithered, palette-independent, persiste
     await expect(settings.getByRole('button', { name: 'Choose image', exact: true })).toBeEnabled();
     await settings.getByLabel('Background image file').setInputFiles({ name: 'test-lightmap.png', mimeType: 'image/png', buffer: Buffer.from(source, 'base64') });
     await expect(settings.getByText('test-lightmap.png', { exact: true })).toBeVisible();
+    await settings.getByRole('combobox', { name: 'Background effect' }).click();
+    await page.getByRole('option', { name: /Mono dither/u }).click();
+    await expect(page.locator('.workspace-backdrop[data-mode="mono"]')).toBeVisible();
     await expect(page.locator('.workspace-backdrop')).toHaveCSS('opacity', '0.1');
     await expect(page.locator('.workspace-backdrop')).toHaveCSS('pointer-events', 'none');
     const cachedMask = await page.locator('.workspace-backdrop').evaluate((element) => (element as HTMLElement).style.maskImage);

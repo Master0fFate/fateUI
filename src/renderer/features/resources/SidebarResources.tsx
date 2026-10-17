@@ -86,7 +86,6 @@ export function SidebarResources({ onOpenProject, projectSelectionBusy }: Sideba
         <ResourceSearchResults query={query} search={search} />
       ) : (
         <>
-          <div className="sidebar-section-heading"><span>Resource types</span><em>{resourceTypes.length}</em></div>
           <div className="resource-type-list">
             {resourceTypes.map((resource) => {
               const Icon = resource.icon;
@@ -108,7 +107,7 @@ export function SidebarResources({ onOpenProject, projectSelectionBusy }: Sideba
                   onClick={() => void openResource(item)}
                 >
                   <span className="resource-type-icon"><Icon size={15} aria-hidden="true" /></span>
-                  <span className="resource-type-copy"><strong>{resource.label}</strong><small>{resource.detail}</small></span>
+                  <span className="resource-type-copy"><strong>{resource.label}</strong></span>
                   <em data-tone={resource.tone ?? 'muted'}>{resource.status}</em>
                   <ChevronRight size={13} aria-hidden="true" />
                 </button>

@@ -97,6 +97,7 @@ describe('narrow inspector CSS contract (not browser geometry)', () => {
     expect(declarations(narrow, '.inspector-secondary-trigger').width).toBe('100%');
     expect(declarations(narrow, '.inspector-secondary-tabs').gap).toBe('8px');
     expect(declarations(narrow, '.inspector-secondary-label').display).toBe('none');
+    expect(declarations(narrow, '.inspector-secondary-trigger > svg').display).toBe('block');
   });
 
   it('reveals only the Dreamcore inspector short counterpart at the label-hiding breakpoint', () => {

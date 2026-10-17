@@ -1,7 +1,10 @@
+import { Plus, Trash2 } from 'lucide-react';
 import { getDesktopApi } from '../../platform/api';
 import { useEffect, useState } from 'react';
 import type { McpServerDefinition, PiMigrationReport } from '../../../shared/contracts/ipc';
+import { SelectControl } from '../../components/SelectControl';
 import { ipcErrorMessage } from '../../lib/ipcError';
+import { useUiStore } from '../../stores/uiStore';
 
 type Draft = { name: string; enabled: boolean; transport: 'stdio' | 'http'; command: string; args: string; url: string };
 const draftFor = (server: McpServerDefinition): Draft => ({
@@ -10,8 +13,21 @@ const draftFor = (server: McpServerDefinition): Draft => ({
   args: server.transport === 'stdio' ? JSON.stringify(server.args) : '[]',
   url: server.transport === 'http' ? server.url : '',
 });
+const TRANSPORT_OPTIONS = [{ value: 'stdio', label: 'Local command' }, { value: 'http', label: 'HTTPS endpoint' }];
+const BRIDGE_WARNING = /^(.+?) needs its Pi MCP bridge or manual setup; /u;
+/** Collapse one-per-server bridge notices into one line so a large Pi config cannot flood the panel. */
+function groupWarnings(warnings: readonly string[]): { bridgeOnly: string[]; other: string[] } {
+  const bridgeOnly: string[] = [];
+  const other: string[] = [];
+  for (const warning of warnings) {
+    const match = BRIDGE_WARNING.exec(warning);
+    if (match?.[1]) bridgeOnly.push(match[1]); else other.push(warning);
+  }
+  return { bridgeOnly, other };
+}
 
 export function McpSettings() {
+  const compact = useUiStore((state) => state.compactMode);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [message, setMessage] = useState('Loading MCP servers…');
   const [saving, setSaving] = useState(false);
@@ -71,37 +87,71 @@ export function McpSettings() {
     } catch (error) { setMigrationMessage(`${ipcErrorMessage(error, 'Pi migration stopped.')} Reopen this panel to check for any partial changes before retrying.`); }
     finally { setMigrating(false); }
   };
+  const importable = migration ? migration.providerEntriesToImport > 0 || (migration.mcpServersToImport > 0 && !migration.bridgeConfigured) : false;
+  const bridgeServers = migration?.bridgeConfigured ? migration.piMcpServers : [];
+  const warnings = groupWarnings(migration?.warnings ?? []);
+  const showBridgeNote = warnings.bridgeOnly.length > 0 && bridgeServers.length === 0;
+  const warningCount = warnings.other.length + (showBridgeNote ? 1 : 0);
+  const addServer = () => { setDirty(true); setDrafts((items) => [...items, { name: '', enabled: false, transport: 'stdio', command: '', args: '[]', url: '' }]); };
   return (
     <div className="settings-panel" role="tabpanel" id="settings-panel-mcp" aria-labelledby="settings-tab-mcp">
-      <div className="settings-title"><div><h3>MCP servers</h3><p>Connect tools to this device. Only Full access sessions can use them.</p></div></div>
-      <div className="settings-group">
-        <h4>Switch from Pi Terminal</h4>
-        {migration && <>
-          <p>{migration.piProfileFound ? 'Pi profile found. Settings, sessions, skills, and global extensions use the same Pi directory; no copy is needed.' : 'No Pi profile found.'} {migration.bridgeConfigured ? 'A Pi MCP bridge is configured. Fate will not make duplicate servers; test the bridge before removing Pi CLI.' : `${migration.mcpServersToImport} compatible global Pi MCP servers can be imported.`} {migration.providerEntriesToImport} provider entries can be imported without replacing Fate values.</p>
-          {migration.providerConflicts > 0 && <p>{migration.providerConflicts} provider values differ; Fate keeps its existing values.</p>}
-          {migration.warnings.map((warning, index) => <p key={index}>{warning}</p>)}
-          <button type="button" className="settings-inline-action" disabled={migrating || dirty || (!migration.providerEntriesToImport && (!migration.mcpServersToImport || migration.bridgeConfigured))} onClick={() => void importPi()}>Import missing Pi providers and MCP servers</button>
-          {dirty && <p>Save or discard your MCP edits before import.</p>}
-        </>}
-        {migrationMessage && <p role="status">{migrationMessage}</p>}
-        <p>Local servers run commands with your user account. Remote servers receive tool inputs. Only add servers you trust. Do not put secrets in URLs or arguments. Global Pi MCP bridge extensions still use their own settings; no copy is needed. Project files cannot add servers to Fate's bridge. A separate Pi extension may use project config. OAuth is not supported yet.</p>
-        {drafts.map((draft, index) => (
-          <div className="settings-group" key={index}>
+      <div className="settings-title">
+        <div><h3>MCP servers</h3><p>Full access sessions only. Add servers you trust; keep secrets out of URLs and arguments.</p></div>
+        <button type="button" className="settings-providers-add" onClick={addServer}><Plus size={13} aria-hidden="true" /> Add server</button>
+      </div>
+      <details className="workspace-preference-details"><summary>How it works</summary><p>Local servers run commands as you; remote servers receive tool inputs. Global Pi MCP bridge extensions keep their own settings; no copy is needed. Project files cannot add servers to Fate's bridge, but a separate Pi extension may read project config. OAuth is not supported yet.</p></details>
+      {drafts.length === 0 && message === 'No servers configured.' && <div className="settings-empty-card"><strong>{bridgeServers.length ? 'No Fate servers.' : 'No servers configured.'}</strong><span>{bridgeServers.length ? 'Your Pi bridge servers are below. Add a server here only if it is not in Pi.' : 'Add a local command or an HTTPS endpoint.'}</span></div>}
+      {bridgeServers.length > 0 && <section className="settings-card" aria-label="Pi MCP bridge servers">
+        <div className="settings-toggle settings-card-head"><div><strong>Pi MCP bridge</strong><small>{bridgeServers.length} {bridgeServers.length === 1 ? 'server' : 'servers'} · read-only · edit in Pi's mcp.json</small></div></div>
+        <ul className="settings-bridge-list">
+          {bridgeServers.map((server) => <li key={server.name} data-off={server.enabled ? undefined : ''}>
+            <strong>{server.name}</strong><code>{server.target}</code>{!server.enabled && <span>off</span>}
+          </li>)}
+        </ul>
+      </section>}
+      {drafts.map((draft, index) => (
+        <section className="settings-card" key={index} aria-label={`MCP server ${index + 1}`}>
+          <label className="settings-toggle settings-card-head">
+            <div><strong>{draft.name || `Server ${index + 1}`}</strong><small>{draft.transport === 'http' ? draft.url || 'HTTPS endpoint' : draft.command || 'Local command'}</small></div>
+            <input type="checkbox" aria-label={`Enable MCP server ${index + 1}`} checked={draft.enabled} onChange={(event) => update(index, { enabled: event.target.checked })} />
+            <span aria-hidden="true" />
+          </label>
+          <div className="settings-card-grid">
             <label className="settings-input-row"><span>Server name</span><input aria-label={`MCP server ${index + 1} name`} value={draft.name} onChange={(event) => update(index, { name: event.target.value })} placeholder="docs" /></label>
-            <label className="settings-input-row"><span>Enabled</span><input aria-label={`Enable MCP server ${index + 1}`} type="checkbox" checked={draft.enabled} onChange={(event) => update(index, { enabled: event.target.checked })} /></label>
-            <label className="settings-input-row"><span>Connection</span><select aria-label={`MCP server ${index + 1} connection`} value={draft.transport} onChange={(event) => update(index, { transport: event.target.value as Draft['transport'] })}><option value="stdio">Local command</option><option value="http">HTTPS endpoint</option></select></label>
+            <div className="settings-input-row"><span>Connection</span><SelectControl compact={compact} label={`MCP server ${index + 1} connection`} value={draft.transport} options={TRANSPORT_OPTIONS} onValueChange={(transport) => update(index, { transport: transport as Draft['transport'] })} /></div>
             {draft.transport === 'stdio' ? <>
               <label className="settings-input-row"><span>Command</span><input aria-label={`MCP server ${index + 1} command`} value={draft.command} onChange={(event) => update(index, { command: event.target.value })} placeholder="npx" /></label>
               <label className="settings-input-row"><span>Arguments (JSON array)</span><input aria-label={`MCP server ${index + 1} arguments`} value={draft.args} onChange={(event) => update(index, { args: event.target.value })} placeholder={'["-y", "server-package@1.0.0"]'} /></label>
-            </> : <label className="settings-input-row"><span>URL</span><input aria-label={`MCP server ${index + 1} URL`} value={draft.url} onChange={(event) => update(index, { url: event.target.value })} placeholder="https://example.com/mcp" /></label>}
-            {draft.enabled && savedNames.includes(draft.name) && <button type="button" className="settings-inline-action" onClick={() => void probe(draft.name)}>Test saved server</button>}
-            <button type="button" className="settings-inline-action" onClick={() => { setDirty(true); setDrafts((items) => items.filter((_, position) => position !== index)); }}>Remove server</button>
+            </> : <label className="settings-input-row settings-card-wide"><span>URL</span><input aria-label={`MCP server ${index + 1} URL`} value={draft.url} onChange={(event) => update(index, { url: event.target.value })} placeholder="https://example.com/mcp" /></label>}
           </div>
-        ))}
-        <button type="button" className="settings-inline-action" onClick={() => { setDirty(true); setDrafts((items) => [...items, { name: '', enabled: false, transport: 'stdio', command: '', args: '[]', url: '' }]); }}>Add server</button>
-        <button type="button" className="settings-inline-action" disabled={saving} onClick={() => void save()}>Save MCP servers</button>
-        {message && <p role="status">{message}</p>}
-      </div>
+          <div className="settings-card-actions">
+            {draft.enabled && savedNames.includes(draft.name) && <button type="button" className="settings-inline-action" onClick={() => void probe(draft.name)}>Test saved server</button>}
+            <button type="button" className="settings-providers-add" onClick={() => { setDirty(true); setDrafts((items) => items.filter((_, position) => position !== index)); }}><Trash2 size={12} aria-hidden="true" /> Remove</button>
+          </div>
+        </section>
+      ))}
+      {(dirty || (message && message !== 'No servers configured.')) && <div className="settings-card-actions settings-card-actions--panel">
+        {dirty && <button type="button" className="settings-inline-action" disabled={saving} onClick={() => void save()}>Save MCP servers</button>}
+        {message && message !== 'No servers configured.' && <span className="settings-card-status" role="status">{message}</span>}
+      </div>}
+      {(migration || migrationMessage) && <section className="settings-card settings-import-card" aria-label="Import from Pi">
+        <div className="settings-toggle settings-card-head">
+          <div><strong>Import from Pi</strong><small>{migration?.piProfileFound ? 'Settings, sessions, skills and extensions are already shared.' : 'No Pi profile found.'}</small></div>
+          {importable && <button type="button" className="settings-inline-action" disabled={migrating || dirty} title={dirty ? 'Save or discard your MCP edits before import.' : undefined} aria-label="Import missing Pi providers and MCP servers" onClick={() => void importPi()}>{migrating ? 'Importing…' : 'Import'}</button>}
+        </div>
+        {migration?.piProfileFound && <ul className="settings-import-facts">
+          <li>{migration.bridgeConfigured ? 'Pi MCP bridge active' : `${migration.mcpServersToImport} MCP servers importable`}</li>
+          <li>{migration.providerEntriesToImport} provider entries importable</li>
+          {migration.providerConflicts > 0 && <li data-tone="warn" title="Fate keeps its own values.">{migration.providerConflicts} provider values differ</li>}
+        </ul>}
+        {warningCount > 0 && <details className="workspace-preference-details"><summary>{warningCount} {warningCount === 1 ? 'note' : 'notes'}</summary>
+          <ul className="settings-import-warnings">
+            {showBridgeNote && <li>Kept on the Pi MCP bridge (options Fate cannot copy): <code>{warnings.bridgeOnly.join(', ')}</code></li>}
+            {warnings.other.map((warning, index) => <li key={index}>{warning}</li>)}
+          </ul>
+        </details>}
+        {migrationMessage && <p className="settings-card-status settings-card-actions" role="status">{migrationMessage}</p>}
+      </section>}
     </div>
   );
 }

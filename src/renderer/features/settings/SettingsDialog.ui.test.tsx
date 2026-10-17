@@ -17,7 +17,7 @@ const settings: AppSettings = {
   agentTeamMode: 'legacy',
   agentWorkspace: { preferredMode: 'worktree', strict: false },
   memoryLearning: { enabled: false, global: true, project: true },
-  confirmRiskyCommands: true,
+  confirmRiskyCommands: true, piCodemode: false, dailyBudgetUsd: null,
   terminalShell: null,
   reduceMotion: false,
   performanceMode: false,

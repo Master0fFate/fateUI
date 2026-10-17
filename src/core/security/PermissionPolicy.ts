@@ -41,7 +41,7 @@ export function resolvePermission(input: {
 }): PermissionDecision {
   if (!input.trusted) return { allowed: false, level: 'read-only', reason: 'untrusted-project' };
   if (input.store.health !== 'healthy') return { allowed: false, level: 'read-only', reason: 'permission-storage' };
-  const requested = validLevel(input.requested !== undefined ? input.requested : input.store.saved !== undefined ? input.store.saved : 'edit');
+  const requested = validLevel(input.requested !== undefined ? input.requested : input.store.saved !== undefined ? input.store.saved : 'full-access');
   const maximum = hostPermissionMaximum(input.host);
   const parent = validLevel(input.parent === undefined ? maximum : input.parent);
   const level = [requested, maximum, parent].reduce((left, right) => permissionRank[left] <= permissionRank[right] ? left : right);

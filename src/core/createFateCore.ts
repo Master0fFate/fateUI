@@ -26,6 +26,7 @@ import { ModelsDevService } from '../main/pi/modelsdev/ModelsDevService';
 import { ModelsDevStore } from '../main/pi/modelsdev/ModelsDevStore';
 import { MutationAttestationLedger } from '../main/pi/provenance/MutationAttestationLedger';
 import { createMutationRecorder } from '../main/pi/provenance/mutationRecorder';
+import { CheckpointStore } from '../main/pi/provenance/CheckpointStore';
 import type { TaskPersistence } from '../main/pi/tasks/TaskRepository';
 import { PiThemeService } from '../main/settings/PiThemeService';
 import { SettingsService } from '../main/settings/SettingsService';
@@ -249,6 +250,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
     const sessionPermissions = options.persistence?.permissions ?? new SessionPermissionStore(logs, paths.dataRoot);
     const attestations = options.persistence?.attestations ?? new MutationAttestationLedger(logs, paths.dataRoot, { instanceSlot: slot });
     if (!options.persistence?.attestations) owned.push(async () => { attestations.dispose(); await attestations.flush(); });
+    const checkpoints = new CheckpointStore(paths.dataRoot);
     const projects = new ProjectTrustService(paths.dataRoot);
     let savedAgents: AgentsService | null = null;
     let runtimeOwner: MultiProjectPiRuntime | null = null;
@@ -276,7 +278,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
       onReport: () => logs.write('warn', 'durable', 'Native workflow reported an execution diagnostic; inspect its retained workflow state.'),
     }) : undefined;
     const dependencies: MultiProjectPiRuntimeDeps = {
-      adapter: options.adapter ?? createPiSdkAdapter(paths),
+      adapter: options.adapter ?? createPiSdkAdapter(paths, { codemode: () => settings.get().piCodemode, dailyBudgetUsd: () => settings.get().dailyBudgetUsd }),
       ...(nativeWorkflowSchedulerFactory ? { nativeWorkflowSchedulerFactory } : {}),
       requireFreshExecutionIntent: explicitWorkOnly,
       paths,
@@ -299,7 +301,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
       },
       ...(options.providerAuthUrlPresenter ? { providerAuthUrlPresenter: options.providerAuthUrlPresenter } : {}),
       ...(options.attention ? { notifySessionSettled: () => options.attention!.sessionSettled() } : {}),
-      recordAttestation: createMutationRecorder(attestations, logs),
+      recordAttestation: createMutationRecorder(attestations, logs, checkpoints),
       defaults: async () => {
         const loaded = await settings.load();
         return {
@@ -394,7 +396,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
       lifecycle.shutdownCore();
       return lifecycle.settled()!;
     };
-    return { paths, statePersistence, executionRecoveryMode: explicitWorkOnly ? 'explicit-work-only' : 'ordinary', recovery, recovered, logs, settings, projects, learning, sessionPermissions, attestations, runtime, events,
+    return { paths, statePersistence, executionRecoveryMode: explicitWorkOnly ? 'explicit-work-only' : 'ordinary', recovery, recovered, logs, settings, projects, learning, sessionPermissions, attestations, checkpoints, runtime, events,
       workspaces, savedAgents, lifecycle, createClient: (resources?: CoreClientResources) => lifecycle.createClient(resources),
       disposeClient: (client) => lifecycle.disposeClient(client), shutdownCore: () => lifecycle.shutdownCore(), dispose };
   } catch (error) {

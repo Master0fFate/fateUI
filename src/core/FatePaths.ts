@@ -60,7 +60,7 @@ export function createDesktopFatePaths(options: DesktopFatePathsOptions = {}): F
     // Reserved, not created or used by existing desktop attachment handling.
     attachmentRoot: path.join(options.temporaryDirectory ?? os.tmpdir(), 'fate-ui-attachments'),
     // Separate from dataRoot: acquiring a future lock must not suppress provider first-run import.
-    lockRoot: path.join(home, '.pi', 'fate-locks'),
+    lockRoot: process.env.FATE_LOCK_DIR ? path.resolve(process.env.FATE_LOCK_DIR) : path.join(home, '.pi', 'fate-locks'),
     profileId: options.profileId ?? 'desktop',
     profileKind: 'desktop',
   });

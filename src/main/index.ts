@@ -21,6 +21,7 @@ import { FilesystemService } from './files/FilesystemService';
 import { DesktopFileActions } from './files/DesktopFileActions';
 import { GitService } from './git/GitService';
 import { registerIpc } from './ipc/registerIpc';
+import { CheckpointRestoreService } from './pi/provenance/CheckpointRestore';
 import { parseLaunchProjectPath, parseForwardedProjectPath, hasNewInstanceFlag, parseConnectionProfile } from './launchProject';
 import { acquireInstanceProfile, isMultiInstanceProbe } from './instanceProfile';
 import { AppLogService } from './logging/AppLogService';
@@ -476,7 +477,7 @@ app.whenReady().then(async () => {
     }
   }
   await recovery.load();
-  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), terminal, logs, music, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, newWindow: () => windows.createWindow(), rendererPolicy });
+  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), terminal, logs, music, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy });
   // Refresh every models.dev-managed provider's model list once per Fate GUI
   // start. Runs beside startup, never blocking it; offline keeps the cache.
   // A saved remote target never starts local scheduled work or an automatic provider refresh.
@@ -507,6 +508,7 @@ app.whenReady().then(async () => {
   try {
     logs.write('error', 'app', failure.message);
     console.error(`${failure.title}: ${failure.message}`);
+    console.error(error);
     // Profile ownership can fail before any renderer/window exists. Never
     // expose SDK error text or owner diagnostics through this native notice.
     dialog.showErrorBox(failure.title, failure.message);
