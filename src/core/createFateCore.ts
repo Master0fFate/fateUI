@@ -371,7 +371,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
         assertAdmission: (root, sessionId) => recovery.assertAdmission(root, sessionId),
         ...(options.savedAgents.notify ? { notify: options.savedAgents.notify } : {}),
       }, new AgentRepository(path.join(paths.dataRoot, 'agents', 'v1')), options.savedAgents.legacy);
-      owned.push(() => agents.dispose());
+      owned.push(runtime.onFocusChanged(() => agents.wake()), () => agents.dispose());
       if (options.savedAgents.scheduleRoutines && recovered.admissionsAllowed && !explicitWorkOnly) agents.start();
       savedAgents = agents;
     }

@@ -52,7 +52,7 @@ Learning is attached only through the root user-turn adapter, not installed as c
 
 The advisory block is ephemeral provider context. It does not alter persisted user/assistant messages or signed reasoning. Retries and tool-loop requests reuse one prepared block and dispatch identity. Output-length continuation does not create another manifest. Final settlement, replacement, fork, and new-session paths do not replay old prompts to inject learning.
 
-Recent use records dispatch/project/session identity, exact revision IDs and digests, selection reasons, skips, byte count, token estimate, and delivery state. **Handed to runtime** does not prove provider receipt. **Prepared** after interruption means delivery may be uncertain. No crash recovery automatically resends a turn. Deleted revisions are labelled as deleted in retained metadata; raw evidence and lesson titles are not copied into manifests.
+Recent use records dispatch/project/session identity, exact revision IDs and digests, selection reasons, skips, byte count, token estimate, and delivery state. A turn that attaches and skips nothing leaves no record and does not write either store. **Handed to runtime** does not prove provider receipt. **Prepared** after interruption means delivery may be uncertain. No crash recovery automatically resends a turn. Deleted revisions are labelled as deleted in retained metadata; raw evidence and lesson titles are not copied into manifests.
 
 ## Storage, limits, and recovery
 

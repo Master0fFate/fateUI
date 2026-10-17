@@ -162,7 +162,7 @@ export class TaskService {
         const status = parsed.status ?? task.status;
         const required = parsed.required ?? task.required;
         // A required task cannot be self-verified. Only an independent
-        // verification outcome (markCriterionVerified) sets verified=true.
+        // verification outcome sets verified=true.
         const verified = !required && status === 'done' ? task.verified : status === 'done' ? task.verified && !required : false;
         return {
           ...task,
@@ -294,23 +294,6 @@ export class TaskService {
       };
       await this.commit(next, expected);
     }).then(() => this.requireList(projectPath, sessionId));
-  }
-
-  /** Mark the task mirroring a criterion as independently verified (or not). */
-  markCriterionVerified(projectPath: string, sessionId: string, goalId: string, criterionId: string, verified: boolean): Promise<void> {
-    return this.serialize(sessionId, async () => {
-      const expected = this.states.get(listKey(projectPath, sessionId))?.revision ?? null;
-      const current = structuredClone(this.requireList(projectPath, sessionId));
-      const now = Date.now();
-      let changed = false;
-      const tasks = current.tasks.map((task) => {
-        if (task.source !== 'goalmax' || task.goalId !== goalId || task.goalCriterionId !== criterionId) return task;
-        changed = true;
-        return { ...task, verified, verifiedAt: verified ? now : null, updatedAt: now };
-      });
-      if (!changed) return;
-      await this.commit({ ...current, revision: current.revision + 1, tasks, updatedAt: now }, expected);
-    });
   }
 
   /** Remove GoalMax-sourced tasks and clear the bound goal (used on goal clear). */

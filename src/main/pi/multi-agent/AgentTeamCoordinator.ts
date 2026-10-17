@@ -5,7 +5,7 @@ import { OwnerLock } from '../../../core/ownership/OwnerLock';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentSession, AgentSessionEvent, ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import type { ModelInfo, PermissionLevel, ThinkingLevel } from '../../../shared/contracts/ipc';
+import type { ModelInfo, PermissionLevel, SubagentUsage, ThinkingLevel } from '../../../shared/contracts/ipc';
 import { AGENT_TEAM_MAX_WAIT_MS, defaultAgentWorkspacePolicy, type AgentTeam, type AgentTeamControlInput, type AgentTeamEnvelope, type AgentTeamEnvelopeDelivery, type AgentTeamNode, type AgentTeamTask, type AgentWorkspacePolicy, type AgentWorkspaceRequest } from '../../../shared/contracts/multiAgent';
 import type { ToolActor } from '../../../shared/contracts/provenance';
 import { addUsage, createSdkChildSession, installChildExecutionAdmission, emptyUsage, finalAssistant, usageFromMessages, type SubagentChildSessionFactory } from '../SubagentSessionFactory';
@@ -39,6 +39,8 @@ const DEFAULT_CHILD_RETENTION_MS = 5 * 60_000;
 const MIN_IDLE_RELEASE_RETRY_MS = 1_000;
 const MAX_IDLE_RELEASE_RETRY_MS = 60_000;
 const MAX_TASK_SETTLEMENT_WAIT_MS = AGENT_TEAM_MAX_WAIT_MS + 60_000;
+const OBSERVATION_EMIT_MS = 50;
+const OBSERVATION_PERSIST_MS = 1_000;
 const permissionRank: Record<PermissionLevel, number> = { 'read-only': 0, edit: 1, 'full-access': 2 };
 const activeNodeStatuses = new Set<AgentTeamNode['status']>(['creating', 'active']);
 const settledTaskStatuses = new Set<AgentTeamTask['status']>(['completed', 'interrupted', 'cancelled', 'failed']);
@@ -75,6 +77,7 @@ export class AgentTeamCoordinator {
   private readonly mutationQueues = new Map<string, Promise<void>>();
   private readonly listeners = new Map<string, Set<TeamListener>>();
   private readonly idleReleaseTimers = new Map<string, CancelableTimer>();
+  private readonly pendingObservations = new Map<string, { emit: ReturnType<typeof setTimeout> | null; persist: ReturnType<typeof setTimeout> | null; type: string }>();
   private readonly dataRoot: string;
   private readonly storageRoots: readonly string[];
 
@@ -116,6 +119,10 @@ export class AgentTeamCoordinator {
 
   getTeams(rootSessionId: string): AgentTeam[] {
     return this.runtimesForRoot(rootSessionId).map(projectTeam);
+  }
+
+  teamUsage(rootSessionId: string): SubagentUsage[] {
+    return this.runtimesForRoot(rootSessionId).map((runtime) => ({ ...runtime.state.usage }));
   }
 
   selectedTeamId(rootSessionId: string): string | null {
@@ -1232,6 +1239,7 @@ export class AgentTeamCoordinator {
       try { nodeRuntime.session?.dispose(); } catch { /* Best effort. */ }
     }
     runtime.nodeRuntime.clear();
+    this.clearPendingObservation(runtime.state.id);
     this.teamsById.delete(runtime.state.id);
     this.schedulers.delete(runtime.state.id);
     this.mutationQueues.delete(runtime.state.id);
@@ -1778,7 +1786,7 @@ export class AgentTeamCoordinator {
           toolName: event.toolName,
           ...(provenance ? { provenance } : {}),
         }, now);
-        this.changed(runtime, `${node.path} recorded ${event.toolName} start.`);
+        this.observed(runtime, `${node.path} recorded ${event.toolName} start.`);
         return;
       }
       if (event.type === 'tool_execution_end') {
@@ -1792,7 +1800,7 @@ export class AgentTeamCoordinator {
           toolName: event.toolName,
           ...(provenance ? { provenance } : {}),
         }, now);
-        this.changed(runtime, `${node.path} recorded ${event.toolName} completion.`);
+        this.observed(runtime, `${node.path} recorded ${event.toolName} completion.`);
         return;
       }
       if (event.type === 'message_end') {
@@ -1806,7 +1814,7 @@ export class AgentTeamCoordinator {
           nodeId: node.id,
           ...(currentTaskId ? { taskId: currentTaskId } : {}),
         }, now);
-        this.changed(runtime, `${node.path} recorded a completed message.`);
+        this.observed(runtime, `${node.path} recorded a completed message.`);
         return;
       }
       if (event.type === 'message_update' && event.assistantMessageEvent.type === 'error') {
@@ -1814,7 +1822,7 @@ export class AgentTeamCoordinator {
           nodeId: node.id,
           ...(currentTaskId ? { taskId: currentTaskId } : {}),
         }, now);
-        this.changed(runtime, `${node.path} recorded a model error.`);
+        this.observed(runtime, `${node.path} recorded a model error.`);
       }
     });
   }
@@ -2474,16 +2482,55 @@ export class AgentTeamCoordinator {
     if (this.teamsById.get(runtime.state.id) !== runtime) return;
     runtime.state.updatedAt = Date.now();
     this.syncScheduler(runtime);
-    this.persist(runtime, persistenceType);
-    this.host.emit(runtime.state.rootSessionId, projectTeam(runtime));
+    this.clearPendingObservation(runtime.state.id);
+    const team = projectTeam(runtime);
+    this.host.persist(runtime.state.rootSessionId, ledgerSnapshot(runtime, persistenceType, team));
+    this.host.emit(runtime.state.rootSessionId, team);
+    this.notifyPath(runtime, summary);
+  }
+
+  private observed(runtime: AgentTeamRuntime, summary: string): void {
+    if (this.teamsById.get(runtime.state.id) !== runtime) return;
+    runtime.state.updatedAt = Date.now();
+    const teamId = runtime.state.id;
+    const pending = this.pendingObservations.get(teamId) ?? { emit: null, persist: null, type: summary };
+    pending.type = summary;
+    pending.emit ??= setTimeout(() => {
+      pending.emit = null;
+      if (this.teamsById.get(teamId) === runtime) this.host.emit(runtime.state.rootSessionId, projectTeam(runtime));
+    }, OBSERVATION_EMIT_MS);
+    pending.persist ??= setTimeout(() => {
+      pending.persist = null;
+      this.persist(runtime, pending.type);
+    }, OBSERVATION_PERSIST_MS);
+    pending.emit.unref?.();
+    pending.persist.unref?.();
+    this.pendingObservations.set(teamId, pending);
+    this.notifyPath(runtime, summary);
+  }
+
+  private clearPendingObservation(teamId: string): void {
+    const pending = this.pendingObservations.get(teamId);
+    if (!pending) return;
+    if (pending.emit) clearTimeout(pending.emit);
+    if (pending.persist) clearTimeout(pending.persist);
+    this.pendingObservations.delete(teamId);
+  }
+
+  private notifyPath(runtime: AgentTeamRuntime, summary: string): void {
     const pathMatch = summary.match(/\/root(?:\/[a-z0-9-]+)*/u)?.[0];
     if (pathMatch) this.notifyListeners(runtime, { path: pathMatch, reason: summary });
   }
 
   private persist(runtime: AgentTeamRuntime, type: string): void {
     if (this.teamsById.get(runtime.state.id) !== runtime) return;
-    const event = ledgerSnapshot(runtime, type);
-    this.host.persist(runtime.state.rootSessionId, event);
+    const pending = this.pendingObservations.get(runtime.state.id);
+    if (pending?.persist) {
+      clearTimeout(pending.persist);
+      pending.persist = null;
+    }
+    if (pending && !pending.emit) this.pendingObservations.delete(runtime.state.id);
+    this.host.persist(runtime.state.rootSessionId, ledgerSnapshot(runtime, type));
   }
 
   private nodeReceipt(node: AgentTeamNode) {

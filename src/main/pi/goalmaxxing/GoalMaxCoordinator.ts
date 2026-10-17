@@ -180,10 +180,6 @@ export class GoalMaxCoordinator {
     return createGoalMaxTools(this);
   }
 
-  isCompletionGateActive(sessionId: string): boolean {
-    return this.completionFences.has(sessionId);
-  }
-
   async bind(projectPath: string, sessionId: string): Promise<GoalMaxState | null> {
     const key = goalKey(projectPath, sessionId);
     // Settlement failures retry from disk on rebind. A failed Stop control is
@@ -1132,6 +1128,11 @@ export class GoalMaxCoordinator {
       this.schedule(goal, 'compaction-complete');
     }
     void raw;
+  }
+
+  observesChildren(sessionId: string): boolean {
+    const goal = this.stateForSession(sessionId);
+    return Boolean(goal && !isGoalMaxTerminal(goal.status));
   }
 
   syncChildren(sessionId: string, children: GoalMaxRuntimeChild[]): void {

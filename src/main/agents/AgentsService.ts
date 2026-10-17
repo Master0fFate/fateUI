@@ -39,14 +39,19 @@ interface ActiveRun {
   completion: Promise<void> | null;
 }
 const failure = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 8000);
+const ROUTINE_RETRY_MS = 60_000;
+const ROUTINE_MAX_SLEEP_MS = 24 * 60 * 60_000;
+const unresolvedRunStatuses = new Set(['queued', 'running', 'needs-attention']);
 
 export class AgentsService {
   private readonly active = new Map<string, ActiveRun>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly initialized = new Set<string>();
   private readonly opening = new Map<string, Promise<{ sessionId: string; appliedRevision: number }>>();
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private ticking = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private started = false;
+  private ticking: Promise<void> | null = null;
+  private nextWakeAt = Infinity;
   private stopping = false;
   private readonly monitorRunsCache = new Map<string, { loadedAt: number; value: MonitorRunsSource }>();
   private readonly monitorReads = new Map<string, { promise: Promise<MonitorRunsSource>; valid: { current: boolean } }>();
@@ -63,14 +68,28 @@ export class AgentsService {
     this.changed = (change) => { this.invalidateMonitor(change.projectPath); sink(change); };
   }
   start(): void {
-    if (this.timer) return;
-    this.timer = setInterval(() => { void this.tick().catch(() => undefined); }, 5000);
-    this.timer.unref?.();
+    if (this.started) return;
+    this.started = true;
+    this.arm(0);
+  }
+  wake(): void {
+    if (this.started) this.arm(0);
   }
   beginShutdown(): void {
     this.stopping = true;
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+  }
+  private arm(delay: number): void {
+    if (this.stopping) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.tick().catch(() => { this.nextWakeAt = Date.now() + ROUTINE_RETRY_MS; }).then(() => {
+        if (this.nextWakeAt !== Infinity) this.arm(this.nextWakeAt - Date.now());
+      });
+    }, Math.min(Math.max(0, delay), ROUTINE_MAX_SLEEP_MS));
+    this.timer.unref?.();
   }
   async dispose(): Promise<void> {
     this.beginShutdown();
@@ -176,6 +195,7 @@ export class AgentsService {
     const result = await this.repository.saveAgent(project, input);
     await this.cancelMatching((active) => active.run.agentId === result.id);
     this.changed({ projectPath: project.path });
+    this.wake();
     return result;
   }
   async saveTask(input: TaskTemplateSave): Promise<TaskTemplate> {
@@ -183,6 +203,7 @@ export class AgentsService {
     const result = await this.repository.saveTask(project, input);
     await this.cancelMatching((active) => active.run.taskTemplateId === result.id);
     this.changed({ projectPath: project.path });
+    this.wake();
     return result;
   }
   async saveRoutine(input: RoutineSave): Promise<RoutineDefinition> {
@@ -193,6 +214,7 @@ export class AgentsService {
     await this.serialize(project.path, () => this.ledger(project.path).configure(result.id, { anchor: Date.now() + result.intervalMinutes * 60_000, intervalMs: result.intervalMinutes * 60_000, timeZone: result.timeZone }, result.revision, digest));
     await this.cancelMatching((active) => active.run.routineId === result.id);
     this.changed({ projectPath: project.path });
+    this.wake();
     return result;
   }
   async remove(input: { kind: 'agent' | 'task' | 'routine'; id: string; expected: { revision: number; digest: string } }): Promise<void> {
@@ -207,6 +229,7 @@ export class AgentsService {
     await this.repository.remove(project, input.kind, input.id, input.expected);
     await this.cancelMatching((active) => input.kind === 'agent' ? active.run.agentId === input.id : input.kind === 'task' ? active.run.taskTemplateId === input.id : active.run.routineId === input.id);
     this.changed({ projectPath: project.path });
+    this.wake();
   }
   private async cancelMatching(predicate: (active: ActiveRun) => boolean): Promise<void> {
     await Promise.all([...this.active.values()].filter(predicate).map(async (active) => { active.cancelled = true; await active.session?.abort(); }));
@@ -273,36 +296,51 @@ export class AgentsService {
     return (await this.findRun(project, run.id)).run;
   }
 
-  async tick(now = Date.now()): Promise<void> {
-    if (this.ticking) return;
-    this.ticking = true;
-    try {
-      const project = this.project();
+  tick(now = Date.now()): Promise<void> {
+    this.ticking ??= this.scan(now).finally(() => { this.ticking = null; });
+    return this.ticking;
+  }
+
+  private async scan(now: number): Promise<void> {
+    this.nextWakeAt = Infinity;
+    const project = this.project();
+    this.host.assertAdmission?.(project.path);
+    await this.initialize(project);
+    const ledger = this.ledger(project.path);
+    const ids = await this.repository.ledgerJournal(project.path).ids(501);
+    for (const id of ids) {
+      await this.serialize(project.path, () => ledger.recover(id, now, false, this.processId));
+    }
+    const library = await this.repository.list(project);
+    if (library.diagnostics.length) {
+      this.nextWakeAt = Date.now() + ROUTINE_RETRY_MS;
+      return;
+    }
+    const scheduled = new Set<string>();
+    for (const routine of library.routines.filter((item) => item.enabled)) {
+      const agent = library.agents.find((item) => item.id === routine.agentId);
+      const task = library.tasks.find((item) => item.id === routine.taskTemplateId);
+      // A Routine may outlive a later Agent/TaskTemplate disable. Do not
+      // admit a new occurrence that can only fail at execution time.
+      if (!agent?.enabled || !task?.enabled) continue;
+      scheduled.add(routine.id);
       this.host.assertAdmission?.(project.path);
-      await this.initialize(project);
-      const ledger = this.ledger(project.path);
-      for (const id of await this.repository.ledgerJournal(project.path).ids(501)) {
-        await this.serialize(project.path, () => ledger.recover(id, now, false, this.processId));
-      }
-      const library = await this.repository.list(project);
-      if (library.diagnostics.length) return;
-      for (const routine of library.routines.filter((item) => item.enabled)) {
-        const agent = library.agents.find((item) => item.id === routine.agentId);
-        const task = library.tasks.find((item) => item.id === routine.taskTemplateId);
-        // A Routine may outlive a later Agent/TaskTemplate disable. Do not
-        // admit a new occurrence that can only fail at execution time.
-        if (!agent?.enabled || !task?.enabled) continue;
+      await this.serialize(project.path, () => this.ledger(project.path).configure(routine.id, { anchor: routine.createdAt + routine.intervalMinutes * 60_000, intervalMs: routine.intervalMinutes * 60_000, timeZone: routine.timeZone }, routine.revision, library.revisions[`routine:${routine.id}`]!.digest));
+      const admitted = await this.serialize(project.path, () => {
         this.host.assertAdmission?.(project.path);
-        await this.serialize(project.path, () => this.ledger(project.path).configure(routine.id, { anchor: routine.createdAt + routine.intervalMinutes * 60_000, intervalMs: routine.intervalMinutes * 60_000, timeZone: routine.timeZone }, routine.revision, library.revisions[`routine:${routine.id}`]!.digest));
-        const admitted = await this.serialize(project.path, () => {
-          this.host.assertAdmission?.(project.path);
-          return this.ledger(project.path).tick(routine.id, now, (id, scheduledFor, status) => this.runRecord(id, agent, task, routine, project.path, scheduledFor, status));
-        });
-        if (!admitted?.payload) continue;
-        if (admitted.status === 'queued') await this.launch(project, routine.id, admitted.payload, true);
-        else this.changed({ projectPath: project.path, runId: admitted.id, status: 'skipped', message: admitted.reason ?? 'Run skipped.' });
-      }
-    } finally { this.ticking = false; }
+        return this.ledger(project.path).tick(routine.id, now, (id, scheduledFor, status) => this.runRecord(id, agent, task, routine, project.path, scheduledFor, status));
+      });
+      if (!admitted?.payload) continue;
+      if (admitted.status === 'queued') await this.launch(project, routine.id, admitted.payload, true);
+      else this.changed({ projectPath: project.path, runId: admitted.id, status: 'skipped', message: admitted.reason ?? 'Run skipped.' });
+    }
+    let wake = Infinity;
+    for (const id of new Set([...ids, ...scheduled])) {
+      const { state } = await ledger.read(id);
+      if (scheduled.has(id)) wake = Math.min(wake, state.nextDue);
+      for (const run of state.runs) if (run.expiresAt !== null && run.expiresAt > now && unresolvedRunStatuses.has(run.status)) wake = Math.min(wake, run.expiresAt);
+    }
+    this.nextWakeAt = wake === Infinity ? Infinity : Math.max(wake, Date.now() + 1_000);
   }
 
   private launch(project: AgentProject, ledgerId: string, run: AgentRun, background: boolean): Promise<void> {

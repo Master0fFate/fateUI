@@ -157,6 +157,7 @@ export class MultiProjectPiRuntime {
   private readonly admissionGuards = new Map<string, () => boolean>();
   private readonly lifecycleHooks = new Map<string, { beforeDispose(service: PiRuntimeService): void; onEvicted(): void }>();
   private readonly checkoutOwners = new Map<string, OwnerLock>();
+  private readonly focusListeners = new Set<() => void>();
   private readonly servicePaths = new WeakMap<PiRuntimeService, string>();
   private readonly checkoutOwnership: CheckoutOwnership | null;
   private stopping = false;
@@ -244,6 +245,7 @@ export class MultiProjectPiRuntime {
             this.deps.browserIntegration?.setActiveRoot(null);
           }
           this.rewireSinks();
+          for (const listener of this.focusListeners) listener();
         },
         onEvicted: (projectPath) => {
           this.lifecycleHooks.get(projectPath)?.onEvicted();
@@ -471,6 +473,11 @@ export class MultiProjectPiRuntime {
   /** A drop-in `PiRuntimeService` that routes to the focused project (or boot service). */
   asRouter(): PiRuntimeService {
     return this.router;
+  }
+
+  onFocusChanged(listener: () => void): () => void {
+    this.focusListeners.add(listener);
+    return () => { this.focusListeners.delete(listener); };
   }
 
   /** Registry verifies that its runtime already holds this canonical checkout. */

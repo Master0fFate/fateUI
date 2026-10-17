@@ -140,7 +140,7 @@ export function hydrateTeamRuntime(value: unknown, fallbackProjectPath = 'unknow
   };
 }
 
-export function ledgerSnapshot(runtime: AgentTeamRuntime, type: string, timestamp = Date.now()): AgentTeamLedgerEvent {
+export function ledgerSnapshot(runtime: AgentTeamRuntime, type: string, team = projectTeam(runtime), timestamp = Date.now()): AgentTeamLedgerEvent {
   return {
     kind: 'fate-agent-team-event',
     version: 1,
@@ -148,7 +148,7 @@ export function ledgerSnapshot(runtime: AgentTeamRuntime, type: string, timestam
     sequence: runtime.sequence,
     timestamp,
     type,
-    payload: { team: projectTeam(runtime) },
+    payload: { team },
   };
 }
 

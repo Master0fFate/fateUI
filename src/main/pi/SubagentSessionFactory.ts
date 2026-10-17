@@ -293,37 +293,3 @@ export function finalAssistant(messages: readonly unknown[]): { text: string; st
   }
   return { text: '' };
 }
-
-export function abortError(): Error {
-  return Object.assign(new Error('Subagent operation cancelled.'), { name: 'AbortError' });
-}
-
-function disposeLateChild(session: AgentSession): void {
-  void session.abort().catch(() => undefined).then(() => session.dispose()).catch(() => undefined);
-}
-
-export function awaitChildCreation(creation: Promise<AgentSession>, signal: AbortSignal): Promise<AgentSession> {
-  if (signal.aborted) {
-    void creation.then(disposeLateChild, () => undefined);
-    return Promise.reject(abortError());
-  }
-  return new Promise((resolve, reject) => {
-    let cancelled = false;
-    const abort = () => {
-      cancelled = true;
-      reject(abortError());
-    };
-    signal.addEventListener('abort', abort, { once: true });
-    void creation.then(
-      (session) => {
-        signal.removeEventListener('abort', abort);
-        if (cancelled) disposeLateChild(session);
-        else resolve(session);
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', abort);
-        if (!cancelled) reject(error);
-      },
-    );
-  });
-}

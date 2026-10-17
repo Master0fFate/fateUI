@@ -11,6 +11,7 @@ import { selectLearning } from './LearningSelection';
 import { isCoreMemory, memoryScopeError, mergeProfileAdditions } from '../../shared/learningMemory';
 
 interface CaptureOwner { origin: LearningOrigin; capture: LearningCapture }
+const storeVersions = (snapshot: LearningSnapshot, companions: readonly LearningSnapshot[]) => [snapshot, ...companions].map((store) => `${store.epoch}:${store.revision}`).join('|');
 export class LearningService {
   private readonly captures = new Map<string, CaptureOwner>();
   private readonly requests = new Map<string, { controller: AbortController; binding: LearningBinding }>();
@@ -235,10 +236,18 @@ export class LearningService {
 
   async previewSelection(origin: LearningOrigin, input: PreviewSelectionInput) {
     this.assertBinding(origin, input.binding, true);
+    return (await this.selectStored(origin, input.text, input.pins, input.binding.scope, input.excluded)).selection;
+  }
+
+  private async selectStored(origin: LearningOrigin, text: string, pins: LearningTurn['pins'], pinScope: LearningTurn['binding']['scope'], excluded: LearningTurn['excluded']) {
     const snapshot = await this.repository.read(learningIdentity(origin.root, 'project'));
     const global = await this.repository.read(learningIdentity(origin.root, 'global')).catch(() => null);
     const companions = global ? [global] : [];
-    return (await selectLearning({ snapshot, companions, enabled: this.settings().enabled && origin.valid(), layers: this.layers(), root: origin.root, projectKey: origin.binding.projectKey, text: input.text, pins: input.pins, pinScope: input.binding.scope, excluded: input.excluded, branch: snapshot.revisions.some((item) => item.content.activation.branchRestriction) ? (await learningCodeState(origin.root)).branch : null })).selection;
+    return { ...await this.select(origin, snapshot, companions, text, pins, pinScope, excluded), stores: storeVersions(snapshot, companions) };
+  }
+
+  private async select(origin: LearningOrigin, snapshot: LearningSnapshot, companions: LearningSnapshot[], text: string, pins: LearningTurn['pins'], pinScope: LearningTurn['binding']['scope'], excluded: LearningTurn['excluded']) {
+    return selectLearning({ snapshot, companions, enabled: this.settings().enabled && origin.valid(), layers: this.layers(), root: origin.root, projectKey: origin.binding.projectKey, text, pins, pinScope, excluded, branch: snapshot.revisions.some((item) => item.content.activation.branchRestriction) ? (await learningCodeState(origin.root)).branch : null });
   }
 
   async prepareDispatch(origin: LearningOrigin, dispatchId: string, text: string, turn?: LearningTurn): Promise<{ block: string; manifest: LearningManifest } | null> {
@@ -248,11 +257,16 @@ export class LearningService {
     }
     if (!origin.valid() || !this.settings().enabled) { if (turn?.pins.length) learningError('Learning is off. Remove the explicit selection or re-enable it.'); return null; }
     try {
+      const pins = turn?.pins ?? [];
+      const pinScope = turn?.binding.scope ?? origin.binding.scope;
+      const excluded = turn?.excluded ?? [];
+      const stored = pins.length ? null : await this.selectStored(origin, text, pins, pinScope, excluded);
+      if (stored && !stored.selection.selected.length && !stored.selection.skipped.length) return null;
       let prepared: { block: string; manifest: LearningManifest } | null = null;
       let blocked = false;
       const identity = learningIdentity(origin.root, 'project');
       const snapshot = await this.repository.mutate(identity, null, async (state, companions) => {
-        const { selection, block } = await selectLearning({ snapshot: state, companions, enabled: this.settings().enabled && origin.valid(), layers: this.layers(), root: origin.root, projectKey: origin.binding.projectKey, text, pins: turn?.pins ?? [], pinScope: turn?.binding.scope ?? origin.binding.scope, excluded: turn?.excluded ?? [], branch: state.revisions.some((item) => item.content.activation.branchRestriction) ? (await learningCodeState(origin.root)).branch : null });
+        const { selection, block } = stored?.stores === storeVersions(state, companions) ? stored : await this.select(origin, state, companions, text, pins, pinScope, excluded);
         blocked = Boolean(turn?.pins.some((pin) => !selection.selected.some((item) => item.revisionId === pin.revisionId && item.scope === (pin.scope ?? turn.binding.scope))));
         if (!this.active(origin)) learningError('Learning changed before dispatch.');
         const manifest: LearningManifest = { dispatchId, projectKey: origin.binding.projectKey, sessionId: origin.binding.sessionId ?? 'no-session', scope: 'project', policyVersion: 2, mode: state.mode, contextModes: { project: state.mode, global: companions[0]?.mode ?? null }, createdAt: Date.now(), items: selection.selected.map(({ title: _title, ...item }) => item), skipped: selection.skipped, contextDigest: learningDigest(block), bytes: selection.bytes, estimatedTokens: selection.estimatedTokens, tokenMethod: selection.tokenMethod, state: blocked ? 'not-sent' : 'prepared' };

@@ -40,6 +40,15 @@ Increased effective authority requires a durable save. Reductions fence new high
 
 In Agent Teams, descendant permissions can only narrow the caller and host limits. See [Agent orchestration](agent-orchestration.md).
 
+## One agent system
+
+Delegation, goals, saved agents, and memory are parts of one runtime, not separate engines:
+
+- **Agent Teams** is the only executor for child Pi sessions. `spawn_agent`, `agent_workflow` nodes, and GoalMax verifier and diagnostic reviews all run as Team nodes under the same permission, workspace, and writer-lease rules. Runs saved by the retired standalone subagent engine load as read-only history that can only be renamed.
+- **GoalMax** is a mode of a root conversation. It adds criteria, evidence, and automatic continuation, and reads child progress from the Team executor; with no open goal it does no child bookkeeping.
+- **Agents** are saved personas, task templates, and Routines. The Routine scheduler sleeps until the next due run or lease expiry and wakes early only when a definition is saved or the focused project changes.
+- **Memory Learning** attaches reviewed memory at the provider boundary of root turns. A turn that attaches or skips nothing writes nothing.
+
 ## Credentials
 
 Fate UI embeds `@earendil-works/pi-coding-agent` in the Electron main process. It does not execute or require the `pi` terminal program.

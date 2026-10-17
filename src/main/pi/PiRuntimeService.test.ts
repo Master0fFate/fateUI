@@ -3138,9 +3138,9 @@ describe('PiRuntimeService', () => {
     const fake = fixture();
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
-    const coordinator = (service as unknown as { subagents: { hasActiveRuns: (sessionId: string) => boolean; cancelParent: (sessionId: string) => Promise<void> } }).subagents;
-    const active = vi.spyOn(coordinator, 'hasActiveRuns').mockReturnValue(true);
-    const cancel = vi.spyOn(coordinator, 'cancelParent').mockResolvedValue();
+    const coordinator = (service as unknown as { agentTeams: { hasActiveWork: (sessionId: string) => boolean; cancelRoot: (sessionId: string) => Promise<void> } }).agentTeams;
+    const active = vi.spyOn(coordinator, 'hasActiveWork').mockReturnValue(true);
+    const cancel = vi.spyOn(coordinator, 'cancelRoot').mockResolvedValue();
 
     expect(await service.abort()).toEqual({ aborted: true });
     expect(cancel).toHaveBeenCalledWith('session-1');
@@ -3157,23 +3157,19 @@ describe('PiRuntimeService', () => {
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const internals = service as unknown as {
       agentWorkflows: { hasActive: (sessionId: string) => boolean; cancelParent: (sessionId: string) => Promise<void> };
-      subagents: { cancelParent: (sessionId: string) => Promise<void> };
       agentTeams: { cancelRoot: (sessionId: string) => Promise<void> };
     };
     const active = vi.spyOn(internals.agentWorkflows, 'hasActive').mockReturnValue(true);
     const workflowCancel = vi.spyOn(internals.agentWorkflows, 'cancelParent').mockRejectedValue(new Error('workflow cancel failed'));
-    const legacyCancel = vi.spyOn(internals.subagents, 'cancelParent').mockResolvedValue();
     const teamCancel = vi.spyOn(internals.agentTeams, 'cancelRoot').mockResolvedValue();
 
     await expect(service.compact()).rejects.toThrow(/child sessions or Agent Team nodes are live/u);
     await expect(service.abort()).rejects.toMatchObject({ errors: [expect.objectContaining({ message: 'workflow cancel failed' })] });
     expect(workflowCancel).toHaveBeenCalledWith('session-1');
-    expect(legacyCancel).toHaveBeenCalledWith('session-1');
     expect(teamCancel).toHaveBeenCalledWith('session-1');
 
     active.mockRestore();
     workflowCancel.mockRestore();
-    legacyCancel.mockRestore();
     teamCancel.mockRestore();
     await service.dispose();
   });
@@ -3244,7 +3240,6 @@ describe('PiRuntimeService', () => {
     await service.createGoalMax({ objective: 'Stop every execution owner safely', verificationLevel: 'normal', agentStrategy: 'auto', tokenLimit: null, timeLimitMs: null });
     const internals = service as unknown as {
       agentWorkflows: { cancelParent: (sessionId: string) => Promise<void> };
-      subagents: { cancelParent: (sessionId: string) => Promise<void> };
       agentTeams: { cancelRoot: (sessionId: string) => Promise<void> };
       queuePersistence: { save: (projectPath: string, sessionId: string, messages: unknown[]) => Promise<void> };
     };
@@ -3259,14 +3254,12 @@ describe('PiRuntimeService', () => {
       await durableSave(state, expectedRevision);
     });
     const workflowCancel = vi.spyOn(internals.agentWorkflows, 'cancelParent').mockRejectedValue(new Error('workflow cancellation failed'));
-    const legacyCancel = vi.spyOn(internals.subagents, 'cancelParent').mockResolvedValue();
     const teamCancel = vi.spyOn(internals.agentTeams, 'cancelRoot').mockResolvedValue();
     const queueSave = vi.spyOn(internals.queuePersistence, 'save');
 
     const stopping = service.abort();
     await vi.waitFor(() => expect(workflowCancel).toHaveBeenCalledWith('session-1'));
     expect(fake.session.abort).toHaveBeenCalledOnce();
-    expect(legacyCancel).toHaveBeenCalledWith('session-1');
     expect(teamCancel).toHaveBeenCalledWith('session-1');
     expect(queueSave).toHaveBeenCalledWith('/project', 'session-1', []);
     releasePause();
@@ -3299,8 +3292,8 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const coordinator = (service as unknown as {
-      subagents: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[], workflowId?: string) => Promise<void> } };
-    }).subagents;
+      agentWorkflows: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[], workflowId?: string) => Promise<void> } };
+    }).agentWorkflows;
 
     await coordinator.host.notifyParent('session-1', 'immediate', 'Child settled.', ['run-1'], 'workflow-1');
 
@@ -3318,8 +3311,8 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const coordinator = (service as unknown as {
-      subagents: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[], workflowId: string | undefined, livenessReport: unknown) => Promise<void> } };
-    }).subagents;
+      agentWorkflows: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[], workflowId: string | undefined, livenessReport: unknown) => Promise<void> } };
+    }).agentWorkflows;
     fake.setStreaming(true);
 
     await coordinator.host.notifyParent('session-1', 'immediate', 'Stale liveness checkpoint.', ['run-1'], undefined, { id: 'report-1' });
@@ -3333,8 +3326,8 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const coordinator = (service as unknown as {
-      subagents: { host: { notifyParent: (sessionId: string, mode: 'immediate' | 'next-turn', text: string, runIds: string[]) => Promise<void> } };
-    }).subagents;
+      agentWorkflows: { host: { notifyParent: (sessionId: string, mode: 'immediate' | 'next-turn', text: string, runIds: string[]) => Promise<void> } };
+    }).agentWorkflows;
     fake.setStreaming(true);
     fake.emitSession({ type: 'agent_start' });
 
@@ -3355,8 +3348,8 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const coordinator = (service as unknown as {
-      subagents: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[]) => Promise<void> } };
-    }).subagents;
+      agentWorkflows: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[]) => Promise<void> } };
+    }).agentWorkflows;
     fake.setStreaming(true);
     fake.emitSession({ type: 'agent_start' });
     fake.emitSession({ type: 'agent_end', messages: [{ role: 'assistant', content: [], stopReason: 'stop' }] });
@@ -3379,8 +3372,8 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const coordinator = (service as unknown as {
-      subagents: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[]) => Promise<void> } };
-    }).subagents;
+      agentWorkflows: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[]) => Promise<void> } };
+    }).agentWorkflows;
     fake.setStreaming(true);
     fake.emitSession({ type: 'agent_start' });
     fake.emitSession({ type: 'agent_end', messages: [{ role: 'assistant', content: [], stopReason: 'stop' }] });
@@ -3401,8 +3394,8 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const coordinator = (service as unknown as {
-      subagents: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[]) => Promise<void> } };
-    }).subagents;
+      agentWorkflows: { host: { notifyParent: (sessionId: string, mode: 'immediate', text: string, runIds: string[]) => Promise<void> } };
+    }).agentWorkflows;
     fake.setStreaming(true);
     fake.emitSession({ type: 'agent_start' });
     fake.emitSession({ type: 'agent_end', messages: [{ role: 'assistant', content: [], stopReason: 'stop' }] });
@@ -4161,8 +4154,9 @@ describe('PiRuntimeService', () => {
       .mockResolvedValueOnce(second.runtime as unknown as AgentSessionRuntime);
     const service = new PiRuntimeService({ ...first.adapter, createRuntime });
     await service.openProject({ path: '/project', name: 'project', trusted: true });
-    const coordinator = (service as unknown as { subagents: { hasActiveRuns: (sessionId: string) => boolean } }).subagents;
-    const active = vi.spyOn(coordinator, 'hasActiveRuns').mockImplementation((sessionId) => sessionId === 'session-1');
+    const coordinator = (service as unknown as { agentTeams: { hasActiveWork: (sessionId: string) => boolean; hasOwnedWork: (sessionId: string) => boolean } }).agentTeams;
+    const active = vi.spyOn(coordinator, 'hasActiveWork').mockImplementation((sessionId) => sessionId === 'session-1');
+    const owned = vi.spyOn(coordinator, 'hasOwnedWork').mockImplementation((sessionId) => sessionId === 'session-1');
 
     const state = await service.newSession();
 
@@ -4174,6 +4168,7 @@ describe('PiRuntimeService', () => {
     ]));
 
     active.mockRestore();
+    owned.mockRestore();
     await service.dispose();
   });
 

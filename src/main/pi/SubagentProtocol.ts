@@ -16,7 +16,6 @@ import type { AgentWorkspaceRequest } from '../../shared/contracts/multiAgent';
 export const DEFAULT_RUNNING_CONCURRENCY = 4;
 export const DEFAULT_TIMEOUT_SECONDS = 0;
 export const DEFAULT_MAILBOX_TTL_SECONDS = 5 * 60;
-export const DEFAULT_MANAGE_WAIT_SECONDS = 10;
 
 export const permissions = ['read-only', 'edit', 'full-access'] as const;
 export const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -127,17 +126,6 @@ export const taskOptions = {
   }, { additionalProperties: false })),
 };
 
-export const taskSchema = Type.Object({
-  task: Type.String({ minLength: 1, description: 'Exact self-contained child task. Admission is based on the receiving model context window.' }),
-  ...taskOptions,
-}, { additionalProperties: false });
-
-export const launchParameters = Type.Object({
-  task: Type.Optional(Type.String({ minLength: 1 })),
-  ...taskOptions,
-  tasks: Type.Optional(Type.Array(taskSchema, { minItems: 1 })),
-}, { additionalProperties: false });
-
 const workflowNodeSchema = Type.Object({
   id: Type.String({ minLength: 1, maxLength: 80, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$' }),
   dependsOn: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 80 }))),
@@ -154,32 +142,6 @@ export const workflowParameters = Type.Object({
   notifyParent: Type.Optional(stringEnum(notificationModes, 'Workflow-level notification after all nodes settle.', 'never')),
   budget: Type.Optional(budgetSchema),
   workflowId: Type.Optional(Type.String({ minLength: 1, maxLength: 100, description: 'Required when action is status, cancel, or resume.' })),
-  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: 'Optional cancellation reason when action is cancel.' })),
-}, { additionalProperties: false });
-
-const runTarget = (description: string) => Type.String({
-  minLength: 1,
-  maxLength: 100,
-  description: `${description} Prefer the stable @handle returned by launch/list; internal run IDs remain accepted for compatibility.`,
-});
-
-const managePageOptions = {
-  offset: Type.Optional(Type.Integer({ minimum: 0, description: 'Optional zero-based result offset for context-sized status pages.' })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, description: 'Optional page size. No maximum is imposed; choose a size that fits the parent model context.' })),
-};
-
-export const manageParameters = Type.Object({
-  action: stringEnum(['list', 'status', 'wait', 'steer', 'retarget', 'followup', 'close', 'cancel'] as const, 'Management operation. wait/close/cancel require runIds; steer/retarget/followup require runId.'),
-  runIds: Type.Optional(Type.Array(runTarget('Child targets for status, wait, close, or cancel.'), { minItems: 1 })),
-  runId: Type.Optional(runTarget('Single child target for steer, retarget, or followup.')),
-  ...managePageOptions,
-  until: Type.Optional(stringEnum(['any', 'all', 'activity'] as const, 'Return after any settles, all settle, or any selected run changes.', 'any')),
-  timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: `Wait timeout (defaults to ${DEFAULT_MANAGE_WAIT_SECONDS} seconds) or advisory follow-up runtime threshold, depending on action.` })),
-  instruction: Type.Optional(Type.String({ minLength: 1, description: 'Required when action is steer.' })),
-  message: Type.Optional(Type.String({ minLength: 1, description: 'Required when action is followup.' })),
-  model: Type.Optional(modelSelectionSchema),
-  thinkingLevel: Type.Optional(stringEnum(thinkingLevels, 'Optional reasoning effort for retarget or followup.')),
-  extendMailboxTtlSeconds: Type.Optional(Type.Number({ minimum: 0 })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: 'Optional cancellation reason when action is cancel.' })),
 }, { additionalProperties: false });
 

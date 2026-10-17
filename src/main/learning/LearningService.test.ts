@@ -155,7 +155,7 @@ describe('user profile and project context layers', () => {
   it('keeps manual defaults and each scope off gate separate from the master switch', async () => {
     origin.binding.scope = 'global';
     await approved(profile());
-    expect((await service.prepareDispatch(origin, randomUUID(), 'Hello'))?.manifest.items).toEqual([]);
+    expect(await service.prepareDispatch(origin, randomUUID(), 'Hello')).toBeNull();
     await mutation({ action: 'set-mode', mode: 'automatic' });
     origin.binding.scope = 'project';
     await approved(brief()); await mutation({ action: 'set-mode', mode: 'off' });
