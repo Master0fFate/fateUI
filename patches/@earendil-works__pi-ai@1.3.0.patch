@@ -1,7 +1,7 @@
 diff --git a/dist/api/openai-completions.js b/dist/api/openai-completions.js
 --- a/dist/api/openai-completions.js
 +++ b/dist/api/openai-completions.js
-@@ -685,8 +685,8 @@
+@@ -687,8 +687,8 @@
                  effort: model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort,
              };
          }

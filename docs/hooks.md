@@ -1,6 +1,6 @@
 # Hooks
 
-Hooks are shell commands that Fate UI runs on the agent tool lifecycle. They are implemented as a Pi SDK inline extension, so they observe the same `tool_call`, `tool_result`, `agent_end`, and `session_start` events the Pi runtime exposes to any extension. Hooks apply to the root agent and to every Agent Team member in the same project.
+Hooks are shell commands that Fate UI runs on the agent tool lifecycle. They are implemented as a Pi SDK inline extension, so they observe the same `tool_call`, `tool_result`, `agent_end`, and `session_start` events the Pi runtime exposes to any extension. Hooks apply to root agent sessions in the project.
 
 Configure hooks in **Settings → Hooks**. The list is stored in `~/.pi/fateGUI/hooks.json` (or `$FATE_GUI_DATA_DIR/hooks.json`). Reopen the project after saving so new sessions load the changed list. Project files cannot add hooks.
 

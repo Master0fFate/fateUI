@@ -54,11 +54,11 @@ Every assistant turn records provider-reported tokens and cost into `usage/v1/<p
 
 ## Codemode and tool search
 
-**Settings → Agent → Codemode and tool search** loads the Pi SDK's `codemode` and `tool_search` extensions into new root sessions. Codemode lets the model run several tools from one script; tool search defers rarely used tool schemas until the model asks for them. Off by default.
+Root sessions load the Pi SDK's `tool_search` extension. Rarely used tools (agent orchestration, tasks, Monitor, session messages, image generation, branch, push and pull request tools, and `fate_mcp`) stay deferred until the model looks them up. **Settings → Agent → Codemode** also loads the `codemode` extension into new root sessions, so the model can run several tools from one script. Codemode is off by default.
 
 ## Hooks and Code Intelligence
 
-**Hooks** (Settings → Hooks) run your own shell commands on the agent tool lifecycle: before a tool call, after a tool result, when the agent stops, and at session start. They apply to the root agent and every Agent Team member. See [Hooks](hooks.md).
+**Hooks** (Settings → Hooks) run your own shell commands on the agent tool lifecycle: before a tool call, after a tool result, when the agent stops, and at session start. They apply to root agent sessions. See [Hooks](hooks.md).
 
 **Code Intelligence** (Settings → Code Intelligence) gives the agent `lsp_diagnostics`, `lsp_definition`, `lsp_references`, and `lsp_symbols`, backed by language servers found on PATH or in the project's `node_modules/.bin`. Every `write`/`edit` result also carries fresh errors and warnings for the touched file. See [Code Intelligence](code-intelligence.md).
 

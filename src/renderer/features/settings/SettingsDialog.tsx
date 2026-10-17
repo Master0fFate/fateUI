@@ -778,8 +778,8 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   </section>
                   <div className="settings-title settings-title--spaced"><div><h3>Pi tools and budget</h3></div></div>
                   <label className="settings-toggle">
-                    <div><strong>Codemode and tool search</strong><small>Lets the model script several tools in one call and look up rarely used tools on demand. Applies to new sessions.</small></div>
-                    <input type="checkbox" aria-label="Enable Pi codemode and tool search" checked={settings.piCodemode} onChange={(event) => setSettings({ ...settings, piCodemode: event.target.checked })} />
+                    <div><strong>Codemode</strong><small>Lets the model script several tools in one call. Applies to new sessions.</small></div>
+                    <input type="checkbox" aria-label="Enable Pi codemode" checked={settings.piCodemode} onChange={(event) => setSettings({ ...settings, piCodemode: event.target.checked })} />
                     <span aria-hidden="true" />
                   </label>
                   <label className="settings-input-row"><span>Daily budget (USD)</span><input aria-label="Daily budget in USD" inputMode="decimal" value={settings.dailyBudgetUsd ?? ''} placeholder="No limit" onChange={(event) => { const value = Number(event.target.value); setSettings({ ...settings, dailyBudgetUsd: event.target.value.trim() === '' || !Number.isFinite(value) || value < 0 ? null : value }); }} /></label>

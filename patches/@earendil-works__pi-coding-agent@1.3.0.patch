@@ -82,7 +82,7 @@ diff --git a/dist/core/resource-loader.d.ts b/dist/core/resource-loader.d.ts
 diff --git a/dist/core/resource-loader.js b/dist/core/resource-loader.js
 --- a/dist/core/resource-loader.js
 +++ b/dist/core/resource-loader.js
-@@ -245,6 +245,7 @@
+@@ -250,6 +250,7 @@
          this.extensionFactories = factories.filter((input) => !isBuiltinExtension(input));
          this.builtinExtensions = new Map(factories.filter(isBuiltinExtension).map((input) => [input.name, input]));
          this.packageManager = new DefaultPackageManager({

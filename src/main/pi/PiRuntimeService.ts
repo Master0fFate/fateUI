@@ -1502,9 +1502,8 @@ export class PiRuntimeService {
     // Snapshot the managed-provider registry into the runtime state cache. The
     // registry lives on disk; the cache keeps getState() synchronous.
     void this.refreshModelsDevManagedCache();
-    const childSessionFactory = async (input: Parameters<typeof createSdkChildSession>[0]) => {
+    const childSessionFactory = (input: Parameters<typeof createSdkChildSession>[0]) => {
       const handle: ChildAttestationHandle | undefined = this.recordAttestation ? { sessionId: null } : undefined;
-      const fate = await loadFateSessionExtensions({ dataRoot: this.paths?.dataRoot, projectRoot: input.projectPath, resolvePermissionLevel: () => input.getPermissionLevel?.() ?? input.permissionLevel });
       const sink = handle && this.recordAttestation
         ? buildChildAttestationSink({
             ...(input.teamIdentity ? { teamIdentity: input.teamIdentity } : {}),
@@ -1530,7 +1529,6 @@ export class PiRuntimeService {
         },
         ...(this.paths ? { agentDir: this.paths.piAgentDir, serverProfile: this.paths.profileKind === 'server' } : {}),
         getImageGenerationSettings: this.getImageGenerationSettings,
-        extensionFactories: fate.extensions,
         ...(sink && handle ? { attestationSink: sink, attestationSessionHandle: handle } : {}),
       });
     };

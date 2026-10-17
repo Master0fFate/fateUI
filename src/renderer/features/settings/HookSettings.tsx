@@ -78,7 +78,7 @@ export function HookSettings() {
   return (
     <div className="settings-panel" role="tabpanel" id="settings-panel-hooks" aria-labelledby="settings-tab-hooks">
       <div className="settings-title">
-        <div><h3>Hooks</h3><p>Shell commands on tool events for every agent. Each gets JSON on stdin and runs in the project with your account.</p></div>
+        <div><h3>Hooks</h3><p>Shell commands on tool events for root agent sessions. Each gets JSON on stdin and runs in the project with your account.</p></div>
         <button type="button" className="settings-providers-add" onClick={add}><Plus size={13} aria-hidden="true" /> Add hook</button>
       </div>
       {loaded && drafts.length === 0 && <p className="settings-empty">No hooks yet.</p>}

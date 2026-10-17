@@ -112,7 +112,7 @@ describe('D0-02 real Pi SDK feasibility (no provider requests)', () => {
     const enabled = activeToolsForPermission(['write', 'edit', 'bash', 'browser_click', 'third_party_effect'], 'read-only');
     expect(enabled).toContain('browser_click');
     expect(enabled).toContain('third_party_effect');
-    expect(enabled).toContain('generate_image');
+    expect(activeToolsForPermission(['generate_image'], 'read-only')).toContain('generate_image');
     expect(enabled).not.toContain('write');
   });
 });
