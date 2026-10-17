@@ -4385,9 +4385,6 @@ export class PiRuntimeService {
     await this.agentTeams.restoreRoot(session, ownsSession);
     if (!ownsSession()) return;
     this.agentWorkflows.restoreParent(session);
-    if (this.hasOwnedAgentWork(session.sessionId)) {
-      session.setActiveToolsByName(filterAgentSessionTools(session, activeToolsForPermission([...new Set([...session.getActiveToolNames(), ...AGENT_ORCHESTRATION_TOOLS])], slot.permissionLevel)));
-    }
     if (access) {
       access.fullAccess = slot.permissionLevel === 'full-access';
       access.permissionLevel = slot.permissionLevel;
@@ -4535,7 +4532,7 @@ export class PiRuntimeService {
   ): Promise<void> {
     if (slot.disposed || slot.runtime.session !== session) return Promise.resolve();
     this.assertPermissionAdmission(slot);
-    if (session.isStreaming && slot.sessionTurnPhase !== 'active') {
+    if (session.isStreaming && slot.sessionTurnPhase === 'ending') {
       // Pi's loop has emitted agent_end but AgentSession still reports streaming
       // until agent_settled. Queueing a steer/follow-up in this window makes the
       // SDK call continue() with an assistant as the final context message.
