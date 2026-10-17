@@ -122,7 +122,7 @@ export const taskOptions = {
   workspace: Type.Optional(Type.Object({
     mode: stringEnum(['shared', 'worktree'] as const, 'Agent Team workspace mode.'),
     baseRef: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
-    branch: Type.Optional(Type.String({ minLength: 1, maxLength: 240 })),
+    branch: Type.Optional(Type.String({ minLength: 1, maxLength: 240, description: 'Worktree branch name. Choose a short kebab-case name that says what the task is; omitted names fall back to fate/agent/<handle>-<id>.' })),
   }, { additionalProperties: false })),
 };
 

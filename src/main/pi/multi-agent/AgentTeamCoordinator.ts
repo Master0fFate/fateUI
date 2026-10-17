@@ -23,6 +23,7 @@ import { sanitizedRecentTurns } from './AgentContextForker';
 import { reserveAgentPath } from './AgentPath';
 import { agentTeamStorageRoots, reconcileAgentTeamHistory, safeDirectoryKey } from './AgentTeamHistory';
 import { AgentTeamScheduler, type TurnLease } from './AgentTeamScheduler';
+import { anthropicUsesSubscription, resolveClaudeReference, routeClaudeReference, routeClaudeSelection } from '../ClaudeSubscriptionRoute';
 import {
   addEnvelope,
   addTask,
@@ -1549,9 +1550,11 @@ export class AgentTeamCoordinator {
     const available = request.model || profile.modelReference ? [...await modelRuntime.getAvailable()] as ParentModel[] : [];
     const disabledModels = this.host.getDisabledModels?.(runtime.state.rootSessionId) ?? [];
     const enabled = visibleModels(available, disabledModels);
+    const subscription = available.length > 0 && await anthropicUsesSubscription(modelRuntime);
     let selected: ParentModel;
     if (request.model) {
-      const model = enabled.find((candidate) => candidate.provider === request.model!.provider && candidate.id === request.model!.id);
+      const target = routeClaudeSelection(request.model, enabled, subscription);
+      const model = enabled.find((candidate) => candidate.provider === target.provider && candidate.id === target.id);
       if (model) selected = model;
       else if (available.some((candidate) => candidate.provider === request.model!.provider && candidate.id === request.model!.id)) {
         throw new Error(disabledModelMessage(request.model.provider, request.model.id));
@@ -1559,10 +1562,13 @@ export class AgentTeamCoordinator {
         throw new Error(`Model ${request.model.provider}/${request.model.id} is not currently authenticated in Pi.`);
       }
     } else if (profile.modelReference) {
-      const exact = enabled.find((model) => `${model.provider}/${model.id}` === profile.modelReference);
-      const disabledExact = available.find((model) => `${model.provider}/${model.id}` === profile.modelReference);
+      const reference = routeClaudeReference(profile.modelReference, enabled, subscription);
+      const exact = enabled.find((model) => `${model.provider}/${model.id}` === reference);
+      const disabledExact = available.find((model) => `${model.provider}/${model.id}` === reference);
+      const claude = exact ? undefined : resolveClaudeReference(reference, enabled, subscription);
       if (exact) selected = exact;
       else if (disabledExact) throw new Error(disabledModelMessage(disabledExact.provider, disabledExact.id));
+      else if (claude) selected = claude;
       else {
         const bare = enabled.filter((model) => model.id === profile.modelReference);
         selected = bare.length === 1 ? bare[0]! : (() => { throw new Error(`Agent profile model ${profile.modelReference} is unavailable or ambiguous.`); })();

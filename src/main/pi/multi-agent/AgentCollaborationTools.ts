@@ -14,7 +14,7 @@ const deliveryModes = ['queue', 'steer'] as const;
 const workspace = Type.Object({
   mode: enumString(['shared', 'worktree'], 'shared inherits the caller checkout; worktree creates a managed isolated checkout.'),
   baseRef: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
-  branch: Type.Optional(Type.String({ minLength: 1, maxLength: 240 })),
+  branch: Type.Optional(Type.String({ minLength: 1, maxLength: 240, description: 'Worktree branch name. Choose a short kebab-case name that says what the task is; omitted names fall back to fate/agent/<handle>-<id>.' })),
 }, { additionalProperties: false });
 const spawnParameters = Type.Object({
   teamId,

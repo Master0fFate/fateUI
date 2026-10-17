@@ -44,8 +44,6 @@
 .agent-library-heading small { color: var(--theme-muted); font-size: 10px; }
 .agent-library-note, .agent-library-card small { color: var(--theme-muted); line-height: 1.4; overflow-wrap: anywhere; }
 .agent-library-note { margin: 0; }
-.agent-library-intro { padding: 6px 0; font-size: 11px; }
-.agent-library-section-help { padding: 7px 1px; color: var(--theme-text-soft); font-size: 11px; line-height: 1.35; text-wrap: pretty; }
 .agent-library-section-note { padding: 7px 0 5px; border-bottom: 1px solid var(--agent-rule); font-size: 10px; }
 .agent-library-history-filter { padding-top: 7px; }
 .agent-library-inline-status { margin: 6px 0; color: var(--theme-muted); font-size: 11px; }

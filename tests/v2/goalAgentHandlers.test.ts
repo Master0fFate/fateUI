@@ -195,6 +195,7 @@ describe('T17 canonical goal, task, Team and monitor handlers', () => {
     try {
       const handlers = createScopedAgentHandlers(f.handle, f.authorize, f.rootSessionId);
       const control = vi.spyOn(f.service, 'controlAgentTeam');
+      const startingPermission = f.service.getState(false).permissionLevel;
       const dashboard = await handlers.monitor({});
       expect(dashboard.sources.teams).toBe('ready');
       expect(control).not.toHaveBeenCalled();
@@ -204,7 +205,7 @@ describe('T17 canonical goal, task, Team and monitor handlers', () => {
       const tasks = createScopedTaskHandlers(f.handle, f.authorize);
       await expect(goals.create(f.command, { objective: 'Try', permissionLevel: 'full-access' })).rejects.toThrow();
       await expect(tasks.create(f.command, { title: 'Try', source: 'goalmax' })).rejects.toThrow();
-      expect(f.service.getState(false).permissionLevel).not.toBe('full-access');
+      expect(f.service.getState(false).permissionLevel).toBe(startingPermission);
     } finally { await f.dispose(); }
   });
 });

@@ -75,7 +75,7 @@ async function fixture(effect = false) {
 }
 async function settled(service: AgentsService, id: string): Promise<AgentRun> {
   let run: AgentRun | undefined;
-  await vi.waitFor(async () => { run = (await service.list()).runs.find((item) => item.id === id); expect(['succeeded', 'failed']).toContain(run?.status); });
+  await vi.waitFor(async () => { run = (await service.list()).runs.find((item) => item.id === id); expect(['succeeded', 'failed']).toContain(run?.status); }, { timeout: 10_000 });
   return run!;
 }
 

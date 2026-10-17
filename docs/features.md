@@ -58,7 +58,7 @@ Root sessions load the Pi SDK's `tool_search` extension. Rarely used tools (agen
 
 ## Hooks and Code Intelligence
 
-**Hooks** (Settings → Hooks) run your own shell commands on the agent tool lifecycle: before a tool call, after a tool result, when the agent stops, and at session start. They apply to root agent sessions. See [Hooks](hooks.md).
+**Hooks** (Settings → Hooks) run your own shell commands on the agent tool lifecycle: before a tool call, after a tool result, when the agent stops, and at session start. They apply to the root agent and every Agent Team member. See [Hooks](hooks.md).
 
 **Code Intelligence** (Settings → Code Intelligence) gives the agent `lsp_diagnostics`, `lsp_definition`, `lsp_references`, and `lsp_symbols`, backed by language servers found on PATH or in the project's `node_modules/.bin`. Every `write`/`edit` result also carries fresh errors and warnings for the touched file. See [Code Intelligence](code-intelligence.md).
 

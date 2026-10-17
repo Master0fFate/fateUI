@@ -34,7 +34,7 @@ const menuFor = async (name: string) => { fireEvent.click(await screen.findByRol
     mount(skin);
     const navigation = await screen.findByRole('navigation', { name: 'Agents sections' });
     expect(within(navigation).getAllByRole('button')).toHaveLength(5);
-    for (const label of ['Agents', 'TaskTemplates', 'Routines', 'Run history', 'Copy Automations']) expect(within(navigation).getByRole('button', { name: label })).toHaveAttribute('title', label);
+    for (const label of ['Agents', 'TaskTemplates', 'Routines', 'Run history', 'Copy Automations']) expect(within(navigation).getByRole('button', { name: label })).toHaveAttribute('title', expect.stringMatching(new RegExp(`^${label} · `, 'u')));
     expect(navigation.querySelectorAll('.agent-library-nav-symbol')).toHaveLength(5);
     expect([...navigation.querySelectorAll('.agent-library-nav-label')].map((label) => label.textContent)).toEqual(['Agents', 'Tasks', 'Routine', 'Runs', 'Import']);
   });

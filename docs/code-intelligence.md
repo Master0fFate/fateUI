@@ -1,6 +1,6 @@
 # Code Intelligence
 
-Code Intelligence connects the agent to Language Server Protocol servers. It adds four read-only tools to every root session and appends fresh diagnostics to each `write`/`edit` result of the root agent.
+Code Intelligence connects the agent to Language Server Protocol servers. It adds four read-only tools to every root session and appends fresh diagnostics to each `write`/`edit` result for the root agent and Agent Team members.
 
 | Tool | Input | Result |
 | :-- | :-- | :-- |

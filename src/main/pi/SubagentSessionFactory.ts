@@ -1,5 +1,6 @@
 import {
   type AgentSession,
+  type InlineExtension,
   type ModelRuntime,
   type ToolDefinition,
   SessionManager,
@@ -62,6 +63,7 @@ export interface ChildSessionInput {
   attestationSink?: AttestationSink;
   /** Bound to the child AgentSession id once the session exists. */
   attestationSessionHandle?: ChildAttestationHandle;
+  extensionFactories?: InlineExtension[];
 }
 
 export type SubagentChildSessionFactory = (input: ChildSessionInput) => Promise<AgentSession>;
@@ -183,6 +185,7 @@ export async function createSdkChildSession(input: ChildSessionInput): Promise<A
       // Server children inherit only host-bound resources, never context files
       // from ancestors above their canonical checkout/project root.
       noContextFiles: input.serverProfile === true || input.settingsProjectPath !== undefined && input.settingsProjectPath !== input.projectPath,
+      ...(input.extensionFactories ? { extensionFactories: input.extensionFactories } : {}),
       appendSystemPrompt,
       skillsOverride: (base) => ({
         ...base,
