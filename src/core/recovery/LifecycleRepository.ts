@@ -27,6 +27,11 @@ const reviewAckSchema = z.object({ version: z.literal(2), outcome: z.literal('un
   principalId: id, checkout: checkoutFactsSchema, at: z.number().int().nonnegative().safe(),
 }).strict();
 export type GoalReviewAck = z.infer<typeof reviewAckSchema>;
+const sessionReviewSchema = z.object({ version: z.literal(1), projectPath: id, sessionId: id,
+  recordIds: z.array(id).min(1).max(512), principalId: id, at: z.number().int().nonnegative().safe(),
+}).strict();
+export type SessionReviewAck = z.infer<typeof sessionReviewSchema>;
+const MAX_SESSION_REVIEW_BYTES = 64 * 1024;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_RECORDS = 512;
 const MAX_LINE = 4096;
@@ -44,6 +49,41 @@ export class LifecycleRepository {
   private reviewFile(projectPath: string, sessionId: string, goalId: string, revision: number, checkout: CheckoutFacts): string {
     const hash = createHash('sha256').update(JSON.stringify([projectPath, sessionId, goalId, revision, checkout])).digest('hex');
     return path.join(this.root, `review-v2-${hash}.json`);
+  }
+  private sessionReviewFile(projectPath: string, sessionId: string): string {
+    return path.join(this.root, `session-review-v1-${createHash('sha256').update(JSON.stringify([projectPath, sessionId])).digest('hex')}.json`);
+  }
+  async readSessionReview(projectPath: string, sessionId: string): Promise<SessionReviewAck | null> {
+    await this.tail;
+    try {
+      const text = await fs.readFile(this.sessionReviewFile(projectPath, sessionId), 'utf8');
+      if (Buffer.byteLength(text) > MAX_SESSION_REVIEW_BYTES) throw new Error('Session review exceeds its size limit.');
+      const ack = sessionReviewSchema.parse(JSON.parse(text));
+      if (ack.projectPath !== projectPath || ack.sessionId !== sessionId) throw new Error('Session review identity mismatch.');
+      return ack;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw new Error('STORAGE_UNAVAILABLE: saved session review is invalid or unavailable.', { cause: error });
+    }
+  }
+  async saveSessionReview(input: Omit<SessionReviewAck, 'version' | 'at'>): Promise<SessionReviewAck> {
+    const result = this.tail.then(async () => {
+      const ack = sessionReviewSchema.parse({ ...input, version: 1, at: Date.now() });
+      const text = `${JSON.stringify(ack)}\n`;
+      if (Buffer.byteLength(text) > MAX_SESSION_REVIEW_BYTES) throw new Error('STORAGE_UNAVAILABLE: session review exceeds its size limit.');
+      const target = this.sessionReviewFile(ack.projectPath, ack.sessionId);
+      const temporary = `${target}.${randomUUID()}.tmp`;
+      try {
+        await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
+        const handle = await fs.open(temporary, 'wx', 0o600);
+        try { await handle.writeFile(text, 'utf8'); await handle.sync(); } finally { await handle.close(); }
+        await fs.rename(temporary, target);
+        return ack;
+      } catch (error) { throw new Error('STORAGE_UNAVAILABLE: session review could not be saved.', { cause: error }); }
+      finally { await fs.rm(temporary, { force: true }).catch(() => undefined); }
+    });
+    this.tail = result.then(() => undefined, () => undefined);
+    return result;
   }
   async readGoalReview(projectPath: string, sessionId: string, goalId: string, revision: number, checkout: CheckoutFacts): Promise<GoalReviewAck | null> {
     await this.tail;

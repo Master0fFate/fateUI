@@ -34,7 +34,7 @@ export const BROWSER_PANE_MIN = 360;
 export const BROWSER_PANE_MAX = 2400;
 
 export type SidebarTab = 'sessions' | 'resources' | 'agents';
-export type SettingsSection = 'general' | 'skins' | 'compaction' | 'agent' | 'mcp' | 'hosts' | 'learning' | 'voice' | 'workspace' | 'system';
+export type SettingsSection = 'general' | 'skins' | 'compaction' | 'agent' | 'mcp' | 'hooks' | 'code' | 'usage' | 'hosts' | 'learning' | 'voice' | 'workspace' | 'system';
 export type InspectorTab = 'changes' | 'files' | 'tools' | 'sessions' | 'resources' | 'context' | 'goal' | 'activity' | 'monitor';
 export type InspectorDestination = 'work' | 'run' | 'system';
 export type InspectorLastViews = Record<InspectorDestination, InspectorTab>;
@@ -74,6 +74,7 @@ interface UiState {
   compactMode: boolean;
   compactSessions: boolean;
   advancedPromptImprovement: boolean;
+  reasoningMenu: boolean;
   disabledModels: string[];
   speech: SpeechSettings;
   speechDownload: SpeechDownloadProgress | null;
@@ -106,6 +107,7 @@ interface UiState {
   setCompactMode: (enabled: boolean) => void;
   setCompactSessions: (enabled: boolean) => void;
   setAdvancedPromptImprovement: (enabled: boolean) => void;
+  setReasoningMenu: (enabled: boolean) => void;
   setDisabledModels: (disabledModels: string[]) => void;
   setSpeech: (speech: SpeechSettings) => void;
   setSpeechDownload: (speechDownload: SpeechDownloadProgress | null) => void;
@@ -184,6 +186,7 @@ export const useUiStore = create<UiState>()(
       compactMode: false,
       compactSessions: false,
       advancedPromptImprovement: false,
+      reasoningMenu: false,
       disabledModels: [],
       speech: defaultSpeechSettings,
       speechDownload: null,
@@ -216,6 +219,7 @@ export const useUiStore = create<UiState>()(
       setCompactMode: (compactMode) => set({ compactMode }),
       setCompactSessions: (compactSessions) => set({ compactSessions }),
       setAdvancedPromptImprovement: (advancedPromptImprovement) => set({ advancedPromptImprovement }),
+      setReasoningMenu: (reasoningMenu) => set({ reasoningMenu }),
       setDisabledModels: (disabledModels) => set({ disabledModels }),
       setSpeech: (speech) => set({ speech }),
       setSpeechDownload: (speechDownload) => set({ speechDownload }),
@@ -275,6 +279,7 @@ export const useUiStore = create<UiState>()(
         inspectorLastViews,
         browserOpen,
         browserPaneWidth,
+        reasoningMenu,
       }) => ({
         leftWidth,
         rightWidth,
@@ -285,6 +290,7 @@ export const useUiStore = create<UiState>()(
         inspectorLastViews,
         browserOpen,
         browserPaneWidth,
+        reasoningMenu,
       }),
     },
   ),

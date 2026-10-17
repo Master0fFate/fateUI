@@ -19,17 +19,20 @@ export function selectGitStatusView(state: WorkspaceStore, source: 'desktop' | '
   if (source === 'desktop') return state.git;
   return state.hostGit.scopeKey === currentNetworkScope()?.key && state.hostGit.status.status === 'ready' ? state.hostGit.status.value : null;
 }
-import { getFateApi, getFateApiOptional, getDesktopApi, hasCapability } from '../platform/api';
+import { getFateApi, getFateApiOptional, getDesktopApi, hasCapability, getDesktopApiOptional } from '../platform/api';
 import type {
   FileEntry,
   FilePreview,
+  GitBranchRef,
   GitCombinedDiff,
+  GitHunksResult,
   GitCommitDetails,
   GitHistory,
   GitOperation,
   GitOperationResult,
   GitDiff,
   GitStatus,
+  GitSwitchBranchInput,
   GitWorktree,
 } from '../../shared/contracts/ipc';
 
@@ -119,6 +122,8 @@ interface WorkspaceStore {
   gitOperation: GitOperation | null;
   worktrees: GitWorktree[];
   worktreesLoading: boolean;
+  branches: GitBranchRef[];
+  branchesLoading: boolean;
   history: GitHistory | null;
   historyLoading: boolean;
   commitDetails: Record<string, GitCommitDetails>;
@@ -129,6 +134,7 @@ interface WorkspaceStore {
   reviewPathRequest: { projectPath: string; path: string; nonce: number } | null;
   reviewNotice: string | null;
   diff: GitDiff | null;
+  hunks: GitHunksResult | null;
   diffLoading: boolean;
   combinedDiff: GitCombinedDiff | null;
   combinedDiffLoading: boolean;
@@ -141,20 +147,24 @@ interface WorkspaceStore {
   openSelectedFile: () => Promise<void>;
   openPath: (path: string) => Promise<void>;
   refreshGit: () => Promise<void>;
+  syncGit: () => Promise<void>;
   loadWorktrees: () => Promise<void>;
+  loadBranches: () => Promise<void>;
+  switchBranch: (input: GitSwitchBranchInput) => Promise<GitStatus>;
   loadHistory: (force?: boolean) => Promise<void>;
   loadCommitDetails: (hash: string) => Promise<void>;
   selectCommit: (hash: string | null) => void;
   loadCombinedDiff: () => Promise<void>;
   runGitOperation: (operation: GitOperation) => Promise<GitOperationResult>;
   revertPath: (path: string) => Promise<void>;
+  revertHunk: (path: string, index: number, header: string) => Promise<void>;
   selectChange: (path: string) => Promise<void>;
   toggleReviewed: (path: string) => void;
   requestReviewPath: (projectPath: string, path: string, nonce: number) => void;
   resolveReviewPath: () => Promise<void>;
 }
 
-function messageOf(error: unknown): string {
+export function messageOf(error: unknown): string {
   if (!(error instanceof Error)) return 'The project operation failed.';
   try {
     const parsed = JSON.parse(error.message) as { message?: string };
@@ -170,11 +180,38 @@ let searchRequestSequence = 0;
 let gitGeneration = 0;
 let gitStatusRequestSequence = 0;
 let worktreesRequestSequence = 0;
+let branchesRequestSequence = 0;
 let historyRequestSequence = 0;
 let commitDetailsRequestSequence = 0;
 let combinedDiffRequestSequence = 0;
 let fileDiffRequestSequence = 0;
 let gitOperationRequestSequence = 0;
+
+function derivedGitReset(git: GitStatus): Partial<WorkspaceStore> {
+  gitGeneration += 1;
+  worktreesRequestSequence += 1;
+  branchesRequestSequence += 1;
+  return {
+    git,
+    worktrees: [],
+    worktreesLoading: false,
+    branches: [],
+    branchesLoading: false,
+    history: null,
+    historyLoading: false,
+    commitDetails: {},
+    commitDetailsLoading: new Set(),
+    selectedCommit: null,
+    selectedChange: null,
+    reviewedPaths: new Set(),
+    reviewPathRequest: null,
+    reviewNotice: null,
+    diff: null,
+    diffLoading: false,
+    combinedDiff: null,
+    combinedDiffLoading: false,
+  };
+}
 
 function isCurrentGitGeneration(projectPath: string, generation: number): boolean {
   return getWorkspaceProjectPath() === projectPath && gitGeneration === generation;
@@ -320,6 +357,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   gitOperation: null,
   worktrees: [],
   worktreesLoading: false,
+  branches: [],
+  branchesLoading: false,
   history: null,
   historyLoading: false,
   commitDetails: {},
@@ -330,6 +369,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   reviewPathRequest: null,
   reviewNotice: null,
   diff: null,
+  hunks: null,
   diffLoading: false,
   combinedDiff: null,
   combinedDiffLoading: false,
@@ -341,10 +381,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       searchRequestSequence += 1;
       gitGeneration += 1;
       worktreesRequestSequence += 1;
+      branchesRequestSequence += 1;
       set({
         projectPath, directories: {}, expanded: new Set(), loadingDirectories: new Set(), treeTruncated: new Set(),
         query: '', searchResults: [], searchTruncated: false, searching: false, selectedFile: null, preview: null,
-        previewLoading: false, git: null, gitLoading: false, gitOperation: null, worktrees: [], worktreesLoading: false,
+        previewLoading: false, git: null, gitLoading: false, gitOperation: null, worktrees: [], worktreesLoading: false, branches: [], branchesLoading: false,
         history: null, historyLoading: false, commitDetails: {}, commitDetailsLoading: new Set(), selectedCommit: null,
         selectedChange: null, reviewedPaths: new Set(), reviewPathRequest: null, reviewNotice: null,
         diff: null, diffLoading: false, combinedDiff: null, combinedDiffLoading: false, error: null,
@@ -488,11 +529,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (!expectedProject) return;
     const generation = ++gitGeneration;
     worktreesRequestSequence += 1;
+    branchesRequestSequence += 1;
     const requestSequence = ++gitStatusRequestSequence;
     set({
       gitLoading: true,
       worktrees: [],
       worktreesLoading: false,
+      branches: [],
+      branchesLoading: false,
       history: null,
       historyLoading: false,
       commitDetails: {},
@@ -519,6 +563,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
   },
 
+  syncGit: async () => {
+    const expectedProject = get().projectPath;
+    if (!expectedProject || !get().git?.repository) return;
+    const generation = gitGeneration;
+    const requestSequence = ++gitStatusRequestSequence;
+    try {
+      const git = await getFateApi().getGitStatus();
+      if (!isCurrentGitGeneration(expectedProject, generation) || requestSequence !== gitStatusRequestSequence) return;
+      if (git.branch !== get().git?.branch) {
+        set(derivedGitReset(git));
+        void get().loadBranches();
+      } else set({ git });
+    } catch (error) {
+      if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === gitStatusRequestSequence) set({ error: messageOf(error) });
+    }
+  },
+
   loadWorktrees: async () => {
     const expectedProject = get().projectPath;
     if (!expectedProject || get().worktreesLoading) return;
@@ -530,6 +591,41 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === worktreesRequestSequence) set({ worktrees, worktreesLoading: false });
     } catch (error) {
       if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === worktreesRequestSequence) set({ worktreesLoading: false, error: messageOf(error) });
+    }
+  },
+
+  loadBranches: async () => {
+    const expectedProject = get().projectPath;
+    const desktop = getDesktopApiOptional();
+    if (!expectedProject || !desktop?.listGitBranches || get().branchesLoading) return;
+    const generation = gitGeneration;
+    const requestSequence = ++branchesRequestSequence;
+    set({ branchesLoading: true, error: null });
+    try {
+      const branches = await desktop.listGitBranches();
+      if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === branchesRequestSequence) set({ branches, branchesLoading: false });
+    } catch (error) {
+      if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === branchesRequestSequence) set({ branchesLoading: false, error: messageOf(error) });
+    }
+  },
+
+  switchBranch: async (input) => {
+    const expectedProject = get().projectPath;
+    if (!expectedProject) throw new Error('Open a project before switching branches.');
+    const desktop = getDesktopApiOptional();
+    if (!desktop?.switchGitBranch) throw new Error('Branch switching is unavailable.');
+    const generation = gitGeneration;
+    set({ error: null });
+    try {
+      const status = await desktop.switchGitBranch(input);
+      if (isCurrentGitGeneration(expectedProject, generation)) {
+        set(derivedGitReset(status));
+        void get().loadBranches();
+      }
+      return status;
+    } catch (error) {
+      if (isCurrentGitGeneration(expectedProject, generation)) set({ error: messageOf(error) });
+      throw error;
     }
   },
 
@@ -594,27 +690,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     try {
       const result = await getFateApi().runGitOperation(operation);
       if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === gitOperationRequestSequence) {
-        gitGeneration += 1;
-        worktreesRequestSequence += 1;
-        set({
-          git: result.status,
-          gitOperation: null,
-          worktrees: [],
-          worktreesLoading: false,
-          history: null,
-          historyLoading: false,
-          commitDetails: {},
-          commitDetailsLoading: new Set(),
-          selectedCommit: null,
-          selectedChange: null,
-          reviewedPaths: new Set(),
-          reviewPathRequest: null,
-          reviewNotice: null,
-          diff: null,
-          diffLoading: false,
-          combinedDiff: null,
-          combinedDiffLoading: false,
-        });
+        set({ ...derivedGitReset(result.status), gitOperation: null });
       }
       return result;
     } catch (error) {
@@ -644,6 +720,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       diff: stillSelected ? get().diff : null,
       reviewNotice: `${path} restored to HEAD or removed if it was untracked.`,
     });
+  },
+
+  revertHunk: async (path, index, header) => {
+    const expectedProject = get().projectPath;
+    if (!expectedProject) throw new Error('Open a project before rejecting a hunk.');
+    const desktop = getDesktopApiOptional();
+    if (!desktop?.revertGitHunk) throw new Error('Hunk revert is unavailable.');
+    const generation = gitGeneration;
+    set({ error: null });
+    const result = await desktop.revertGitHunk({ path, index, header });
+    if (!isCurrentGitGeneration(expectedProject, generation)) return;
+    gitGeneration += 1;
+    const reviewedPaths = new Set(get().reviewedPaths);
+    reviewedPaths.delete(path);
+    const stillChanged = result.status.changes.some((change) => change.path === path);
+    set({ git: result.status, reviewedPaths, reviewNotice: `Hunk ${index + 1} of ${path} reverted.`, ...(stillChanged ? {} : { selectedChange: null, diff: null, hunks: null }) });
+    if (stillChanged) await get().selectChange(path);
   },
 
   toggleReviewed: (path) => {
@@ -681,10 +774,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const generation = gitGeneration;
     const requestSequence = ++fileDiffRequestSequence;
     combinedDiffRequestSequence += 1;
-    set({ selectedChange: path, diff: null, diffLoading: true, combinedDiff: null, combinedDiffLoading: false, error: null, reviewNotice: null });
+    set({ selectedChange: path, diff: null, hunks: null, diffLoading: true, combinedDiff: null, combinedDiffLoading: false, error: null, reviewNotice: null });
     try {
-      const diff = await getFateApi().getGitDiff(path);
-      if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === fileDiffRequestSequence && get().selectedChange === path) set({ diff, diffLoading: false });
+      const desktop = getDesktopApiOptional();
+      const [diff, hunks] = await Promise.all([getFateApi().getGitDiff(path), desktop?.getGitHunks ? desktop.getGitHunks(path).catch(() => null) : Promise.resolve(null)]);
+      if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === fileDiffRequestSequence && get().selectedChange === path) set({ diff, hunks, diffLoading: false });
     } catch (error) {
       if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === fileDiffRequestSequence && get().selectedChange === path) set({ diffLoading: false, error: messageOf(error) });
     }

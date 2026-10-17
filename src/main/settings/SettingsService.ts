@@ -21,6 +21,8 @@ const defaults: AppSettings = {
   agentWorkspace: defaultAgentWorkspacePolicy,
   memoryLearning: { enabled: false, global: true, project: true },
   confirmRiskyCommands: true,
+  piCodemode: false,
+  dailyBudgetUsd: null,
   terminalShell: null,
   reduceMotion: false,
   performanceMode: false,

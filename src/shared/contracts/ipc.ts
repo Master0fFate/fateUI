@@ -17,7 +17,10 @@ import { agentTeamSchema, agentTeamControlInputSchema, agentWorkspacePolicySchem
 
 const AGENT_TEAM_MAX_RETAINED_TEAMS = 32;
 import { toolProvenanceSchema } from './provenance';
-import { type AttestationQueryRequestInput, type AttestationQueryResult } from './mutationAttestation';
+import { type AttestationQueryRequestInput, type AttestationQueryResult, type CheckpointRestoreResult } from './mutationAttestation';
+import type { HookDefinition } from './hooks';
+import type { LspServerDefinition } from './lsp';
+import type { UsageQueryInput, UsageQueryResult } from './usage';
 import {
   browserAnnotationReferenceSchema,
   type BrowserAnnotation,
@@ -152,6 +155,8 @@ export const ipcChannels = {
   runtimeSendSessionMessage: 'runtime:send-session-message',
   runtimeSetModel: 'runtime:set-model',
   runtimeSetThinking: 'runtime:set-thinking',
+  runtimeRecoveryReview: 'runtime:recovery-review',
+  runtimeRecoveryAcknowledge: 'runtime:recovery-acknowledge',
   runtimeSetPermission: 'runtime:set-permission',
   runtimeProviderLoginInitialize: 'runtime:provider-login:initialize',
   runtimeProviderLoginStart: 'runtime:provider-login:start',
@@ -211,6 +216,11 @@ export const ipcChannels = {
   mcpGet: 'mcp:get',
   mcpSet: 'mcp:set',
   mcpProbe: 'mcp:probe',
+  hooksGet: 'hooks:get',
+  hooksSet: 'hooks:set',
+  lspGet: 'lsp:get',
+  lspSet: 'lsp:set',
+  usageQuery: 'usage:query',
   piMigrationInspect: 'pi-migration:inspect',
   piMigrationImport: 'pi-migration:import',
   updatesCheck: 'updates:check',
@@ -246,6 +256,7 @@ export const ipcChannels = {
   diagnosticsGet: 'diagnostics:get',
   logsGet: 'logs:get',
   attestationsQuery: 'attestations:query',
+  checkpointsRestore: 'checkpoints:restore',
   appCommand: 'app:command',
   filesList: 'files:list',
   filesSearch: 'files:search',
@@ -256,12 +267,16 @@ export const ipcChannels = {
   gitDiff: 'git:diff',
   gitCombinedDiff: 'git:combined-diff',
   gitWorktrees: 'git:worktrees',
+  gitBranches: 'git:branches',
+  gitSwitchBranch: 'git:switch-branch',
   gitSwitchWorktree: 'git:switch-worktree',
   gitCreateWorktreeSession: 'git:create-worktree-session',
   gitHistory: 'git:history',
   gitCommitDetails: 'git:commit-details',
   gitOperation: 'git:operation',
   gitRevertPath: 'git:revert-path',
+  gitHunks: 'git:hunks',
+  gitRevertHunk: 'git:revert-hunk',
   sessionExport: 'session:export',
 } as const;
 
@@ -494,6 +509,19 @@ export const gitWorktreeSchema = z.object({
   current: z.boolean(),
 }).strict();
 export const gitWorktreeListSchema = z.array(gitWorktreeSchema).max(500);
+export const gitBranchRefSchema = z.object({
+  name: z.string().min(1).max(250),
+  kind: z.enum(['local', 'remote']),
+  current: z.boolean(),
+  worktreePath: z.string().min(1).max(32_768).nullable(),
+  upstream: z.string().min(1).max(500).nullable(),
+}).strict();
+export const gitBranchListSchema = z.array(gitBranchRefSchema).max(2_000);
+export const gitSwitchBranchInputSchema = z.object({
+  name: z.string().min(1).max(250),
+  create: z.boolean().optional(),
+  base: z.string().min(1).max(250).optional(),
+}).strict();
 export const gitWorktreeSessionResultSchema = z.object({
   state: z.lazy(() => runtimeStateSchema),
   selectedText: z.string().max(2_000),
@@ -547,6 +575,28 @@ export const gitRevertPathResultSchema = z.object({
   path: z.string().min(1).max(4_096),
   status: gitStatusSchema,
 }).strict();
+export const GIT_HUNK_TEXT_MAX = 64_000;
+export const gitHunkSchema = z.object({
+  index: z.number().int().nonnegative(),
+  header: z.string().min(1).max(1_000),
+  oldStart: z.number().int().nonnegative(),
+  oldLines: z.number().int().nonnegative(),
+  newStart: z.number().int().nonnegative(),
+  newLines: z.number().int().nonnegative(),
+  text: z.string().max(GIT_HUNK_TEXT_MAX),
+  truncated: z.boolean(),
+}).strict();
+export const gitHunksResultSchema = z.object({
+  path: z.string().min(1).max(4_096),
+  tracked: z.boolean(),
+  hunks: z.array(gitHunkSchema).max(500),
+}).strict();
+export const gitRevertHunkInputSchema = z.object({
+  path: z.string().min(1).max(4_096),
+  index: z.number().int().nonnegative(),
+  header: z.string().min(1).max(1_000),
+}).strict();
+
 export const recoveryNoticeSchema = z.object({
   projectPath: z.string().min(1).max(32_768).nullable(),
   sessionId: z.string().min(1).max(500).nullable(),
@@ -1158,6 +1208,8 @@ export const subagentControlInputSchema = z.discriminatedUnion('action', [
 ]);
 export const setModelInputSchema = z.object({ provider: z.string().min(1), id: z.string().min(1) }).strict();
 export const setThinkingInputSchema = z.object({ level: thinkingLevelSchema }).strict();
+export const recoveryReviewSchema = z.object({ reasons: z.array(z.string().min(1).max(500)).max(64) }).strict();
+export type RecoveryReview = z.infer<typeof recoveryReviewSchema>;
 export const setPermissionInputSchema = z.object({ level: permissionLevelSchema }).strict();
 export const queueMutationInputSchema = z.object({
   id: z.string().uuid(),
@@ -1332,6 +1384,7 @@ const mcpServerBaseSchema = z.object({ name: mcpServerNameSchema, enabled: z.boo
 export const mcpServerSchema = z.discriminatedUnion('transport', [
   mcpServerBaseSchema.extend({ transport: z.literal('stdio'), command: z.string().trim().min(1).max(2_048), args: z.array(z.string().max(2_048)).max(32) }).strict(),
   mcpServerBaseSchema.extend({ transport: z.literal('http'), url: z.string().url().max(2_048).refine((raw) => {
+    if (!URL.canParse(raw)) return false;
     const url = new URL(raw);
     return !url.username && !url.password && !url.hash
       && (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)));
@@ -1348,6 +1401,7 @@ export const piMigrationReportSchema = z.object({
   piProfileFound: z.boolean(), sharedSettings: z.boolean(), sharedSessions: z.boolean(), sharedExtensions: z.boolean(),
   bridgeConfigured: z.boolean(), projectExtensionsBlocked: z.boolean(), projectMcpRequiresBridge: z.boolean(), providerEntriesToImport: z.number().int().nonnegative(), providerConflicts: z.number().int().nonnegative(),
   mcpServersToImport: z.number().int().nonnegative(), mcpServersSkipped: z.number().int().nonnegative(),
+  piMcpServers: z.array(z.object({ name: z.string().min(1).max(64), transport: z.enum(['stdio', 'http']), target: z.string().max(260), enabled: z.boolean() }).strict()).max(64),
   missingMcpCommands: z.array(z.string().max(64)).max(32), packageManagerMissing: z.boolean(),
   warnings: z.array(z.string().max(500)).max(100),
 }).strict();
@@ -1374,6 +1428,8 @@ export const appSettingsSchema = z.object({
   agentWorkspace: agentWorkspacePolicySchema,
   memoryLearning: memoryLearningSettingsSchema,
   confirmRiskyCommands: z.boolean(),
+  piCodemode: z.boolean().default(false),
+  dailyBudgetUsd: z.number().nonnegative().finite().nullable().default(null),
   terminalShell: z.string().max(4_096).nullable(),
   reduceMotion: z.boolean(),
   performanceMode: z.boolean().default(false),
@@ -1526,6 +1582,9 @@ export type GitStatus = z.infer<typeof gitStatusSchema>;
 export type GitDiff = z.infer<typeof gitDiffSchema>;
 export type GitCombinedDiff = z.infer<typeof gitCombinedDiffSchema>;
 export type GitWorktree = z.infer<typeof gitWorktreeSchema>;
+export type GitBranchRef = z.infer<typeof gitBranchRefSchema>;
+export type GitSwitchBranchInput = z.infer<typeof gitSwitchBranchInputSchema>;
+export interface GitRenameBranchInput { from?: string; to: string }
 export type GitRef = z.infer<typeof gitRefSchema>;
 export type GitCommitSummary = z.infer<typeof gitCommitSummarySchema>;
 export type GitHistory = z.infer<typeof gitHistorySchema>;
@@ -1534,6 +1593,8 @@ export type GitCommitDetails = z.infer<typeof gitCommitDetailsSchema>;
 export type GitOperation = z.infer<typeof gitOperationSchema>;
 export type GitOperationResult = z.infer<typeof gitOperationResultSchema>;
 export type GitRevertPathResult = z.infer<typeof gitRevertPathResultSchema>;
+export type GitHunk = z.infer<typeof gitHunkSchema>;
+export type GitHunksResult = z.infer<typeof gitHunksResultSchema>;
 export type TerminalEvent = z.infer<typeof terminalEventSchema>;
 export type ImageGenerationSettings = z.infer<typeof imageGenerationSettingsSchema>;
 export type AppSettings = z.infer<typeof appSettingsSchema>;
@@ -1612,6 +1673,8 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   controlAgentTeam: (input: AgentTeamControlInput) => Promise<RuntimeState>;
   setModel: (provider: string, id: string) => Promise<RuntimeState>;
   setThinkingLevel: (level: ThinkingLevel) => Promise<RuntimeState>;
+  getRecoveryReview: () => Promise<RecoveryReview>;
+  acknowledgeRecovery: () => Promise<RecoveryReview>;
   setPermissionLevel: (level: PermissionLevel) => Promise<RuntimeState>;
   initializeProviderLogin: () => Promise<RuntimeState>;
   startProviderLogin: (input: ProviderLoginStartInput) => Promise<RuntimeState>;
@@ -1661,12 +1724,16 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   getGitDiff: (path: string) => Promise<GitDiff>;
   getGitCombinedDiff: () => Promise<GitCombinedDiff>;
   listGitWorktrees: () => Promise<GitWorktree[]>;
+  listGitBranches: () => Promise<GitBranchRef[]>;
+  switchGitBranch: (input: GitSwitchBranchInput) => Promise<GitStatus>;
   switchGitWorktree: (path: string) => Promise<RuntimeState>;
   createWorktreeSession: (entryId: string) => Promise<z.infer<typeof gitWorktreeSessionResultSchema>>;
   getGitHistory: () => Promise<GitHistory>;
   getGitCommitDetails: (hash: string) => Promise<GitCommitDetails>;
   runGitOperation: (operation: GitOperation) => Promise<GitOperationResult>;
   revertGitPath: (path: string) => Promise<z.infer<typeof gitRevertPathResultSchema>>;
+  getGitHunks: (path: string) => Promise<z.infer<typeof gitHunksResultSchema>>;
+  revertGitHunk: (input: z.infer<typeof gitRevertHunkInputSchema>) => Promise<z.infer<typeof gitRevertPathResultSchema>>;
   exportSession: () => Promise<z.infer<typeof sessionExportResultSchema>>;
   createTerminal: (cols: number, rows: number) => Promise<z.infer<typeof terminalCreateResultSchema>>;
   writeTerminal: (id: string, data: string) => Promise<void>;
@@ -1678,6 +1745,11 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   getMcpServers: () => Promise<McpServerDefinition[]>;
   setMcpServers: (servers: McpServerDefinition[]) => Promise<McpServerDefinition[]>;
   testMcpServer: (name: string) => Promise<z.infer<typeof mcpProbeResultSchema>>;
+  getHooks: () => Promise<HookDefinition[]>;
+  setHooks: (hooks: HookDefinition[]) => Promise<HookDefinition[]>;
+  getLspServers: () => Promise<LspServerDefinition[]>;
+  setLspServers: (servers: LspServerDefinition[]) => Promise<LspServerDefinition[]>;
+  queryUsage: (input?: UsageQueryInput) => Promise<UsageQueryResult>;
   inspectPiMigration: () => Promise<PiMigrationReport>;
   importPiMigration: () => Promise<z.infer<typeof piMigrationResultSchema>>;
   checkForUpdates: () => Promise<UpdateCheckResult>;
@@ -1713,6 +1785,7 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   getDiagnostics: () => Promise<Diagnostics>;
   getLogs: () => Promise<LogEntry[]>;
   queryAttestations: (request?: AttestationQueryRequestInput) => Promise<AttestationQueryResult>;
+  restoreCheckpoint: (attestationId: string) => Promise<CheckpointRestoreResult>;
   onEvents: (listener: (events: PiEvent[]) => void) => () => void;
   onTerminalEvent: (listener: (event: TerminalEvent) => void) => () => void;
   onAppCommand: (listener: (command: AppCommand) => void) => () => void;

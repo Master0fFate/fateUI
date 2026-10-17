@@ -156,7 +156,6 @@ function absorbSessionEntry(metadata: ScannedSessionMetadata, entry: JsonRecord,
     return;
   }
   if (entry.type !== 'message' || !isRecord(entry.message)) return;
-  metadata.messageCount += 1;
   const message = entry.message;
   const role = message.role;
   if (role !== 'user' && role !== 'assistant') return;
@@ -167,6 +166,7 @@ function absorbSessionEntry(metadata: ScannedSessionMetadata, entry: JsonRecord,
     metadata.lastActivityTime = Math.max(metadata.lastActivityTime ?? Number.NEGATIVE_INFINITY, timestamp);
   }
   const text = textFromContent(message.content);
+  if (text) metadata.messageCount += 1;
   if (role === 'user' && !metadata.firstMessage && text) metadata.firstMessage = text;
   if (includeSearchText && text && metadata.searchText.length < MAX_SESSION_SEARCH_TEXT) {
     const separator = metadata.searchText ? '\n' : '';

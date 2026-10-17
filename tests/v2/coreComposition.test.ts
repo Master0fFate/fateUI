@@ -48,7 +48,7 @@ describe('real Node-only Fate core composition', () => {
       expect(createRuntime.mock.calls[0]?.[0].browserIntegration).toBeNull();
       expect(core.savedAgents).toBeNull();
       const state = await core.runtime.openProject({ path: project, name: 'fixture', trusted: true });
-      expect(state).toMatchObject({ status: 'ready', permissionLevel: 'edit' });
+      expect(state).toMatchObject({ status: 'ready', permissionLevel: 'full-access' });
       expect(adapter.invocations.filter((entry) => entry.kind === 'createModelRuntime')).toHaveLength(1);
       expect(runtimeCreation).toHaveBeenCalledOnce();
       expect(runtimeCreation.mock.calls[0]?.[3]?.some((tool) => tool.name.startsWith('browser_'))).toBe(false);

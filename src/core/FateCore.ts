@@ -5,6 +5,7 @@ import type { AppLogService } from '../main/logging/AppLogService';
 import type { MultiProjectPiRuntime } from '../main/pi/MultiProjectPiRuntime';
 import type { SessionPermissionPersistence } from '../main/pi/SessionPermissionStore';
 import type { MutationAttestationLedger } from '../main/pi/provenance/MutationAttestationLedger';
+import type { CheckpointStore } from '../main/pi/provenance/CheckpointStore';
 import type { SettingsService } from '../main/settings/SettingsService';
 import type { FatePaths } from './FatePaths';
 import type { RecoveryCoordinator, RecoveryResult } from './recovery/RecoveryCoordinator';
@@ -27,6 +28,7 @@ export interface FateCore {
   readonly learning: LearningService;
   readonly sessionPermissions: SessionPermissionPersistence;
   readonly attestations: MutationAttestationLedger;
+  readonly checkpoints: CheckpointStore;
   /** The sole existing multi-project runtime owner created by this factory. */
   readonly runtime: MultiProjectPiRuntime;
   /** Dormant until a trusted transport resolves workspace membership; no listener. */

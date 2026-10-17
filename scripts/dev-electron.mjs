@@ -37,6 +37,7 @@ function startElectron() {
       ...process.env,
       VITE_DEV_SERVER_URL: developmentUrl,
       FATE_GUI_DATA_DIR: developmentProfile.fateGuiData,
+      FATE_LOCK_DIR: path.join(developmentProfile.profileRoot, 'locks'),
     },
     stdio: 'inherit',
     windowsHide: false,

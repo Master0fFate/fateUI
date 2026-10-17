@@ -17,8 +17,8 @@
 
 .monitor-state, .monitor-dashboard-row-state { display: inline-flex; flex: none; height: 16px; align-items: center; justify-content: center; padding: 0 5px; border-radius: 4px; color: var(--theme-text-soft); background: var(--theme-raised); font: 8px/1 var(--font-interface); font-weight: 650; letter-spacing: .03em; text-transform: uppercase; }
 .monitor-dashboard-row-state { min-width: 50px; }
-.monitor-state--attention, .monitor-dashboard-row--attention .monitor-dashboard-row-state { color: var(--theme-danger); background: color-mix(in srgb, var(--theme-danger) 14%, transparent); }
-.monitor-state--active, .monitor-dashboard-row--active .monitor-dashboard-row-state { color: var(--theme-accent); background: var(--theme-accent-soft); }
+.monitor-dashboard-row--attention .monitor-dashboard-row-state { color: var(--theme-danger); background: color-mix(in srgb, var(--theme-danger) 14%, transparent); }
+.monitor-dashboard-row--active .monitor-dashboard-row-state { color: var(--theme-accent); background: var(--theme-accent-soft); }
 .monitor-state--unknown { color: var(--theme-muted); background: transparent; box-shadow: inset 0 0 0 1px var(--theme-border); }
 .monitor-dashboard-metrics { display: inline-flex; align-items: center; gap: 8px; }
 .monitor-dashboard-metrics strong { color: var(--theme-text); font: inherit; font-weight: 650; }

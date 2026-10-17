@@ -22,7 +22,6 @@
 :root[data-skin="m3-expressive"] :is(.activity-pulse, .activity-pulse-state, .activity-pulse-label) { min-width: 0; overflow: hidden; }
 :root[data-skin="m3-expressive"] .activity-pulse-label { text-overflow: ellipsis; white-space: nowrap; }
 :root[data-skin="m3-expressive"] .workspace-header strong { font-size: 16px; }
-:root[data-skin="m3-expressive"] .workspace-header .eyebrow { margin-bottom: 3px; }
 :root[data-skin="m3-expressive"] .activity-pulse { font-size: 10px; }
 :root[data-skin="m3-expressive"] .browser-thread-layout { margin: 0 10px 10px; border-radius: 24px; background: transparent; }
 :root[data-skin="m3-expressive"] .workspace::before { position: absolute; z-index: -2; inset: 82px 10px 10px; border-radius: 24px; background: var(--theme-canvas); content: ''; pointer-events: none; }
@@ -112,7 +111,12 @@
 :root[data-skin="m3-expressive"] .composer .send-button svg { width: 22px; height: 22px; }
 :root[data-skin="m3-expressive"] .composer-toolbar button.model-pill { min-height: 36px; padding: 7px 10px; border-radius: 24px; background: var(--theme-raised); }
 :root[data-skin="m3-expressive"] .composer-toolbar button.model-pill:hover { background: var(--theme-raised-hover); }
-:root[data-skin="m3-expressive"] .composer-toolbar .composer-project-button { min-height: 34px; padding-inline: 12px; border-radius: 24px; background: var(--theme-raised); }
+:root[data-skin="m3-expressive"] .effort-slider-track, :root[data-skin="m3-expressive"] .effort-slider-fill { inset: 5px 0; clip-path: polygon(0 calc(50% - 2px), 100% 0, 100% 100%, 0 calc(50% + 2px)); border-radius: 8px; }
+:root[data-skin="m3-expressive"] .effort-slider-thumb { width: calc(5px + var(--heat) * 2px); height: calc(18px + var(--heat) * 6px); border: 0; border-radius: 4px; background: var(--theme-accent); box-shadow: 0 0 0 4px var(--theme-raised), 0 0 calc(var(--heat) * 18px) color-mix(in srgb, var(--theme-accent) 80%, transparent); }
+:root[data-skin="m3-expressive"] .effort-slider:hover .effort-slider-thumb, :root[data-skin="m3-expressive"] .effort-slider:focus-visible .effort-slider-thumb { transform: translate(-50%, -50%) scaleX(1.4); }
+:root[data-skin="m3-expressive"] .effort-slider-value { font-weight: 600; letter-spacing: .02em; text-transform: none; }
+:root[data-skin="m3-expressive"] .model-setting-toggle { border-radius: 50%; }
+:root[data-skin="m3-expressive"] .composer-toolbar :is(.composer-project-button, .composer-branch) { min-height: 34px; padding-inline: 12px; border-radius: 24px; background: var(--theme-raised); }
 :root[data-skin="m3-expressive"] .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button) { display: grid; box-sizing: border-box; flex: 0 0 var(--m3-action-size); width: var(--m3-action-size); min-width: var(--m3-action-size); height: var(--m3-action-size); min-height: var(--m3-action-size); place-items: center; border-radius: 50%; background: var(--theme-raised); padding: 0; }
 :root[data-skin="m3-expressive"] .composer-toolbar .tooltip-trigger:has(> :is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button)) { flex: 0 0 var(--m3-action-size); min-width: var(--m3-action-size); }
 :root[data-skin="m3-expressive"] :is(.tool-card, .queued-message, .goalmax-task-strip, .goalmax-rail, .subagent-chat-preview, .subagent-session-row, .browser-annotation-editor) { border-radius: 16px; box-shadow: none; }
@@ -138,6 +142,15 @@
 :root[data-skin="m3-expressive"] .cinematic-image-viewer .cinematic-image-close { z-index: 1; border-radius: 50%; }
 :root[data-skin="m3-expressive"] :is([role="menu"], .custom-select-content, .popover-content) { border-radius: 18px; background: var(--theme-raised); }
 :root[data-skin="m3-expressive"] :is(.settings-group, .context-dashboard > section, .goalmax-overview-facts, .agent-tree-branch) { box-shadow: none; }
+:root[data-skin="m3-expressive"] :is(.settings-card, .usage-table, .usage-days) { border-radius: 16px; box-shadow: none; background: var(--theme-raised); }
+/* 16px corners clip 10px cell padding; keep edge cells inside the curve. */
+:root[data-skin="m3-expressive"] .usage-table :is(th, td):first-child { padding-left: 16px; }
+:root[data-skin="m3-expressive"] .usage-table :is(th, td):last-child { padding-right: 16px; }
+:root[data-skin="m3-expressive"] .usage-caption { margin-left: 6px; }
+:root[data-skin="m3-expressive"] .settings-empty-card { border-radius: 16px; }
+:root[data-skin="m3-expressive"] .settings-import-facts li { background: var(--theme-panel); }
+:root[data-skin="m3-expressive"] :is(.hunk-action, .activity-rewind, .settings-providers-add) { border-radius: 18px; }
+:root[data-skin="m3-expressive"] .composer-tools-list .composer-saved-session-menu > summary { border-radius: 10px; }
 :root[data-skin="m3-expressive"] :is(.settings-nav-button, .custom-select-item, .palette-item, .file-row, .resource-type-row, .automation-open, .activity-chip) { border-radius: 10px; }
 :root[data-skin="m3-expressive"] :is(.settings-theme-select, .settings-font-select) { flex: 0 0 160px; max-width: 50%; }
 :root[data-skin="m3-expressive"] .music-dock { left: var(--m3-music-left, auto); right: calc(24px + var(--music-dock-inset, 0px)); bottom: var(--m3-music-bottom, 24px); width: var(--m3-music-width, min(320px, calc(100vw - 48px - var(--music-dock-inset, 0px)))); transition: none; }
@@ -217,7 +230,6 @@
 :root[data-skin="m3-expressive"][data-platform="darwin"] .sidebar { padding-top: 40px; }
 @container workspace (max-width: 600px) {
   :root[data-skin="m3-expressive"] .workspace-header .workspace-header-identity { flex-direction: column; align-items: flex-start; gap: 3px; }
-  :root[data-skin="m3-expressive"] .workspace-header .eyebrow { display: none; }
   :root[data-skin="m3-expressive"] .activity-pulse { max-width: 100%; }
   :root[data-skin="m3-expressive"] .session-controls { gap: 4px; }
   :root[data-skin="m3-expressive"] .session-controls .icon-button { width: 30px; height: 30px; flex-basis: 30px; border-radius: 12px; }
@@ -238,11 +250,9 @@
 }
 @container (max-width: 340px) {
   :root[data-skin="m3-expressive"] .inspector-secondary-trigger { gap: 3px; padding-inline: 3px; }
-  :root[data-skin="m3-expressive"] .inspector-secondary-trigger > svg { display: none; }
 }
 /* Global inspector labels disappear here; retain their visible icon counterpart. */
 @container (max-width: 259px) {
-  :root[data-skin="m3-expressive"] .inspector-secondary-trigger > svg { display: block; }
   :root[data-skin="m3-expressive"] .inspector-secondary-tabs { gap: 2px; padding-inline: 4px; }
   :root[data-skin="m3-expressive"] .inspector-secondary-tooltip { flex: 1 1 0; }
   :root[data-skin="m3-expressive"] .inspector-secondary-trigger { width: 100%; padding: 0; }

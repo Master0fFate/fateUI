@@ -7,7 +7,7 @@ import { McpSettings } from './McpSettings';
 afterEach(() => { Reflect.deleteProperty(window, 'piDesktop'); });
 
 it('imports a detected Pi profile without launching MCP servers or losing the saved list', async () => {
-  const report = { piProfileFound: true, sharedSettings: true, sharedSessions: true, sharedExtensions: true, bridgeConfigured: false, projectExtensionsBlocked: false, projectMcpRequiresBridge: false, providerEntriesToImport: 1, providerConflicts: 0, mcpServersToImport: 1, mcpServersSkipped: 0, missingMcpCommands: [], packageManagerMissing: false, warnings: [] };
+  const report = { piProfileFound: true, sharedSettings: true, sharedSessions: true, sharedExtensions: true, bridgeConfigured: false, projectExtensionsBlocked: false, projectMcpRequiresBridge: false, providerEntriesToImport: 1, providerConflicts: 0, mcpServersToImport: 1, mcpServersSkipped: 0, piMcpServers: [], missingMcpCommands: [], packageManagerMissing: false, warnings: [] };
   const imported = { name: 'docs', enabled: true, transport: 'stdio' as const, command: 'node', args: ['fixture.js'] };
   const getMcpServers = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([imported]);
   const importPiMigration = vi.fn(async () => ({ providerEntriesImported: 1, providerConflicts: 0, mcpServersImported: 1, mcpServersSkipped: 0, warnings: [] }));
@@ -28,7 +28,7 @@ it('adds and saves an opt-in MCP server from the settings panel', async () => {
   const probe = vi.fn(async () => ({ tools: ['echo'] }));
   Object.defineProperty(window, 'piDesktop', { configurable: true, value: {
     getMcpServers: vi.fn(async () => []), setMcpServers: save, testMcpServer: probe,
-    inspectPiMigration: vi.fn(async () => ({ piProfileFound: false, sharedSettings: false, sharedSessions: false, sharedExtensions: false, bridgeConfigured: false, projectExtensionsBlocked: false, projectMcpRequiresBridge: false, providerEntriesToImport: 0, providerConflicts: 0, mcpServersToImport: 0, mcpServersSkipped: 0, missingMcpCommands: [], packageManagerMissing: false, warnings: [] })),
+    inspectPiMigration: vi.fn(async () => ({ piProfileFound: false, sharedSettings: false, sharedSessions: false, sharedExtensions: false, bridgeConfigured: false, projectExtensionsBlocked: false, projectMcpRequiresBridge: false, providerEntriesToImport: 0, providerConflicts: 0, mcpServersToImport: 0, mcpServersSkipped: 0, piMcpServers: [], missingMcpCommands: [], packageManagerMissing: false, warnings: [] })),
     importPiMigration: vi.fn(),
   } as unknown as PiDesktopApi });
   const user = userEvent.setup();
@@ -46,4 +46,21 @@ it('adds and saves an opt-in MCP server from the settings panel', async () => {
   await user.click(screen.getByRole('button', { name: 'Test saved server' }));
   await waitFor(() => expect(probe).toHaveBeenCalledWith('docs'));
   expect(await screen.findByText(/connected: 1 tools available/u)).toBeInTheDocument();
+});
+
+it('lists Pi bridge servers read-only and folds the duplicate bridge note', async () => {
+  Object.defineProperty(window, 'piDesktop', { configurable: true, value: {
+    getMcpServers: vi.fn(async () => []), setMcpServers: vi.fn(), testMcpServer: vi.fn(), importPiMigration: vi.fn(),
+    inspectPiMigration: vi.fn(async () => ({ piProfileFound: true, sharedSettings: true, sharedSessions: true, sharedExtensions: true, bridgeConfigured: true, projectExtensionsBlocked: false, projectMcpRequiresBridge: false, providerEntriesToImport: 0, providerConflicts: 0, mcpServersToImport: 0, mcpServersSkipped: 2, missingMcpCommands: [], packageManagerMissing: false,
+      piMcpServers: [{ name: 'git', transport: 'stdio', target: 'uvx', enabled: true }, { name: 'docs', transport: 'http', target: 'docs.example', enabled: false }],
+      warnings: ['git needs its Pi MCP bridge or manual setup; Fate cannot preserve all its options.'] })),
+  } as unknown as PiDesktopApi });
+  render(<McpSettings />);
+  const list = await screen.findByRole('region', { name: 'Pi MCP bridge servers' });
+  expect(list).toHaveTextContent('2 servers');
+  expect(list).toHaveTextContent('gituvx');
+  expect(list).toHaveTextContent('docsdocs.exampleoff');
+  expect(screen.getByText('No Fate servers.')).toBeInTheDocument();
+  expect(screen.queryByText(/Kept on the Pi MCP bridge/u)).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 });

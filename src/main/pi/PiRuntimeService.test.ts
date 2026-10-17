@@ -345,8 +345,8 @@ describe('PiRuntimeService', () => {
     const permissions = new InMemorySessionPermissionStore();
     if (saved) await permissions.set('/project', 'session-1', saved);
     const service = permissionRuntime(fake, permissions);
-    expect((await service.openProject({ path: '/project', name: 'project', trusted: true })).permissionLevel).toBe(saved ?? 'edit');
-    expect(fake.session.getActiveToolNames().includes('bash')).toBe(saved === 'full-access');
+    expect((await service.openProject({ path: '/project', name: 'project', trusted: true })).permissionLevel).toBe(saved ?? 'full-access');
+    expect(fake.session.getActiveToolNames().includes('bash')).toBe((saved ?? 'full-access') === 'full-access');
     await service.dispose();
   });
 
@@ -400,6 +400,7 @@ describe('PiRuntimeService', () => {
   it('keeps authority and admissions fenced while higher tool names are staged until persistence completes', async () => {
     const fake = fixture();
     const permissions = new InMemorySessionPermissionStore();
+    await permissions.set('/project', 'session-1', 'edit');
     const service = permissionRuntime(fake, permissions);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const save = permissions.set.bind(permissions);
@@ -504,10 +505,10 @@ describe('PiRuntimeService', () => {
     await service.dispose();
   });
 
-  it.each(['new', 'fork', 'clone', 'import'] as const)('%s session replacement does not inherit a previous full-access grant', async (operation) => {
+  it.each(['new', 'fork', 'clone', 'import'] as const)('%s session replacement does not inherit a previous read-only grant', async (operation) => {
     const fake = fixture();
     const permissions = new InMemorySessionPermissionStore();
-    await permissions.set('/project', 'session-1', 'full-access');
+    await permissions.set('/project', 'session-1', 'read-only');
     const service = permissionRuntime(fake, permissions);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const rebind = fake.runtime.setRebindSession.mock.calls[0]?.[0] as (session: typeof fake.session) => Promise<void>;
@@ -523,8 +524,8 @@ describe('PiRuntimeService', () => {
     else if (operation === 'fork') await service.forkSession('entry-1');
     else if (operation === 'clone') await service.cloneSession();
     else await service.importSession('/sessions/import.jsonl');
-    expect(service.getState(false)).toMatchObject({ sessionId: `session-${operation}`, permissionLevel: 'edit' });
-    expect(fake.session.getActiveToolNames()).not.toContain('bash');
+    expect(service.getState(false)).toMatchObject({ sessionId: `session-${operation}`, permissionLevel: 'full-access' });
+    expect(fake.session.getActiveToolNames()).toContain('bash');
     await service.dispose();
   });
 
@@ -545,6 +546,7 @@ describe('PiRuntimeService', () => {
   it('does not publish an escalation into a project selected while its save awaited', async () => {
     const fake = fixture();
     const permissions = new InMemorySessionPermissionStore();
+    await permissions.set('/project', 'session-1', 'edit');
     const service = permissionRuntime(fake, permissions);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const entered = permissionBarrier();
@@ -557,20 +559,20 @@ describe('PiRuntimeService', () => {
     const callsAfterReplacement = fake.session.setActiveToolsByName.mock.calls.length;
     finish.release();
     await rejected;
-    expect(service.getState(false)).toMatchObject({ project: { path: '/other' }, permissionLevel: 'edit', error: { code: 'PROJECT_NOT_TRUSTED' } });
+    expect(service.getState(false)).toMatchObject({ project: { path: '/other' }, permissionLevel: 'full-access', error: { code: 'PROJECT_NOT_TRUSTED' } });
     expect(service.agentAuthority('session-1')).toBeNull();
     expect(fake.session.setActiveToolsByName).toHaveBeenCalledTimes(callsAfterReplacement);
     await service.dispose();
   });
 
-  it('does not assign a stale restored full-access grant to a rebound session after an await', async () => {
+  it('does not assign a stale restored read-only grant to a rebound session after an await', async () => {
     const fake = fixture();
     const permissions = new InMemorySessionPermissionStore();
     const service = permissionRuntime(fake, permissions);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const entered = permissionBarrier();
     const finish = permissionBarrier();
-    vi.spyOn(permissions, 'get').mockImplementationOnce(async () => { entered.release(); await finish.promise; return 'full-access'; });
+    vi.spyOn(permissions, 'get').mockImplementationOnce(async () => { entered.release(); await finish.promise; return 'read-only'; });
     const rebind = fake.runtime.setRebindSession.mock.calls[0]?.[0] as (session: typeof fake.session) => Promise<void>;
     const stale = { ...fake.session, sessionId: 'stale' };
     fake.runtime.session = stale;
@@ -581,8 +583,8 @@ describe('PiRuntimeService', () => {
     await rebind(fresh);
     finish.release();
     await restoring;
-    expect(service.getState(false)).toMatchObject({ sessionId: 'fresh', permissionLevel: 'edit' });
-    expect(fake.session.getActiveToolNames()).not.toContain('bash');
+    expect(service.getState(false)).toMatchObject({ sessionId: 'fresh', permissionLevel: 'full-access' });
+    expect(fake.session.getActiveToolNames()).toContain('bash');
     await service.dispose();
   });
 
@@ -591,11 +593,11 @@ describe('PiRuntimeService', () => {
     const { service, fake, resumed, saved: summary } = coldPermissionFixture(permissions);
     if (saved) await permissions.set('/project', summary.id, saved);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
-    expect((await service.switchSession(summary.id)).permissionLevel).toBe(saved ?? 'edit');
+    expect((await service.switchSession(summary.id)).permissionLevel).toBe(saved ?? 'full-access');
     expect(fake.adapter.createRuntime).toHaveBeenCalledTimes(1);
     await service.prompt({ text: 'continue', behavior: 'prompt' });
-    expect(service.getState(false).permissionLevel).toBe(saved ?? 'edit');
-    expect(resumed.session.getActiveToolNames().includes('bash')).toBe(saved === 'full-access');
+    expect(service.getState(false).permissionLevel).toBe(saved ?? 'full-access');
+    expect(resumed.session.getActiveToolNames().includes('bash')).toBe((saved ?? 'full-access') === 'full-access');
     resumed.settle();
     await service.dispose();
   });
@@ -639,6 +641,7 @@ describe('PiRuntimeService', () => {
   it('keeps a cold escalation fenced until durable save and never starts Pi just to change permissions', async () => {
     const permissions = new InMemorySessionPermissionStore();
     const { service, saved, fake } = coldPermissionFixture(permissions);
+    await permissions.set('/project', saved.id, 'edit');
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     await service.switchSession(saved.id);
     const save = permissions.set.bind(permissions);
@@ -660,6 +663,7 @@ describe('PiRuntimeService', () => {
   it('blocks a cold escalation save failure and permits only a successful retry to clear it', async () => {
     const permissions = new InMemorySessionPermissionStore();
     const { service, saved, fake } = coldPermissionFixture(permissions);
+    await permissions.set('/project', saved.id, 'edit');
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     await service.switchSession(saved.id);
     vi.spyOn(permissions, 'set').mockRejectedValueOnce(new Error('disk full'));
@@ -675,6 +679,7 @@ describe('PiRuntimeService', () => {
   it('fences a stale cold escalation save when selection changes before completion', async () => {
     const permissions = new InMemorySessionPermissionStore();
     const { service, saved } = coldPermissionFixture(permissions);
+    await permissions.set('/project', saved.id, 'edit');
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     await service.switchSession(saved.id);
     const entered = permissionBarrier();
@@ -686,7 +691,7 @@ describe('PiRuntimeService', () => {
     await service.closeProject();
     finish.release();
     await rejected;
-    expect(service.getState(false)).toMatchObject({ project: null, permissionLevel: 'edit', error: null });
+    expect(service.getState(false)).toMatchObject({ project: null, permissionLevel: 'full-access', error: null });
     await service.dispose();
   });
 
@@ -1387,7 +1392,7 @@ describe('PiRuntimeService', () => {
     { label: 'legacy settings', mode: 'legacy' as const, legacyHistory: false },
     { label: 'v2 settings', mode: 'v2' as const, legacyHistory: false },
     { label: 'saved legacy history', mode: 'legacy' as const, legacyHistory: true },
-  ])('always registers and activates only the canonical orchestration family for $label', async ({ mode, legacyHistory }) => {
+  ])('registers only the canonical orchestration family, deferred until loaded, for $label', async ({ mode, legacyHistory }) => {
     const fake = fixture();
     if (legacyHistory) {
       fake.session.sessionManager.getBranch.mockReturnValue([{
@@ -1402,7 +1407,7 @@ describe('PiRuntimeService', () => {
     );
     const registered = ((fake.adapter.createRuntime as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as ToolDefinition[]).map((tool) => tool.name);
     expect(registered).toEqual(expect.arrayContaining([...AGENT_ORCHESTRATION_TOOL_NAMES]));
-    expect(fake.session.getActiveToolNames()).toEqual(expect.arrayContaining([...AGENT_ORCHESTRATION_TOOL_NAMES]));
+    expect(fake.session.getActiveToolNames().filter((name) => AGENT_ORCHESTRATION_TOOL_NAMES.includes(name as never))).toEqual([]);
     for (const forbidden of LEGACY_LAUNCH_TOOL_NAMES) {
       expect(registered, `${forbidden} must not be registered`).not.toContain(forbidden);
       expect(fake.session.getActiveToolNames(), `${forbidden} must not be active`).not.toContain(forbidden);
@@ -1670,7 +1675,7 @@ describe('PiRuntimeService', () => {
     }
   });
 
-  it('registers and activates canonical task tools for ordinary root sessions at every permission level', async () => {
+  it('registers deferred canonical task tools that work for ordinary root sessions at every permission level', async () => {
     const fake = fixture();
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
@@ -1682,7 +1687,7 @@ describe('PiRuntimeService', () => {
       expect(fake.session.getActiveToolNames()).not.toContain('goalmax_status');
       for (const level of ['read-only', 'edit', 'full-access'] as const) {
         await service.setPermissionLevel(level);
-        expect(fake.session.getActiveToolNames()).toEqual(expect.arrayContaining([...TASK_TOOL_NAMES]));
+        expect(fake.session.getActiveToolNames()).not.toContain('create_task');
         await call('create_task', { title: `Task at ${level}`, detail: 'Visible without an active goal.' });
         const list = (await service.getTaskList())!;
         expect(list.goalId).toBeNull();
@@ -2813,29 +2818,29 @@ describe('PiRuntimeService', () => {
     await service.dispose();
   });
 
-  it('switches between default edit, read-only, and explicit full-access tool sets', async () => {
+  it('switches between default full-access, read-only, and explicit edit tool sets', async () => {
     const fake = fixture();
     const service = new PiRuntimeService(fake.adapter);
     const initial = await service.openProject({ path: '/project', name: 'project', trusted: true });
 
-    expect(initial.permissionLevel).toBe('edit');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'edit', 'write', 'generate_image', 'imagegen', ...TASK_TOOL_NAMES, 'read_monitor_dashboard', ...AGENT_ORCHESTRATION_TOOL_NAMES]);
+    expect(initial.permissionLevel).toBe('full-access');
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(expect.arrayContaining(['read', 'edit', 'write', 'bash', 'generate_image']));
 
     const readOnly = await service.setPermissionLevel('read-only');
     expect(readOnly.permissionLevel).toBe('read-only');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', ...TASK_TOOL_NAMES, 'read_monitor_dashboard', ...AGENT_ORCHESTRATION_TOOL_NAMES]);
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen']);
 
     const fullAccess = await service.setPermissionLevel('full-access');
     expect(fullAccess.permissionLevel).toBe('full-access');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', ...TASK_TOOL_NAMES, 'read_monitor_dashboard', ...AGENT_ORCHESTRATION_TOOL_NAMES, 'write', 'edit', 'bash']);
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'write', 'edit', 'bash']);
 
     const editable = await service.setPermissionLevel('edit');
     expect(editable.permissionLevel).toBe('edit');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', ...TASK_TOOL_NAMES, 'read_monitor_dashboard', ...AGENT_ORCHESTRATION_TOOL_NAMES, 'write', 'edit']);
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'write', 'edit']);
     await service.dispose();
   });
 
-  it('restores host-owned permissions per session and defaults unseen sessions to edit', async () => {
+  it('restores host-owned permissions per session and defaults unseen sessions to full access', async () => {
     const fake = fixture();
     const permissions = new InMemorySessionPermissionStore();
     await permissions.set('/project', 'session-2', 'read-only');
@@ -2843,7 +2848,7 @@ describe('PiRuntimeService', () => {
     const service = new PiRuntimeService(fake.adapter, undefined, permissions);
 
     const initial = await service.openProject({ path: '/project', name: 'project', trusted: true });
-    expect(initial.permissionLevel).toBe('edit');
+    expect(initial.permissionLevel).toBe('full-access');
     expect(fake.adapter.createRuntime).toHaveBeenCalledWith(
       '/project', fake.modelRuntime, true,
       expect.arrayContaining([
@@ -2868,11 +2873,11 @@ describe('PiRuntimeService', () => {
     const newSession = { ...fake.session, sessionId: 'session-new' };
     fake.runtime.session = newSession;
     await rebind?.(newSession);
-    expect(service.getState(false).permissionLevel).toBe('edit');
+    expect(service.getState(false).permissionLevel).toBe('full-access');
 
     fake.runtime.session = fake.session;
     await rebind?.(fake.session);
-    expect(service.getState(false).permissionLevel).toBe('edit');
+    expect(service.getState(false).permissionLevel).toBe('full-access');
     await service.setPermissionLevel('read-only');
     await expect(permissions.get('/project', 'session-1')).resolves.toBe('read-only');
     await service.dispose();
@@ -2957,20 +2962,24 @@ describe('PiRuntimeService', () => {
     await service.dispose();
   });
 
-  it('enforces root-only agent policy and restores the canonical session orchestration surface after clear', async () => {
+  it('enforces root-only agent policy and keeps the session orchestration surface deferred after clear', async () => {
     const fake = fixture();
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
+    const orchestrationActive = () => fake.session.getActiveToolNames().some((name) => [...LEGACY_LAUNCH_TOOL_NAMES, ...AGENT_ORCHESTRATION_TOOL_NAMES].includes(name as never));
+    expect(orchestrationActive()).toBe(false);
+
+    await service.createGoalMax({ objective: 'Delegate when useful', verificationLevel: 'normal', agentStrategy: 'auto', tokenLimit: null, timeLimitMs: null });
     expect(fake.session.getActiveToolNames()).toContain('spawn_agent');
+    await service.controlGoalMax({ action: 'cancel' });
+    await service.clearGoalMax();
 
     await service.createGoalMax({ objective: 'Complete this without delegation', verificationLevel: 'normal', agentStrategy: 'off', tokenLimit: null, timeLimitMs: null });
-    expect(fake.session.getActiveToolNames().some((name) => [...LEGACY_LAUNCH_TOOL_NAMES, ...AGENT_ORCHESTRATION_TOOL_NAMES].includes(name as never))).toBe(false);
-    expect(fake.session.getActiveToolNames()).toContain('read_monitor_dashboard');
+    expect(orchestrationActive()).toBe(false);
 
     await service.controlGoalMax({ action: 'cancel' });
     await service.clearGoalMax();
-    expect(fake.session.getActiveToolNames()).toEqual(expect.arrayContaining([...AGENT_ORCHESTRATION_TOOL_NAMES]));
-    expect(fake.session.getActiveToolNames()).toEqual(expect.not.arrayContaining([...LEGACY_LAUNCH_TOOL_NAMES]));
+    expect(orchestrationActive()).toBe(false);
     await service.dispose();
   });
 

@@ -1,8 +1,17 @@
+import { isBackgroundEffect, type BackgroundEffect } from '../../shared/dither';
+
 export interface BackgroundImage {
+  /** Rendered effect output. */
   image: Blob;
+  /** 960px source; absent on legacy mono-only records, which cannot switch effects. */
+  source?: Blob;
+  /** Absent = legacy mono mask. */
+  effect?: BackgroundEffect;
   name: string;
   opacity: number;
 }
+
+const validPng = (value: unknown): value is Blob => value instanceof Blob && value.type === 'image/png' && value.size <= 8 * 1024 * 1024;
 
 const databaseName = 'fate-appearance-assets';
 const storeName = 'background';
@@ -27,7 +36,9 @@ export async function loadBackground(): Promise<BackgroundImage | null> {
       const request = transaction.objectStore(storeName).get(key);
       transaction.oncomplete = () => {
         const value = request.result as Partial<BackgroundImage> | undefined;
-        resolve(value?.image instanceof Blob && value.image.type === 'image/png' && value.image.size <= 4 * 1024 * 1024
+        resolve(value && validPng(value.image)
+          && (value.source === undefined || validPng(value.source))
+          && (value.effect === undefined || isBackgroundEffect(value.effect))
           && typeof value.name === 'string' && value.name.length <= 160
           && typeof value.opacity === 'number' && Number.isFinite(value.opacity) && value.opacity >= 0.03 && value.opacity <= 0.22
           ? value as BackgroundImage : null);

@@ -35,6 +35,8 @@ export function WorkspaceBackground() {
   const { record } = useBackground();
   const skin = useSyncExternalStore(subscribeSkinChanges, getAppliedSkin, getAppliedSkin);
   const [url, setUrl] = useState<string | null>(null);
+  // Only mono is a theme-inked mask; every other effect paints its own pixels.
+  const color = record?.effect !== undefined && record.effect !== 'mono';
   const image = record?.image;
   useEffect(() => {
     if (!image) { setUrl(null); return; }
@@ -42,7 +44,8 @@ export function WorkspaceBackground() {
     setUrl(next);
     return () => URL.revokeObjectURL(next);
   }, [image]);
-  const background = record && url ? { maskImage: `url("${url}")`, opacity: record.opacity }
+  // Color mode paints the dithered palette image itself; mono stays a theme-inked mask.
+  const background = record && url ? (color ? { backgroundImage: `url("${url}")`, opacity: record.opacity } : { maskImage: `url("${url}")`, opacity: record.opacity })
     : skin.background ? { maskImage: `url("data:image/png;base64,${skin.background.data}")`, opacity: skin.background.opacity } : null;
-  return background ? <div className="workspace-backdrop" aria-hidden="true" data-source={record && url ? 'personal' : 'skin-pack'} style={background} /> : null;
+  return background ? <div className="workspace-backdrop" aria-hidden="true" data-source={record && url ? 'personal' : 'skin-pack'} data-mode={record && url && color ? 'color' : 'mono'} style={background} /> : null;
 }

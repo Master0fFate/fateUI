@@ -134,6 +134,7 @@ function attestation(overrides: Partial<MutationAttestation> = {}): MutationAtte
     preHash: 'c'.repeat(64),
     postHash: 'b'.repeat(64),
     preState: 'hashed',
+    postState: 'written',
     captureKind: 'direct-file-tool',
     ...overrides,
   };
@@ -210,7 +211,7 @@ function referenceMergeActivity(retained: readonly RetainedRow[], attestations: 
     return 'Unknown permission';
   };
   const hashText = (record: MutationAttestation): string => {
-    const post = record.postHash.slice(0, 8);
+    const post = record.postHash ? record.postHash.slice(0, 8) : 'removed';
     if (record.preState === 'hashed' && record.preHash) return `${record.preHash.slice(0, 8)} → ${post}`;
     if (record.preState === 'oversize') return `oversize prior · ${post}`;
     return `new file · ${post}`;
@@ -226,7 +227,7 @@ function referenceMergeActivity(retained: readonly RetainedRow[], attestations: 
         id: row.id, timestamp: row.timestamp, source: row.source, rank: 0, kind: 'write',
         title: `${record.operation} ${record.path}`, detail: mergedDetail,
         ...(row.target ? { target: row.target } : {}),
-        ledger: { operation: record.operation, path: record.path, detail: mergedDetail },
+        ledger: { id: record.id, operation: record.operation, path: record.path, detail: mergedDetail },
       };
     }
     return {
@@ -239,7 +240,7 @@ function referenceMergeActivity(retained: readonly RetainedRow[], attestations: 
     rows.push({
       id: `ledger:${record.id}`, timestamp: record.recordedAt, source: record.actor.kind, rank: 1, kind: 'write',
       title: `${record.operation} ${record.path}`, detail: detail(record),
-      ledger: { operation: record.operation, path: record.path, detail: '' },
+      ledger: { id: record.id, operation: record.operation, path: record.path, detail: '' },
     });
   }
   rows.sort((left, right) => left.timestamp - right.timestamp || left.rank - right.rank || left.id.localeCompare(right.id));

@@ -5,9 +5,10 @@ import { useWebWorkspaceStore } from '../../stores/webWorkspaceStore';
 import { unavailableExplanation } from '../../platform/capabilityPolicy';
 import * as Dialog from '@radix-ui/react-dialog';
 import { LearningIndicator } from '../learning/LearningIndicator';
+import { RecoveryReviewNotice } from './RecoveryReviewNotice';
 import { learningDraftKey, useLearningStore } from '../learning/learningStore';
 import * as Popover from '@radix-ui/react-popover';
-import { ArrowUp, AtSign, ChevronDown, ChevronUp, CornerUpLeft, FileText, FolderOpen, GitFork, Globe2, Hash, History, ImagePlus, LoaderCircle, MessageSquarePlus, Mic, Pencil, Plug, Shield, ShieldCheck, Sparkles, Square, Target, Trash2, TriangleAlert, X, Zap } from 'lucide-react';
+import { ArrowRight, ArrowUp, AtSign, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, FileText, FolderOpen, GitFork, Globe2, Hash, History, ImagePlus, LoaderCircle, MessageSquarePlus, Mic, Paperclip, Pencil, Plug, Shield, ShieldCheck, Sparkles, Square, Target, Trash2, TriangleAlert, X, Zap } from 'lucide-react';
 import { type ChangeEvent, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { BrowserAnnotation, FileEntry, PromptInput, QueueMutationInput, SpeechStreamUpdate } from '../../../shared/contracts/ipc';
@@ -23,7 +24,9 @@ import { useBrowserStore } from '../../stores/browserStore';
 import { GoalMaxRail } from '../goalmaxxing/GoalMaxRail';
 import { GoalMaxTaskStrip } from '../goalmaxxing/GoalMaxTaskStrip';
 import { parseGoalMaxCommand } from '../goalmaxxing/parseGoalMaxCommand';
+import { BranchChip } from './BranchChip';
 import { ContextWheel } from './ContextWheel';
+import { EffortSlider } from './EffortSlider';
 import { ComposerPresentation } from './ComposerInput';
 import { QuestionCard } from './QuestionCard';
 import { agentMentionContext, findLiveAgentMentions, parseAgentStopCommand, sessionMentionHandle, type LiveAgentMention } from './agentMentions';
@@ -603,7 +606,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const [images, setImages] = useState<Attachment[]>([]);
   const [browserAnnotationIds, setBrowserAnnotationIds] = useState<string[]>([]);
   const [sessionReferences, setSessionReferences] = useState<SessionReferenceAttachment[]>([]);
-  const [sessionReferenceMenuOpen, setSessionReferenceMenuOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [sessionDropActive, setSessionDropActive] = useState(false);
   const [previewImage, setPreviewImage] = useState<Attachment | null>(null);
   const [providerLoginOpen, setProviderLoginOpen] = useState(false);
@@ -617,6 +620,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const [confirmFullAccess, setConfirmFullAccess] = useState(false);
   const [compactToolbar, setCompactToolbar] = useState(false);
   const [modelBusy, setModelBusy] = useState(false);
+  const [thinkingDraft, setThinkingDraft] = useState<typeof thinkingLevels[number] | null>(null);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [queueBusyId, setQueueBusyId] = useState<string | null>(null);
   const [goalUpdateBusyId, setGoalUpdateBusyId] = useState<string | null>(null);
@@ -675,6 +679,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const queueBusyRef = useRef(false);
   const goalUpdateBusyRef = useRef(false);
   const modelBusyRef = useRef(false);
+  const thinkingQueue = useRef<{ running: boolean; next: typeof thinkingLevels[number] | null }>({ running: false, next: null });
   const permissionBusyRef = useRef(false);
   const forkingRef = useRef(false);
   const voiceRestoreFrames = useRef(new Set<number>());
@@ -724,6 +729,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const activeGoal = useGoalMaxStore((state) => state.goal);
   const setActiveGoal = useGoalMaxStore((state) => state.setGoal);
   const subagentOrder = useRuntimeStore((state) => state.subagentOrder);
+  const sessionStarted = useRuntimeStore((state) => state.messageOrder.length > 0);
   const heldQueueItems = queue.held ?? [];
   const recoveredQueueItems = queue.recovered ?? [];
   const recoveredQueueIds = new Set(recoveredQueueItems.map((item) => item.id));
@@ -735,6 +741,8 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const minComposerInputHeight = compactMode ? COMPACT_MIN_COMPOSER_INPUT_HEIGHT : MIN_COMPOSER_INPUT_HEIGHT;
   const sendMessageWithModifier = useUiStore((state) => state.sendMessageWithModifier);
   const advancedPromptImprovement = useUiStore((state) => state.advancedPromptImprovement);
+  const reasoningMenu = useUiStore((state) => state.reasoningMenu);
+  const setReasoningMenu = useUiStore((state) => state.setReasoningMenu);
   const composerDraftRequest = useUiStore((state) => state.composerDraftRequest);
   const clearComposerDraftRequest = useUiStore((state) => state.clearComposerDraftRequest);
   const showToast = useUiStore((state) => state.showToast);
@@ -745,7 +753,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     && Boolean(speechStatus?.models.find((model) => model.id === speech.modelId)?.streaming);
   const connected = runtime.status === 'ready';
   const nextModel = runtime.pendingModel ?? runtime.model;
-  const nextThinkingLevel = runtime.pendingThinkingLevel ?? runtime.thinkingLevel;
+  const nextThinkingLevel = thinkingDraft ?? runtime.pendingThinkingLevel ?? runtime.thinkingLevel;
   const imageCapable = connected && nextModel?.supportsImages === true;
   const reasoningCapable = connected && nextModel?.reasoning === true;
   const permissionLevel = runtime.permissionLevel ?? 'edit';
@@ -759,6 +767,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const liveAgentMessageTarget = liveAgentTarget !== null && liveAgentTarget.kind !== 'session';
   const sendButtonStops = !liveAgentMessageTarget && !hasPendingPrompt && (activeSessionRunning || goalCancelable || childWorkActive);
   const canFork = Boolean(runtime.sessionCapabilities?.fork && forkPoint && !activeSessionRunning && !runtime.sessionOperation);
+  const branchLocked = sessionStarted || Boolean(forkPoint) || !connected || activeSessionRunning || Boolean(runtime.sessionOperation);
   const forkTooltip = forking
     ? 'Creating the new session…'
     : runtime.sessionOperation
@@ -1676,7 +1685,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     setCaretPosition(nextCaret);
     updateSessionReferences((current) => [...current, session]);
     setLiveAgentTarget(null);
-    setSessionReferenceMenuOpen(false);
+    setAttachMenuOpen(false);
   };
 
   const attachSessionReference = (reference: SessionReferenceAttachment) => {
@@ -1686,7 +1695,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       return;
     }
     if (sessionReferencesRef.current.some((current) => current.id === reference.id && current.projectPath === reference.projectPath)) {
-      setSessionReferenceMenuOpen(false);
+      setAttachMenuOpen(false);
       textarea.current?.focus({ preventScroll: true });
       return;
     }
@@ -1696,7 +1705,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     }
     updateSessionReferences((current) => [...current, reference]);
     setComposerError(null);
-    setSessionReferenceMenuOpen(false);
+    setAttachMenuOpen(false);
     textarea.current?.focus({ preventScroll: true });
   };
 
@@ -2444,25 +2453,33 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   };
 
   const changeThinking = async (level: typeof thinkingLevels[number]) => {
-    if (!getFateApiOptional() || modelBusyRef.current) return;
+    if (!getFateApiOptional()) return;
     const origin = useRuntimeStore.getState().runtime;
     const selectedModel = origin.pendingModel ?? origin.model;
     if (!selectedModel?.reasoning && level !== 'off') return;
-    modelBusyRef.current = true;
-    setModelBusy(true);
+    const queue = thinkingQueue.current;
+    queue.next = level;
+    setThinkingDraft(level);
     setComposerError(null);
+    if (queue.running) return;
+    queue.running = true;
     try {
-      const state = await getFateApi().setThinkingLevel(level);
-      if (!mounted.current) return;
-      const current = useRuntimeStore.getState().runtime;
-      const selectionIsOrigin = current.sessionId === origin.sessionId && current.project?.path === origin.project?.path;
-      const resultIsCurrent = current.sessionId === state.sessionId && current.project?.path === state.project?.path;
-      if (selectionIsOrigin || resultIsCurrent) useRuntimeStore.getState().setRuntime(state);
+      while (queue.next !== null) {
+        const target = queue.next;
+        queue.next = null;
+        const state = await getFateApi().setThinkingLevel(target);
+        if (!mounted.current) return;
+        const current = useRuntimeStore.getState().runtime;
+        const selectionIsOrigin = current.sessionId === origin.sessionId && current.project?.path === origin.project?.path;
+        const resultIsCurrent = current.sessionId === state.sessionId && current.project?.path === state.project?.path;
+        if (selectionIsOrigin || resultIsCurrent) useRuntimeStore.getState().setRuntime(state);
+      }
     } catch (error) {
+      queue.next = null;
       if (mounted.current) setComposerError(error instanceof Error ? error.message : 'The reasoning level could not be changed.');
     } finally {
-      modelBusyRef.current = false;
-      if (mounted.current) setModelBusy(false);
+      queue.running = false;
+      if (mounted.current) setThinkingDraft(null);
     }
   };
 
@@ -2825,10 +2842,9 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                 </AppTooltip>
                 <Popover.Portal>
                   <Popover.Content className="composer-tools-popover" role="dialog" aria-label="Composer tools" side="top" align="start" sideOffset={9} collisionPadding={12}>
-                    <div className="composer-tools-heading">Composer tools</div>
                     <div className="composer-tools-list">
                       <details className="composer-saved-session-menu">
-                        <summary>Message saved session</summary>
+                        <summary><MessageSquarePlus size={14} aria-hidden="true" /><span className="icon-label">Message saved session</span></summary>
                         <div role="group" aria-label="Saved sessions">
                           {attachableSessions.length ? attachableSessions.map((session) => <button key={session.id} type="button" title={session.title} onClick={() => { setUtilityMenuOpen(false); selectSessionTarget(session); }}>{session.title}</button>) : <p>No other saved sessions are available.</p>}
                         </div>
@@ -2857,6 +2873,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
             {!compactToolbar && (
               <AppTooltip content={runtime.project?.name ?? 'Open project'}><button className="composer-project-button" type="button" onClick={onOpenProject}>{runtime.project?.name ?? 'Project'}</button></AppTooltip>
             )}
+            <BranchChip locked={branchLocked} />
             <Popover.Root
               open={permissionMenuOpen}
               onOpenChange={(nextOpen) => {
@@ -2893,16 +2910,15 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                     </div>
                   ) : (
                     <>
-                      <div className="permission-popover-heading"><strong>Permission level</strong><span>Saved for this session</span></div>
                       <div className="permission-options">
                         <button type="button" data-active={permissionLevel === 'read-only'} aria-label="Read only" disabled={permissionBusy} onClick={() => void changePermissionLevel('read-only')}>
-                          <Shield size={15} aria-hidden="true" /><span><strong>Read only</strong><small>Inspect project files</small></span>
+                          <Shield size={15} aria-hidden="true" /><strong>Read only</strong>
                         </button>
                         <button type="button" data-active={permissionLevel === 'edit'} aria-label="Edit files" disabled={permissionBusy} onClick={() => void changePermissionLevel('edit')}>
-                          <ShieldCheck size={15} aria-hidden="true" /><span><strong>Edit files</strong><small>Project-confined read, write, and edit</small></span>
+                          <ShieldCheck size={15} aria-hidden="true" /><strong>Edit files</strong>
                         </button>
                         <button type="button" className="permission-option--danger" data-active={permissionLevel === 'full-access'} aria-label="Full access" disabled={permissionBusy} onClick={() => permissionLevel === 'full-access' ? void changePermissionLevel('full-access') : setConfirmFullAccess(true)}>
-                          <Zap size={15} aria-hidden="true" /><span><strong>Full access</strong><small>Host files and shell · no sandbox</small></span>
+                          <Zap size={15} aria-hidden="true" /><strong>Full access</strong>
                         </button>
                       </div>
                     </>
@@ -2913,50 +2929,43 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
             <input ref={fileInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple onChange={attachImages} />
             {!compactToolbar && (
               <>
-                <AppTooltip content="Tag a project file or folder with #" wrapTrigger><button className="composer-icon-action" type="button" aria-label="Tag project file or folder" disabled={!connected} onClick={startResourceTag}><ActionContent text="tag"><Hash size={15} aria-hidden="true" /></ActionContent></button></AppTooltip>
-                <AppTooltip content={imageCapable ? 'Attach up to four images' : 'The model selected for the next message does not support images'} wrapTrigger><button className="composer-icon-action" type="button" aria-label="Attach image" disabled={!imageCapable || images.length >= 4} onClick={() => fileInput.current?.click()}><ActionContent text="image"><ImagePlus size={15} aria-hidden="true" /></ActionContent></button></AppTooltip>
-                {runtime.sessionCapabilities?.fork && forkPoint && <AppTooltip content={forkTooltip} wrapTrigger><button className="composer-icon-action" type="button" aria-label="Create new session from latest prompt" disabled={!canFork || forking} onClick={() => void forkConversation()}><ActionContent text={forking ? 'wait' : 'fork'}>{forking ? <LoaderCircle className="tool-spinner" size={15} aria-label="Creating session" /> : <GitFork size={15} aria-hidden="true" />}</ActionContent></button></AppTooltip>}
                 <Popover.Root
-                  open={sessionReferenceMenuOpen}
+                  open={attachMenuOpen}
                   onOpenChange={(nextOpen) => {
-                    setSessionReferenceMenuOpen(nextOpen);
+                    setAttachMenuOpen(nextOpen);
                     if (nextOpen) {
                       setUtilityMenuOpen(false);
                       setPermissionMenuOpen(false);
                     }
                   }}
                 >
-                  <AppTooltip content="Message a saved session with ~" wrapTrigger>
+                  <AppTooltip content="Attach file tag, image, or saved session" wrapTrigger>
                     <Popover.Trigger asChild>
-                      <button className="composer-icon-action" type="button" aria-label="Message saved session" disabled={!connected}>
-                        <ActionContent text="session"><History size={15} aria-hidden="true" /></ActionContent>
+                      <button className="composer-icon-action" type="button" aria-label="Attach" disabled={!connected}>
+                        <ActionContent text="attach"><Paperclip size={15} aria-hidden="true" /></ActionContent>
                       </button>
                     </Popover.Trigger>
                   </AppTooltip>
                   <Popover.Portal>
-                    <Popover.Content className="session-reference-popover" role="dialog" aria-label="Message saved session" side="top" align="start" sideOffset={9} collisionPadding={12}>
-                      <div className="session-reference-popover-heading">
-                        <div><strong>Message saved session</strong><span>Select a session to insert its ~ tag.</span></div>
-                        <History size={15} aria-hidden="true" />
+                    <Popover.Content className="composer-tools-popover" role="dialog" aria-label="Attach" side="top" align="start" sideOffset={9} collisionPadding={12}>
+                      <div className="composer-tools-list">
+                        <button type="button" aria-label="Tag project file or folder" disabled={!connected} onClick={() => { setAttachMenuOpen(false); startResourceTag(); }}>
+                          <Hash size={14} aria-hidden="true" /><span className="icon-label">Tag project file or folder</span>
+                        </button>
+                        <button type="button" aria-label="Attach image" disabled={!imageCapable || images.length >= 4} onClick={() => { setAttachMenuOpen(false); fileInput.current?.click(); }}>
+                          <ImagePlus size={14} aria-hidden="true" /><span className="icon-label">Attach image</span>
+                        </button>
+                        <details className="composer-saved-session-menu">
+                          <summary><MessageSquarePlus size={14} aria-hidden="true" /><span className="icon-label">Message saved session</span></summary>
+                          <div role="group" aria-label="Saved sessions">
+                            {attachableSessions.length ? attachableSessions.map((session) => <button key={session.id} type="button" title={session.title} onClick={() => { setAttachMenuOpen(false); selectSessionTarget(session); }}>{session.title}</button>) : <p>No other saved sessions are available.</p>}
+                          </div>
+                        </details>
                       </div>
-                      {attachableSessions.length > 0 ? (
-                        <div className="session-reference-options" role="listbox" aria-label="Saved sessions">
-                          {attachableSessions.map((session) => {
-                            return (
-                              <button key={session.id} type="button" role="option" onClick={() => selectSessionTarget(session)}>
-                                <History size={14} aria-hidden="true" />
-                                <span><strong>{session.title}</strong><small>Insert ~{sessionMentionHandle(session.title, session.id)}</small></span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="session-reference-empty">No other saved sessions are available in this project.</p>
-                      )}
-                      <p className="session-reference-popover-note">You can also type ~ in the message box to find a saved session.</p>
                     </Popover.Content>
                   </Popover.Portal>
                 </Popover.Root>
+                {runtime.sessionCapabilities?.fork && forkPoint && <AppTooltip content={forkTooltip} wrapTrigger><button className="composer-icon-action" type="button" aria-label="Create new session from latest prompt" disabled={!canFork || forking} onClick={() => void forkConversation()}><ActionContent text={forking ? 'wait' : 'fork'}>{forking ? <LoaderCircle className="tool-spinner" size={15} aria-label="Creating session" /> : <GitFork size={15} aria-hidden="true" />}</ActionContent></button></AppTooltip>}
               </>
             )}
           </div>
@@ -2971,23 +2980,24 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                       <button className="model-pill" type="button" aria-label="Model and reasoning settings" disabled={!connected || modelBusy}>
                         {modelBusy && <LoaderCircle className="tool-spinner" size={14} />}
                         <strong className="icon-label">{modelLabel}</strong>
-                        <span className="icon-label">{reasoningCapable ? thinkingLabel(nextThinkingLevel) : 'No reasoning'}</span>
+                        {reasoningCapable ? (
+                          <span className="icon-label model-pill-effort">
+                            {thinkingLevels.map((level) => <span key={level} data-active={level === nextThinkingLevel || undefined} aria-hidden={level !== nextThinkingLevel || undefined}>{thinkingLabel(level)}</span>)}
+                          </span>
+                        ) : <span className="icon-label">No reasoning</span>}
                         <Symbol text="v"><ChevronDown size={12} /></Symbol>
                       </button>
                     </Popover.Trigger>
                   </AppTooltip>
                   <Popover.Portal>
                     <Popover.Content className="model-popover" role="dialog" aria-label="Model settings" side="top" align="end" sideOffset={10} collisionPadding={12}>
-                      <div className="model-popover-heading">
-                        <div><strong>Model settings</strong><span>Choose settings for upcoming prompts</span></div>
-                        {modelBusy && <LoaderCircle className="tool-spinner" size={14} aria-label="Applying settings" />}
-                      </div>
-                      <div className="model-transition-copy" aria-label={`Current model: ${currentModelName}. Next model: ${nextModelName}.`}>
-                        <span><b>Current</b>{currentModelName}</span>
-                        <span><b>Next</b>{nextModelName}</span>
-                      </div>
+                      {activeSessionRunning && currentModelName !== nextModelName && (
+                        <div className="model-transition-copy" aria-label={`Current model: ${currentModelName}. Next model: ${nextModelName}.`}>
+                          <span>{currentModelName}</span><ArrowRight size={12} aria-hidden="true" /><span>{nextModelName}</span>
+                        </div>
+                      )}
                       <div className="model-setting">
-                        <div><strong>Model</strong><span>{runtime.streaming ? 'Stages for your next message' : 'Used for your next message'}</span></div>
+                        <div className="model-setting-head"><strong>Model</strong>{modelBusy && <LoaderCircle className="tool-spinner" size={14} aria-label="Applying settings" />}</div>
                         <SelectControl
                           label="Model"
                           disabled={!connected || modelBusy}
@@ -3002,15 +3012,22 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                         />
                       </div>
                       <div className="model-setting">
-                        <div><strong>Reasoning</strong><span>{reasoningCapable ? runtime.streaming ? 'Stages for your next user message' : 'Used for your next user message' : 'Not supported by the next model'}</span></div>
-                        <SelectControl
-                          label="Reasoning level"
-                          disabled={!reasoningCapable || modelBusy}
-                          value={reasoningCapable ? nextThinkingLevel : 'off'}
-                          options={(reasoningCapable ? thinkingLevels : ['off'] as const).map((level) => ({ value: level, label: reasoningCapable ? thinkingLabel(level) : 'Not supported' }))}
-                          contentClassName="model-select-content"
-                          onValueChange={(value) => void changeThinking(value as typeof thinkingLevels[number])}
-                        />
+                        <div className="model-setting-head">
+                          <strong>Reasoning</strong>
+                          <button type="button" className="model-setting-toggle" aria-label={reasoningMenu ? 'Show reasoning slider' : 'Show reasoning menu'} aria-expanded={reasoningMenu} onClick={() => setReasoningMenu(!reasoningMenu)}><ChevronRight size={13} aria-hidden="true" /></button>
+                        </div>
+                        {reasoningMenu ? (
+                          <SelectControl
+                            label="Reasoning level"
+                            disabled={!reasoningCapable || modelBusy}
+                            value={reasoningCapable ? nextThinkingLevel : 'off'}
+                            options={(reasoningCapable ? thinkingLevels : ['off'] as const).map((level) => ({ value: level, label: reasoningCapable ? thinkingLabel(level) : 'Not supported' }))}
+                            contentClassName="model-select-content"
+                            onValueChange={(value) => void changeThinking(value as typeof thinkingLevels[number])}
+                          />
+                        ) : (
+                          <EffortSlider levels={thinkingLevels} value={reasoningCapable ? nextThinkingLevel : 'off'} label="Reasoning level" disabled={!reasoningCapable} format={(level) => reasoningCapable ? thinkingLabel(level) : 'Not supported'} onChange={(level) => void changeThinking(level)} />
+                        )}
                       </div>
                     </Popover.Content>
                   </Popover.Portal>
@@ -3078,6 +3095,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         </div>
         </>}
       </ComposerPresentation>
+      <RecoveryReviewNotice projectPath={runtime.project?.path ?? null} sessionId={runtime.sessionId} />
       {composerError && <p className="composer-error" role="alert">{composerError}</p>}
       <ProviderConnectDialog open={providerLoginOpen} onOpenChange={setProviderLoginOpen} />
       <Dialog.Root open={Boolean(previewImage)} onOpenChange={(open) => { if (!open) setPreviewImage(null); }}>

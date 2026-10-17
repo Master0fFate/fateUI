@@ -690,4 +690,46 @@ describe('GitService', { timeout: 30_000 }, () => {
     await expect(fs.stat(path.join(root, 'fresh.ts'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(afterUntracked.changes.some((change) => change.path === 'fresh.ts')).toBe(false);
   });
+
+  it('lists, switches, tracks, and creates branches while surfacing git refusals and rejecting bad names', async () => {
+    const root = await repository();
+    await fs.writeFile(path.join(root, 'file.txt'), 'one\n');
+    await run('git', ['add', '--', 'file.txt'], { cwd: root });
+    await run('git', ['commit', '-m', 'initial'], { cwd: root });
+    await run('git', ['branch', '-M', 'main'], { cwd: root });
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-desktop-remote-'));
+    temporary.push(remote);
+    await run('git', ['init', '--bare', '--initial-branch=main'], { cwd: remote });
+    await run('git', ['remote', 'add', 'origin', remote], { cwd: root });
+    await run('git', ['push', '-u', 'origin', 'main'], { cwd: root });
+    await run('git', ['branch', 'remote-only'], { cwd: root });
+    await run('git', ['push', 'origin', 'remote-only'], { cwd: root });
+    await run('git', ['branch', '-D', 'remote-only'], { cwd: root });
+    await run('git', ['remote', 'set-head', 'origin', 'main'], { cwd: root });
+    const secondWorktree = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-desktop-worktree-'));
+    temporary.push(secondWorktree);
+    await fs.rm(secondWorktree, { recursive: true, force: true });
+    await run('git', ['worktree', 'add', '-b', 'second', secondWorktree], { cwd: root });
+    const files = new FilesystemService();
+    await files.setRoot(root);
+    const git = new GitService(files);
+
+    const listed = await git.listBranches();
+    expect(listed[0]).toEqual({ name: 'main', kind: 'local', current: true, worktreePath: null, upstream: 'origin/main' });
+    expect(listed).toContainEqual({ name: 'second', kind: 'local', current: false, worktreePath: await fs.realpath(secondWorktree), upstream: null });
+    expect(listed).toContainEqual({ name: 'remote-only', kind: 'remote', current: false, worktreePath: null, upstream: 'origin/remote-only' });
+    expect(listed.filter((ref) => ref.name === 'main')).toHaveLength(1);
+    expect(listed.some((ref) => ref.name === 'HEAD')).toBe(false);
+
+    await expect(git.switchBranch({ name: 'remote-only' })).resolves.toMatchObject({ branch: 'remote-only', upstream: 'origin/remote-only' });
+    await expect(git.switchBranch({ name: 'topic', create: true, base: 'main' })).resolves.toMatchObject({ branch: 'topic' });
+    await expect(git.switchBranch({ name: 'topic', create: true })).rejects.toThrow('Branch already exists: topic');
+    await expect(git.switchBranch({ name: 'main' })).resolves.toMatchObject({ branch: 'main' });
+    await expect(git.switchBranch({ name: 'second' })).rejects.toThrow(/second/u);
+    await expect(git.switchBranch({ name: 'missing-branch' })).rejects.toThrow(/missing-branch/u);
+    await expect(git.switchBranch({ name: '-flag' })).rejects.toThrow('Invalid branch name');
+    await expect(git.switchBranch({ name: 'has space' })).rejects.toThrow('Invalid branch name');
+    await expect(git.switchBranch({ name: 'ok', create: true, base: 'HEAD~1' })).rejects.toThrow('Invalid branch name');
+    expect((await git.status()).branch).toBe('main');
+  });
 });

@@ -11,23 +11,27 @@
   border-radius: var(--surface-surface-radius); border-color: var(--surface-border); background: var(--surface-background);
   box-shadow: none; backdrop-filter: none; font-family: var(--font-interface); font-size: var(--surface-font-size);
 }
-:root[data-skin][data-skin-styled] :is(.custom-select-item, .palette-item, .folder-action-item, .session-action-item, .composer-tools-list > button) { min-height: var(--surface-row-height); border-radius: var(--surface-control-radius); font-size: var(--surface-font-size); }
+:root[data-skin][data-skin-styled] :is(.custom-select-item, .palette-item, .folder-action-item, .session-action-item, .composer-tools-list > button, .branch-popover > button) { min-height: var(--surface-row-height); border-radius: var(--surface-control-radius); font-size: var(--surface-font-size); }
 :root[data-skin][data-skin-styled] .tooltip { padding: var(--surface-padding); line-height: 1.5; max-width: min(48ch, calc(100vw - 24px)); }
 :root[data-skin][data-skin-styled] .tooltip-arrow { fill: var(--surface-background); stroke: var(--surface-border); }
 
-:root[data-skin="dreamcore"][data-skin-styled] .welcome h1 { font-size: 18px; letter-spacing: 0; }
+:root[data-skin="dreamcore"][data-skin-styled] #welcome-title { font: 300 28px/1.3 "Cormorant Garamond", "EB Garamond", Garamond, "Hoefler Text", "Times New Roman", serif; letter-spacing: .32em; text-transform: uppercase; }
 :root[data-skin="dreamcore"][data-skin-styled] .action-grid { display: flex; flex-direction: column; gap: 0; width: min(100%, 560px); }
 :root[data-skin="dreamcore"][data-skin-styled] .action-card { min-height: var(--surface-row-height); flex-direction: row; align-items: center; gap: 12px; padding: var(--surface-padding); border-bottom: 1px solid var(--surface-border); background: transparent; }
 :root[data-skin="dreamcore"][data-skin-styled] .action-icon { position: static; flex: none; margin: 0; }
-:root[data-skin="dreamcore"][data-skin-styled] .action-card strong { flex: 0 0 16ch; }
-:root[data-skin="dreamcore"][data-skin-styled] .action-card small { margin: 0; min-width: 0; white-space: normal; text-align: left; }
 
 /* The model picker is a form, not a collection of floating cards. */
 :root[data-skin][data-skin-styled] .model-popover { padding: var(--surface-padding); }
-:root[data-skin][data-skin-styled] :is(.model-popover-heading, .model-setting, .model-transition-copy) { border-color: var(--surface-border); border-radius: 0; background: transparent; }
+:root[data-skin][data-skin-styled] :is(.model-setting, .model-transition-copy) { border-color: var(--surface-border); border-radius: 0; background: transparent; }
 :root[data-skin][data-skin-styled] .model-setting { padding-block: var(--surface-padding); }
 :root[data-skin][data-skin-styled] .model-setting :is(strong, span, input, button) { font-family: var(--font-interface); }
 :root[data-skin][data-skin-styled] .model-transition-copy span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root[data-skin][data-skin-styled] .model-setting-toggle { border-radius: var(--surface-control-radius); }
+:root[data-skin][data-skin-styled] .effort-slider-track, :root[data-skin][data-skin-styled] .effort-slider-fill { inset: 9px 0; clip-path: polygon(0 calc(50% - .5px), 100% 0, 100% 100%, 0 calc(50% + .5px)); }
+:root[data-skin][data-skin-styled] .effort-slider-fill { background: var(--theme-accent); filter: none; }
+:root[data-skin][data-skin-styled] .effort-slider-thumb { width: calc(8px + var(--heat) * 4px); height: calc(8px + var(--heat) * 4px); border: 1px solid var(--surface-background); border-radius: var(--surface-control-radius); background: var(--theme-accent); box-shadow: 0 0 0 1px var(--surface-border); animation: none; }
+:root[data-skin][data-skin-styled] .effort-slider:hover .effort-slider-thumb, :root[data-skin][data-skin-styled] .effort-slider:focus-visible .effort-slider-thumb { transform: translate(-50%, -50%); box-shadow: 0 0 0 1px var(--theme-accent); }
+:root[data-skin][data-skin-styled] .effort-slider-value { color: var(--theme-text); font: 10px var(--font-code); letter-spacing: 0; text-transform: none; }
 :root[data-skin][data-skin-styled] .custom-select-copy { min-width: 0; }
 :root[data-skin][data-skin-styled] .custom-select-search { border: 0; border-bottom: 1px solid var(--surface-border); border-radius: var(--surface-control-radius); background: transparent; box-shadow: none; }
 :root[data-skin][data-skin-styled] .custom-select-search:focus-within { border-bottom-color: var(--theme-accent); box-shadow: none; }
@@ -40,15 +44,12 @@
 :root[data-skin][data-skin-styled] :is(.session-row--compact, .session-open--compact) { min-height: var(--surface-row-height); }
 :root[data-skin][data-skin-styled] .session-open { padding-inline: var(--surface-padding); }
 :root[data-skin][data-skin-styled] .settings-panel { padding: var(--surface-padding); }
-:root[data-skin][data-skin-styled] :is(.settings-group, .settings-notice, .settings-shortcuts, .settings-diagnostics, .settings-logs, .settings-font-preview) { border-radius: var(--surface-surface-radius); box-shadow: none; background: transparent; }
+:root[data-skin][data-skin-styled] :is(.settings-group, .settings-notice, .settings-shortcuts, .settings-diagnostics, .settings-logs, .settings-font-preview, .settings-card, .usage-table, .usage-days) { border-radius: var(--surface-surface-radius); box-shadow: none; background: transparent; }
 :root[data-skin][data-skin-styled] .workspace-header-identity { min-width: 0; overflow: hidden; }
 :root[data-skin][data-skin-styled] .session-controls { flex: 0 0 auto; }
 :root[data-skin][data-skin-styled] .activity-pulse { min-width: 0; overflow: hidden; }
 :root[data-skin][data-skin-styled] .activity-pulse-state { min-width: 0; max-width: 100%; flex: 0 1 auto; }
 :root[data-skin][data-skin-styled] .activity-pulse-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@container workspace (max-width: 540px) {
-  :root[data-skin][data-skin-styled] .workspace-header .eyebrow { display: none; }
-}
 :root[data-skin][data-skin-styled] :is(.files-panel, .changes-panel, .resources-panel, .subagent-sessions, .learning-body, .sidebar-automation-panel) { font-size: var(--surface-font-size); }
 :root[data-skin][data-skin-styled] :is(.file-row, .change-row, .resource-type-row, .resource-result-row, .automation-open) { min-height: var(--surface-row-height); font-size: var(--surface-font-size); }
 :root[data-skin][data-skin-styled] :is(.learning-body, .automation-editor, .model-popover, .provider-dialog-content) { padding: var(--surface-padding); }
@@ -115,11 +116,13 @@
 :root[data-skin][data-skin-styled] .resource-list > * { min-height: var(--surface-row-height); background: transparent; }
 :root[data-skin][data-skin-styled] .resource-type-icon { background: transparent; }
 
-:root[data-skin][data-skin-styled] :is(.tool-card, .subagent-tool, .activity-panel, .activity-row, .activity-chip, .activity-head, .activity-tag) { border-radius: var(--surface-control-radius); box-shadow: none; border-color: var(--surface-border); }
+:root[data-skin][data-skin-styled] :is(.tool-card, .subagent-tool, .activity-panel, .activity-row, .activity-row-group, .activity-chip, .activity-head, .activity-tag, .activity-rewind, .hunk-row, .hunk-action, .settings-providers-add) { border-radius: var(--surface-control-radius); box-shadow: none; border-color: var(--surface-border); }
 :root[data-skin][data-skin-styled] :is(.tool-card, .activity-panel) { background: var(--surface-background); font-family: var(--font-interface); }
+/* Angelcore tool calls are open transcript lines: no panel behind header or output. */
+:root[data-skin="dreamcore"][data-skin-styled] :is(.tool-card, .tool-card-header, .tool-details, .tool-details pre) { background: transparent; }
 :root[data-skin][data-skin-styled] .activity-row { min-height: var(--surface-row-height); padding-inline: var(--surface-padding); }
 :root[data-skin][data-skin-styled] .activity-filters { flex-wrap: nowrap; min-width: 0; overflow-x: auto; }
-:root[data-skin][data-skin-styled] :is(.activity-chip, .activity-tag, .activity-refresh) { font-family: var(--font-interface); }
+:root[data-skin][data-skin-styled] :is(.activity-chip, .activity-tag, .activity-refresh, .activity-rewind, .hunk-action, .hunk-counts, .usage-table, .usage-day, .settings-card-status) { font-family: var(--font-interface); }
 :root[data-skin][data-skin-styled] :is(.runtime-notice, .workspace-error, .project-reveal-error, .subagent-error) { border-radius: var(--surface-surface-radius); font-family: var(--font-interface); }
 
 /* Music is a compact transport and playlist, with the same text actions. */
@@ -141,7 +144,7 @@
 :root[data-skin][data-skin-styled] :is(.learning-card, .learning-editor, .automation-row, .automation-editor, .app-toast, .settings-toast, .inline-confirm, .provider-connect-card) { border-radius: var(--surface-surface-radius); box-shadow: none; border-color: var(--surface-border); }
 :root[data-skin][data-skin-styled] :is(.settings-theme-row, .settings-input-row) { font-family: var(--font-interface); }
 :root[data-skin][data-skin-styled] :is(.terminal-prompt-heading, .terminal-message-heading, .terminal-context, .terminal-action, .terminal-symbol) { font-family: var(--font-interface); }
-:root[data-skin][data-skin-styled] :is(.skin-pack-actions, .goalmax-dialog-actions, .model-popover-heading, .music-queue-actions) { flex-wrap: nowrap; min-width: 0; }
+:root[data-skin][data-skin-styled] :is(.skin-pack-actions, .goalmax-dialog-actions, .music-queue-actions) { flex-wrap: nowrap; min-width: 0; }
 :root[data-skin][data-skin-styled] .skin-pack-actions > button { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 :root[data-skin][data-skin-styled] .queued-message-actions .terminal-action { font-size: 10px; }
 /* A supplied font must not redraw safety-confirmation labels. */
@@ -152,3 +155,17 @@
 :root[data-skin="dreamcore"][data-skin-styled] input[type="checkbox"]:not(.settings-toggle input) { appearance: none; display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; padding: 0; border: 1px solid var(--surface-border); border-radius: 0; background: var(--surface-background); }
 :root[data-skin="dreamcore"][data-skin-styled] input[type="checkbox"]:not(.settings-toggle input):checked::before { content: 'x'; color: var(--theme-accent); font: 12px/1 var(--font-interface); }
 :root[data-skin="dreamcore"][data-skin-styled] input[type="radio"] { accent-color: var(--theme-accent); }
+:root[data-skin="dreamcore"][data-skin-styled] :is(.settings-card, .settings-model-picker, .usage-table, .usage-days, .latest-response-summary, .workspace-preference-option) { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+:root[data-skin="dreamcore"][data-skin-styled] :is(.settings-card, .settings-model-picker) { margin-top: 0; padding: 12px 0; border-top: 1px solid var(--dreamcore-hairline); }
+:root[data-skin="dreamcore"][data-skin-styled] .settings-card-head { padding-bottom: 0; border-bottom: 0; }
+:root[data-skin="dreamcore"][data-skin-styled] .usage-days { padding: 0; }
+:root[data-skin="dreamcore"][data-skin-styled] .composer-rails :is(.queued-message, .goalmax-rail, .goalmax-task-strip, .goalmax-saved-instructions) { border: 0; border-top: 1px solid var(--dreamcore-hairline); border-radius: 0; background: transparent; }
+:root[data-skin="dreamcore"][data-skin-styled] .composer-rails :is(.goalmax-task-strip-toggle, .composer-rail-header) { min-height: calc(max(28px, var(--composer-rail-height)) - 1px); }
+:root[data-skin="dreamcore"][data-skin-styled] .workspace-preference-option:hover, :root[data-skin="dreamcore"][data-skin-styled] .workspace-preference-option[data-selected="true"] { background: var(--theme-raised); }
+:root[data-skin="dreamcore"][data-skin-styled] :is(.settings-group, .settings-notice, .settings-diagnostics, .settings-logs, .settings-shortcuts) { border-inline: 0; border-radius: 0; background: transparent; }
+:root[data-skin="dreamcore"][data-skin-styled] :is(.settings-providers-add, .settings-inline-action, .activity-refresh, .activity-rewind, .activity-chip, .hunk-action, .music-dock-toggle, .workspace-preference-scope, .settings-model-heading > span) { border-color: transparent; border-radius: 0; box-shadow: none; background: transparent; }
+:root[data-skin="dreamcore"][data-skin-styled] :is(.settings-providers-add, .settings-inline-action, .activity-refresh, .activity-rewind, .activity-chip, .hunk-action, .music-dock-toggle):hover:not(:disabled) { background: var(--theme-raised); color: var(--theme-text); }
+:root[data-skin="dreamcore"][data-skin-styled] :is(.activity-chip[aria-pressed="true"], .activity-chip[aria-current="page"], .hunk-action[aria-pressed="true"]) { border-color: transparent; background: transparent; color: var(--theme-text); box-shadow: inset 0 -1px 0 var(--theme-text); }
+:root[data-skin="dreamcore"][data-skin-styled] :is(.settings-providers-add, .settings-inline-action, .activity-refresh, .activity-rewind, .activity-chip, .hunk-action, .music-dock-toggle):focus-visible { outline: 2px solid var(--theme-text); outline-offset: 2px; }
+:root[data-skin="dreamcore"][data-skin-styled] .settings-dialog :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, .custom-select-trigger) { border: 0; border-bottom: 1px solid var(--dreamcore-hairline); border-radius: 0; box-shadow: none; background: transparent; }
+:root[data-skin="dreamcore"][data-skin-styled] .settings-dialog :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, .custom-select-trigger):focus-visible { border-bottom-color: var(--theme-text); outline: 2px solid var(--theme-text); outline-offset: 2px; box-shadow: none; }

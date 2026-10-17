@@ -234,12 +234,21 @@ export function ConversationImageViewerProvider({ children }: { children: ReactN
   );
 }
 
+const MAX_CACHED_LOCAL_IMAGES = 48;
+const localImageCache = new Map<string, string>();
+
+function cacheLocalImage(reference: string, source: string) {
+  localImageCache.delete(reference);
+  localImageCache.set(reference, source);
+  if (localImageCache.size > MAX_CACHED_LOCAL_IMAGES) localImageCache.delete(localImageCache.keys().next().value as string);
+}
+
 function ChatImage({ src, alt = '' }: { src?: string | undefined; alt?: string | undefined }) {
   const sharedOpenImage = useContext(ImageViewerContext);
   const [localImage, setLocalImage] = useState<OpenImage | null>(null);
   const [failed, setFailed] = useState(false);
   const [remoteAllowed, setRemoteAllowed] = useState(false);
-  const [localSource, setLocalSource] = useState<string | null>(null);
+  const [localSource, setLocalSource] = useState<string | null>(() => (src ? localImageCache.get(src) ?? null : null));
   const label = alt.trim() || 'Generated image';
   const localReference = Boolean(src && isLocalImageReference(src));
   const displaySource = localReference ? localSource ?? undefined : src;
@@ -247,14 +256,21 @@ function ChatImage({ src, alt = '' }: { src?: string | undefined; alt?: string |
   useEffect(() => {
     let cancelled = false;
     setFailed(false);
-    setLocalSource(null);
-    if (!localReference) return () => { cancelled = true; };
+    if (!localReference) {
+      setLocalSource(null);
+      return () => { cancelled = true; };
+    }
+    const cached = src ? localImageCache.get(src) : undefined;
+    setLocalSource(cached ?? null);
+    if (cached) return () => { cancelled = true; };
     if (!src || !getFateApiOptional() || typeof getDesktopApiOptional()?.readLocalImage !== 'function') {
       setFailed(true);
       return () => { cancelled = true; };
     }
     void getDesktopApi().readLocalImage(src).then((image) => {
-      if (!cancelled) setLocalSource(`data:${image.mimeType};base64,${image.data}`);
+      const source = `data:${image.mimeType};base64,${image.data}`;
+      cacheLocalImage(src, source);
+      if (!cancelled) setLocalSource(source);
     }).catch(() => {
       if (!cancelled) setFailed(true);
     });
@@ -280,7 +296,7 @@ function ChatImage({ src, alt = '' }: { src?: string | undefined; alt?: string |
   return (
     <>
       <button className="chat-image-trigger" type="button" aria-label={`Expand image: ${label}`} onClick={() => (sharedOpenImage ?? setLocalImage)(image)}>
-        <img src={displaySource} alt={label} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        <img src={displaySource} alt={label} decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
         <span aria-hidden="true"><Expand size={14} /><span className="icon-label">View</span></span>
       </button>
       {!sharedOpenImage ? <CinematicImageViewer image={localImage} onClose={() => setLocalImage(null)} /> : null}

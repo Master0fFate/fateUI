@@ -33,6 +33,7 @@ import {
   filePathInputSchema,
   getAppInfoInputSchema,
   sessionExportResultSchema,
+  gitStatusSchema,
   gitWorktreeInputSchema,
   gitWorktreeSessionResultSchema,
   ipcChannels,
@@ -93,6 +94,7 @@ import {
   speechTranscribeInputSchema,
   speechTranscriptionSchema,
   setPermissionInputSchema,
+  recoveryReviewSchema,
   providerLoginStartInputSchema,
   providerLoginRespondInputSchema,
   questionnaireAnswerInputSchema,
@@ -143,9 +145,18 @@ import { buildSessionExport } from '../pi/SessionExport';
 import { isTrustedRendererUrl, type TrustedRendererPolicy } from '../security/trustedRenderer';
 import type { BrowserHost } from '../browser/BrowserHost';
 import type { MutationAttestationLedger } from '../pi/provenance/MutationAttestationLedger';
+import type { CheckpointRestoreService } from '../pi/provenance/CheckpointRestore';
+import { hooksConfigFile, lspConfigFile } from '../pi/FateSessionExtensions';
+import { hookListSchema } from '../../shared/contracts/hooks';
+import { usageQueryInputSchema, usageQueryResultSchema } from '../../shared/contracts/usage';
+import { usageLedgerFor } from '../pi/usage/UsageLedger';
+import { fateDataRoot } from '../pi/FateProviderStorage';
+import { lspServerListSchema } from '../../shared/contracts/lsp';
 import {
   attestationQueryRequestSchema,
   attestationQueryResultSchema,
+  checkpointRestoreRequestSchema,
+  checkpointRestoreResultSchema,
   type AttestationQueryRequest,
   type AttestationQueryResult,
 } from '../../shared/contracts/mutationAttestation';
@@ -219,6 +230,7 @@ export interface IpcServices {
   browser: Pick<BrowserHost, 'ensure' | 'current' | 'setAppOverlay' | 'respondToConfirmation' | 'reset' | 'onRootChanged'>;
   /** Read-only per-project attestation ledger; resolves only the current trusted project. */
   attestations: Pick<MutationAttestationLedger, 'query'>;
+  checkpoints?: Pick<CheckpointRestoreService, 'restore'>;
   /** Open another Fate UI window in this same process so it shares the live runtime. */
   newWindow?: () => void;
   rendererPolicy: TrustedRendererPolicy;
@@ -502,13 +514,16 @@ async function applyPendingRecovery(
   await recovery?.markClean();
 }
 
-export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, terminal, logs, music, speech, hotkey, updates, recovery, browser, attestations, newWindow, rendererPolicy }: IpcServices) {
+export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, terminal, logs, music, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
   const sessionHandlers = createSessionHandlers(runtime);
   const runtimeHandlers = createRuntimeHandlers(runtime, (projectPath) => projects.prepareSessionListPath(projectPath));
   const goalHandlers = createGoalHandlers(runtime);
   const taskHandlers = createTaskHandlers(runtime);
   const agentHandlers = createAgentHandlers(runtime);
   const mcpConfig = new McpConfigService();
+  const hooksConfig = hooksConfigFile();
+  const emptyUsage = { turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 };
+  const lspConfig = lspConfigFile();
   const piMigration = new PiMigrationService();
   runtime.setEventSink((events) => {
     if (connections && !connections.isLocal) return;
@@ -1025,6 +1040,21 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     () => runtimeHandlers.setModel(input), ({ handle: workspace, authorize, command }) => createScopedRuntimeHandlers(workspace, authorize).setModel(command, input))));
   handle(ipcChannels.runtimeSetThinking, (event, input) => runRuntimeMutation('changing the reasoning level', () => scoped(event,
     () => runtimeHandlers.setThinking(input), ({ handle: workspace, authorize, command }) => createScopedRuntimeHandlers(workspace, authorize).setThinking(command, input))));
+  handle(ipcChannels.runtimeRecoveryReview, (event, input) => {
+    emptyInputSchema.parse(input);
+    return scoped(event, () => recoveryReviewSchema.parse({ reasons: [] }), ({ handle: workspace, command }) => recoveryReviewSchema.parse({
+      reasons: command.expectedSessionId && core ? core.recovery.blockersFor(workspace.root, command.expectedSessionId) : [],
+    }));
+  });
+  handle(ipcChannels.runtimeRecoveryAcknowledge, (event, input) => {
+    emptyInputSchema.parse(input);
+    return runRuntimeMutation('continuing after recovery review', () => scoped(event, () => recoveryReviewSchema.parse({ reasons: [] }),
+      async ({ identity, handle: workspace, command, authorize }) => {
+        if (!command.expectedSessionId || !core) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Open a session first.', retryable: true });
+        await core.recovery.acknowledgeSession(identity, workspace.id, workspace.generation, command.expectedSessionId, { command, authorize });
+        return recoveryReviewSchema.parse({ reasons: core.recovery.blockersFor(workspace.root, command.expectedSessionId) });
+      }));
+  });
   handle(ipcChannels.runtimeSetPermission, async (_event, input) => {
     const parsed = setPermissionInputSchema.parse(input);
     return runRuntimeMutation('changing permissions', async () => {
@@ -1164,6 +1194,21 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedGitHandlers(workspace, authorize).desktopCombinedDiff(input)) : desktopGit.combinedDiff(input));
   handle(ipcChannels.gitWorktrees, (event, input) => core
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedGitHandlers(workspace, authorize).desktopWorktrees(input)) : desktopGit.worktrees(input));
+  handle(ipcChannels.gitBranches, (event, input) => core
+    ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedGitHandlers(workspace, authorize).desktopBranches(input)) : desktopGit.branches(input));
+  handle(ipcChannels.gitSwitchBranch, (event, input) => queueProjectActivation.runSerializedMutation(async () => {
+    assertProjectActivationIdle(runtime, 'switching branches');
+    const status = core
+      ? await coreAdapter(event).scoped(async ({ handle: workspace, authorize }) => {
+        if (authorize().currentGeneration !== workspace.generation) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The project changed.', retryable: true });
+        await workspace.files.assertBoundRootIdentity();
+        if (authorize().currentGeneration !== workspace.generation) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The project changed.', retryable: true });
+        return createGitHandlers(workspace.git).switchBranch(input);
+      })
+      : await desktopGit.switchBranch(input);
+    assertProjectActivationIdle(runtime, 'switching branches');
+    return gitStatusSchema.parse(status);
+  }));
   handle(ipcChannels.gitSwitchWorktree, async (event, input) => queueProjectActivation.run(async () => {
     assertProjectActivationIdle(runtime, 'changing worktrees');
     const current = runtime.getState(false);
@@ -1420,6 +1465,39 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     const request = attestationQueryRequestSchema.parse(input);
     return attestationQueryResultSchema.parse(await resolveAttestationQuery(runtime, attestations, request));
   });
+  handle(ipcChannels.checkpointsRestore, (_event, input) => queueProjectActivation.runSerializedMutation(async () => {
+    const { attestationId } = checkpointRestoreRequestSchema.parse(input);
+    if (!checkpoints) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Checkpoint restore is unavailable on this host.', retryable: false });
+    const state = runtime.getState(false);
+    if (!state.project?.trusted) throw new PiDesktopError({ code: 'INVALID_PROJECT', message: 'Open a trusted project before restoring a checkpoint.', retryable: false });
+    if (state.streaming) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Stop the running session before restoring a checkpoint.', retryable: true });
+    return checkpointRestoreResultSchema.parse(await checkpoints.restore(state.project.path, attestationId, state.sessionId));
+  }));
+  handle(ipcChannels.usageQuery, async (_event, input) => {
+    const { days } = usageQueryInputSchema.parse(input);
+    const project = runtime.getState(false).project;
+    if (!project) return usageQueryResultSchema.parse({ today: emptyUsage, window: emptyUsage, days: [], models: [], sessions: [], dailyBudgetUsd: null });
+    return usageQueryResultSchema.parse(await usageLedgerFor(core?.paths.dataRoot ?? fateDataRoot()).query(project.path, days, settings.get().dailyBudgetUsd));
+  });
+  handle(ipcChannels.gitHunks, (event, input) => core
+    ? coreAdapter(event).scoped(({ handle: workspace }) => createGitHandlers(workspace.git).hunks(input)) : desktopGit.hunks(input));
+  handle(ipcChannels.gitRevertHunk, (event, input) => queueProjectActivation.runSerializedMutation(() => core
+    ? coreAdapter(event).scoped(async ({ handle: workspace, authorize }) => {
+      if (authorize().currentGeneration !== workspace.generation) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The project changed.', retryable: true });
+      await workspace.files.assertBoundRootIdentity();
+      if (authorize().currentGeneration !== workspace.generation) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The project changed.', retryable: true });
+      return createGitHandlers(workspace.git).revertHunk(input);
+    }) : desktopGit.revertHunk(input)));
+  handle(ipcChannels.hooksGet, async (_event, input) => {
+    emptyInputSchema.parse(input);
+    return hookListSchema.parse(await hooksConfig.list());
+  });
+  handle(ipcChannels.hooksSet, async (_event, input) => hookListSchema.parse(await hooksConfig.save(hookListSchema.parse(input))));
+  handle(ipcChannels.lspGet, async (_event, input) => {
+    emptyInputSchema.parse(input);
+    return lspServerListSchema.parse(await lspConfig.list());
+  });
+  handle(ipcChannels.lspSet, async (_event, input) => lspServerListSchema.parse(await lspConfig.save(lspServerListSchema.parse(input))));
 
   const openRecoveredProjectPath = (projectPath: string, owner?: BrowserWindow) => {
     const open = async () => {

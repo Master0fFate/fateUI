@@ -10,7 +10,9 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import { Type } from 'typebox';
 import type { PermissionLevel } from '../../shared/contracts/ipc';
+import { BASH_TIMEOUT_GUIDELINE, BASH_TIMEOUT_HINT, createBoundedBashOperations, DEFAULT_BASH_TIMEOUT_SECONDS } from './BoundedBashOperations';
 import { rasterImageMimeType } from '../files/FilesystemService';
 import { PiDesktopError } from './errors';
 import { createConfiguredImageGenerator, createGenerateImageTool, createGeneratedImageStore, type ImageGenerationSettingsResolver } from './PiImageTool';
@@ -49,7 +51,7 @@ export function requiredPermissionForTool(tool: string): PermissionLevel | undef
 export function activeToolsForPermission(activeTools: readonly string[], level: PermissionLevel): string[] {
   const allowed = new Set(toolsByPermissionLevel[level]);
   const selected = activeTools.filter((name) => !permissionControlledTools.has(name) || allowed.has(name));
-  for (const name of toolsByPermissionLevel[level]) if (!selected.includes(name)) selected.push(name);
+  for (const name of toolsByPermissionLevel[level]) if (name !== 'generate_image' && !selected.includes(name)) selected.push(name);
   return selected;
 }
 
@@ -213,7 +215,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
   // Emits an attestation only for project-confined paths. Full-access writes
   // outside the active project are skipped: a project-relative path cannot
   // truthfully represent them.
-  const attest = (operation: 'write' | 'edit', target: string, content: string, preHash: string | null, preState: 'missing' | 'hashed' | 'oversize'): void => {
+  const attest = (operation: 'write' | 'edit', target: string, content: string, preHash: string | null, preState: 'missing' | 'hashed' | 'oversize', priorContent?: Buffer): void => {
     if (!attestations) return;
     const context: AttestationContext | null = attestations.resolveContext();
     if (!context) return;
@@ -224,6 +226,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
       content,
       preHash,
       preState,
+      ...(priorContent ? { priorContent } : {}),
       actor: context.actor,
       sessionId: context.sessionId,
       permissionLevel: context.permissionLevel,
@@ -357,11 +360,13 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
       if (!fallbackInstead) {
         let preHash: string | null = null;
         let preState: 'missing' | 'hashed' | 'oversize' = 'missing';
+        let priorContent: Buffer | undefined;
         if (!create) {
           if (stat.size > maxPreHashBytes) {
             preState = 'oversize';
           } else {
-            preHash = createHash('sha256').update(await handle.readFile()).digest('hex');
+            priorContent = await handle.readFile();
+            preHash = createHash('sha256').update(priorContent).digest('hex');
             preState = 'hashed';
           }
         }
@@ -373,7 +378,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
         // Confirm the path still resolves to the inode we wrote; otherwise skip the row.
         const afterStat = await fs.stat(target).catch(() => null);
         if (afterStat && afterStat.dev === stat.dev && afterStat.ino === stat.ino) {
-          attest(operation, attestTarget, content, preHash, preState);
+          attest(operation, attestTarget, content, preHash, preState, priorContent);
         }
       }
     } finally {
@@ -527,7 +532,15 @@ export async function createProjectConfinedTools(
       },
     }),
   ] : [];
-  const bash = createBashToolDefinition(canonicalCwd);
+  const bash = createBashToolDefinition(canonicalCwd, { operations: createBoundedBashOperations() });
+  // The SDK schema says "no default timeout". Fate always applies one, so the
+  // model must see the real contract.
+  bash.parameters = Type.Object({
+    command: Type.String({ description: 'Shell command to execute' }),
+    timeout: Type.Optional(Type.Number({ description: `Timeout in seconds (default ${DEFAULT_BASH_TIMEOUT_SECONDS}). Pass a larger value for long builds or test suites.` })),
+  });
+  bash.description = bash.description.replace('Optionally provide a timeout in seconds.', `Default timeout is ${DEFAULT_BASH_TIMEOUT_SECONDS} seconds; pass timeout (seconds) to change it.`);
+  bash.promptGuidelines = [...(bash.promptGuidelines ?? []), BASH_TIMEOUT_GUIDELINE];
   const executeBash = bash.execute;
   bash.execute = (...args) => {
     // Shell authority has always refused synchronously. Keep that contract at
@@ -536,7 +549,10 @@ export async function createProjectConfinedTools(
     if (access.permissionLevel !== undefined && access.permissionLevel !== 'full-access') {
       throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Live session authority no longer permits shell execution.', retryable: false });
     }
-    return executeBash(...args);
+    return executeBash(...args).catch((error: unknown) => {
+      if (error instanceof Error && /Command timed out after \S+ seconds$/.test(error.message)) error.message += `\n${BASH_TIMEOUT_HINT}`;
+      throw error;
+    });
   };
   const guardedImageFetch: typeof fetch = (request, init) => { access.assertExecutionAdmission?.(); return fetch(request, init); };
   const tools = [

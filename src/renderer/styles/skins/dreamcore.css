@@ -1,9 +1,7 @@
 /* Dreamcore is a structural skin. Every color remains derived from the active
    --theme-* palette so skin and palette stay independent. */
 :root[data-skin="dreamcore"] {
-  --dreamcore-hairline: color-mix(in srgb, var(--theme-text) 18%, var(--theme-border));
-  --dreamcore-edge: color-mix(in srgb, var(--theme-text) 48%, var(--theme-border));
-  --dreamcore-shadow: color-mix(in srgb, var(--theme-shadow) 38%, transparent);
+  --dreamcore-hairline: var(--theme-border);
   --dreamcore-field: color-mix(in srgb, var(--theme-canvas) 94%, var(--theme-panel));
   --dreamcore-chrome-inset: 38px;
   --dreamcore-header-row: 42px;
@@ -112,7 +110,7 @@
 :root[data-skin="dreamcore"] .session-open,
 :root[data-skin="dreamcore"] .resource-type-row,
 :root[data-skin="dreamcore"] .resource-result-row,
-:root[data-skin="dreamcore"] .automation-open { border-radius: 2px; }
+:root[data-skin="dreamcore"] .automation-open { border-radius: 0; }
 :root[data-skin="dreamcore"] .session-row[data-current="true"] .session-open,
 :root[data-skin="dreamcore"] .session-row.active .session-open,
 :root[data-skin="dreamcore"] .nav-list button.active {
@@ -120,7 +118,7 @@
 }
 :root[data-skin="dreamcore"] .nav-list button,
 :root[data-skin="dreamcore"] .sidebar-footer button,
-:root[data-skin="dreamcore"] .icon-button { border-radius: 2px; }
+:root[data-skin="dreamcore"] .icon-button { border-radius: 0; }
 
 :root[data-skin="dreamcore"] .workspace { background: var(--dreamcore-field); }
 :root[data-skin="dreamcore"] .workspace-header {
@@ -131,17 +129,7 @@
   padding: var(--dreamcore-chrome-inset) 24px 0;
 }
 :root[data-skin="dreamcore"] .workspace-header-identity {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  column-gap: 10px;
   font-family: var(--font-code);
-}
-:root[data-skin="dreamcore"] .workspace-header .eyebrow {
-  color: var(--theme-muted);
-  font-family: inherit;
-  font-weight: 400;
-  letter-spacing: .12em;
 }
 :root[data-skin="dreamcore"] .workspace-header strong {
   font-family: inherit;
@@ -149,7 +137,6 @@
   font-weight: 500;
   letter-spacing: 0;
 }
-:root[data-skin="dreamcore"] .activity-pulse { grid-column: 1 / -1; }
 :root[data-skin="dreamcore"] .app-shell .workspace-status-row {
   position: relative;
   inset: auto;
@@ -176,28 +163,16 @@
   width: min(calc(100% - 2 * var(--dreamcore-thread-inset)), var(--dreamcore-thread-width));
 }
 :root[data-skin="dreamcore"] .timeline-row { padding-block: 10px; }
-:root[data-skin="dreamcore"] .chat-message {
-  border: 0;
-  border-inline-start: 1px solid var(--dreamcore-hairline);
-  border-radius: 0;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--theme-panel) 68%, transparent), transparent 88%);
-  box-shadow: none;
-}
-:root[data-skin="dreamcore"] .chat-message--user {
-  border-inline-start: 0;
-  border-inline-end: 1px solid var(--dreamcore-edge);
-  background: linear-gradient(270deg, color-mix(in srgb, var(--theme-raised) 72%, var(--theme-canvas)), transparent 92%);
-}
 :root[data-skin="dreamcore"] .chat-message--system { border-inline: 0; }
 :root[data-skin="dreamcore"] .timeline-notice,
-:root[data-skin="dreamcore"] .tool-card { border-radius: 2px; }
+:root[data-skin="dreamcore"] .tool-card { border-radius: 0; }
 
 :root[data-skin="dreamcore"] .composer {
   --composer-surface: color-mix(in srgb, var(--theme-panel) 78%, var(--theme-canvas));
   width: 100%;
   padding: 15px 17px 13px;
   border: 1px solid var(--dreamcore-hairline);
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--composer-surface);
   box-shadow: none;
   font-family: var(--font-code);
@@ -218,7 +193,7 @@
 }
 :root[data-skin="dreamcore"] .composer textarea::placeholder { color: var(--theme-muted); }
 :root[data-skin="dreamcore"] .composer-toolbar button:not(.send-button),
-:root[data-skin="dreamcore"] .send-button { border-radius: 2px; }
+:root[data-skin="dreamcore"] .send-button { border-radius: 0; }
 :root[data-skin="dreamcore"] .send-button {
   border: 1px solid var(--theme-accent);
   color: var(--theme-on-accent);
@@ -233,6 +208,8 @@
 :root[data-skin="dreamcore"] .inspector-primary-nav { height: var(--dreamcore-header-row); }
 :root[data-skin="dreamcore"] .inspector-secondary-tabs {
   flex-basis: 36px;
+  justify-content: flex-start;
+  gap: 0;
   border-color: var(--theme-border);
 }
 :root[data-skin="dreamcore"] .inspector-secondary-trigger { height: 35px; }
@@ -259,11 +236,12 @@
 :root[data-skin="dreamcore"] .automation-editor,
 :root[data-skin="dreamcore"] .model-popover,
 :root[data-skin="dreamcore"] .permission-popover,
-:root[data-skin="dreamcore"] .composer-tools-popover {
-  border-color: var(--dreamcore-edge);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--theme-panel) 92%, var(--theme-canvas));
-  box-shadow: 0 26px 90px var(--dreamcore-shadow), inset 0 1px 0 color-mix(in srgb, var(--theme-text) 12%, transparent);
+:root[data-skin="dreamcore"] .composer-tools-popover,
+:root[data-skin="dreamcore"] .branch-popover {
+  border-color: var(--dreamcore-hairline);
+  border-radius: 0;
+  background: var(--theme-canvas);
+  box-shadow: none;
 }
 :root[data-skin="dreamcore"] .settings-header {
   flex-basis: 76px;
@@ -286,28 +264,35 @@
 }
 :root[data-skin="dreamcore"] .settings-nav button {
   min-height: 50px;
-  border-radius: 1px;
+  border-radius: 0;
 }
 :root[data-skin="dreamcore"] .settings-nav button[aria-selected="true"] {
   background: transparent;
   box-shadow: inset 1px 0 0 var(--theme-text);
 }
 :root[data-skin="dreamcore"] .settings-panel { padding: 30px 34px 38px; }
-:root[data-skin="dreamcore"] .settings-group { border-color: var(--dreamcore-hairline); }
+:root[data-skin="dreamcore"] :is(.settings-group, .settings-card, .settings-card-head, .usage-table, .usage-days, .hunk-strip, .hunk-row) { border-color: var(--dreamcore-hairline); }
 :root[data-skin="dreamcore"] .settings-dialog .custom-select-trigger,
 :root[data-skin="dreamcore"] .settings-inline-action,
 :root[data-skin="dreamcore"] .settings-input-row input,
+:root[data-skin="dreamcore"] .settings-input-row select,
+:root[data-skin="dreamcore"] .settings-card,
+:root[data-skin="dreamcore"] .settings-providers-add,
+:root[data-skin="dreamcore"] .usage-table,
+:root[data-skin="dreamcore"] .usage-days,
+:root[data-skin="dreamcore"] .hunk-action,
+:root[data-skin="dreamcore"] .activity-rewind,
 :root[data-skin="dreamcore"] .settings-notice,
 :root[data-skin="dreamcore"] .settings-shortcuts,
 :root[data-skin="dreamcore"] .settings-diagnostics,
-:root[data-skin="dreamcore"] .settings-logs { border-radius: 2px; }
+:root[data-skin="dreamcore"] .settings-logs { border-radius: 0; }
 :root[data-skin="dreamcore"] .settings-dialog > footer {
   border-color: var(--dreamcore-hairline);
   background: color-mix(in srgb, var(--theme-canvas) 34%, var(--theme-panel));
 }
 
 :root[data-skin="dreamcore"] .terminal-panel {
-  border-top-color: var(--dreamcore-edge);
+  border-top-color: var(--dreamcore-hairline);
   background: color-mix(in srgb, var(--theme-canvas) 96%, var(--theme-panel));
 }
 :root[data-skin="dreamcore"] .terminal-panel header {
@@ -316,7 +301,6 @@
 }
 
 :root[data-skin="dreamcore"][data-compact-mode="true"] .workspace-header-drag { padding-inline: 12px; }
-:root[data-skin="dreamcore"][data-compact-mode="true"] .workspace-header-identity { display: flex; }
 :root[data-skin="dreamcore"][data-compact-mode="true"] .app-shell .workspace-status-row {
   inset: auto;
   width: calc(100% - 24px);

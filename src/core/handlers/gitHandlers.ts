@@ -1,9 +1,9 @@
 import type { GitService } from '../../main/git/GitService';
 import {
-  emptyInputSchema, filePathInputSchema, gitCombinedDiffSchema, gitCommitDetailsSchema,
+  emptyInputSchema, filePathInputSchema, gitBranchListSchema, gitCombinedDiffSchema, gitCommitDetailsSchema,
   gitCommitInputSchema, gitDiffSchema, gitHistorySchema, gitOperationInputSchema,
-  gitOperationResultSchema, gitRevertPathInputSchema, gitRevertPathResultSchema, gitStatusSchema,
-  gitWorktreeListSchema,
+  gitOperationResultSchema, gitRevertHunkInputSchema, gitRevertPathInputSchema, gitRevertPathResultSchema, gitStatusSchema,
+  gitHunksResultSchema, gitSwitchBranchInputSchema, gitWorktreeListSchema,
 } from '../../shared/contracts/ipc';
 import { assertScopedRead } from './agentHandlers';
 import type { AdmissionAuthority } from '../workspaces/WorkspaceAdmissionQueue';
@@ -18,10 +18,17 @@ export function createGitHandlers(git: GitService) {
     async history(input: unknown) { emptyInputSchema.parse(input); return gitHistorySchema.parse(await git.history()); },
     async commitDetails(input: unknown) { return gitCommitDetailsSchema.parse(await git.commitDetails(gitCommitInputSchema.parse(input).hash)); },
     async worktrees(input: unknown) { emptyInputSchema.parse(input); return gitWorktreeListSchema.parse(await git.worktrees()); },
+    async branches(input: unknown) { emptyInputSchema.parse(input); return gitBranchListSchema.parse(await git.listBranches()); },
+    async switchBranch(input: unknown) { return gitStatusSchema.parse(await git.switchBranch(gitSwitchBranchInputSchema.parse(input))); },
     async runOperation(input: unknown) { return gitOperationResultSchema.parse(await git.runOperation(gitOperationInputSchema.parse(input).operation)); },
     async revertPath(input: unknown) {
       const { path } = gitRevertPathInputSchema.parse(input);
       return gitRevertPathResultSchema.parse({ path, status: await git.revertPath(path) });
+    },
+    async hunks(input: unknown) { return gitHunksResultSchema.parse(await git.hunks(filePathInputSchema.parse(input).path)); },
+    async revertHunk(input: unknown) {
+      const { path, index, header } = gitRevertHunkInputSchema.parse(input);
+      return gitRevertPathResultSchema.parse({ path, status: await git.revertHunk(path, index, header) });
     },
   };
 }
@@ -46,6 +53,7 @@ export function createScopedGitHandlers(handle: WorkspaceHandle, authorize: () =
     /** Existing native IPC only. These operations are absent from the portable wire catalog. */
     desktopCombinedDiff: (input: unknown) => read(() => desktop.combinedDiff(input)),
     desktopWorktrees: (input: unknown) => read(() => desktop.worktrees(input)),
+    desktopBranches: (input: unknown) => read(() => desktop.branches(input)),
     // No mutations. Legacy desktop revert/remote operations remain named local IPC only.
     // Future Git writes require expected-HEAD/review and safe filter/hook/path policy.
   };

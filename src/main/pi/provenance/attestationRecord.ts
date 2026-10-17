@@ -56,9 +56,41 @@ export interface DirectWriteFacts {
   content: string;
   preHash: string | null;
   preState: 'missing' | 'hashed' | 'oversize';
+  /** Prior bytes when hashed; stored as a checkpoint blob, never in the ledger. */
+  priorContent?: Buffer;
 }
 
 export type AttestationRecordInput = DirectWriteFacts & AttestationContext;
+
+export interface RestoreFacts {
+  projectRoot: string;
+  targetPath: string;
+  sessionId: string | null;
+  preHash: string | null;
+  preState: 'missing' | 'hashed';
+  postHash: string | null;
+}
+
+export function buildRestoreAttestation(input: RestoreFacts, recordedAt: number = Date.now()): MutationAttestation | null {
+  if (!isInsideProject(input.projectRoot, input.targetPath)) return null;
+  const parsed = mutationAttestationSchema.safeParse({
+    id: randomUUID(),
+    schemaVersion: MUTATION_ATTESTATION_SCHEMA_VERSION,
+    recordedAt,
+    projectPathHash: projectPathHash(input.projectRoot),
+    sessionId: input.sessionId,
+    actor: { kind: 'root' },
+    permissionLevel: null,
+    operation: 'restore',
+    path: projectRelativePath(input.projectRoot, input.targetPath),
+    preHash: input.preHash,
+    postHash: input.postHash,
+    preState: input.preState,
+    postState: input.postHash === null ? 'missing' : 'written',
+    captureKind: 'checkpoint-restore',
+  });
+  return parsed.success ? parsed.data : null;
+}
 
 /**
  * Build a validated v1 attestation. Returns null when the target is outside the
@@ -79,6 +111,7 @@ export function buildAttestation(input: AttestationRecordInput, recordedAt: numb
     preHash: input.preHash,
     postHash: sha256Hex(input.content),
     preState: input.preState,
+    postState: 'written',
     captureKind: 'direct-file-tool',
   });
   return parsed.success ? parsed.data : null;

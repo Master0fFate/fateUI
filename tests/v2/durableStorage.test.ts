@@ -132,8 +132,8 @@ describe('owned native Pi Durable SQLite', () => {
     await expect(session.commit(async (tx) => { (await tx.doc(Counter)).count = 99; }, BACKGROUND_CONTEXT)).rejects.toThrow(/failed commit/u);
     expect(observed?.value?.count).toBe(1);
     expect(publications).toEqual([]);
-    await expect(session.snapshot(Counter, BACKGROUND_CONTEXT)).rejects.toThrow(/poisoned/u);
-    await expect(session.commit(async (tx) => { (await tx.doc(Counter)).count = 100; }, BACKGROUND_CONTEXT)).rejects.toThrow(/poisoned/u);
+    await expect(session.snapshot(Counter, BACKGROUND_CONTEXT)).rejects.toThrow(/Session failed after a storage error/u);
+    await expect(session.commit(async (tx) => { (await tx.doc(Counter)).count = 100; }, BACKGROUND_CONTEXT)).rejects.toThrow(/Session failed after a storage error/u);
     await session.close(BACKGROUND_CONTEXT);
     const reopened = createSession((await open()).storage);
     expect((await reopened.snapshot(Counter, BACKGROUND_CONTEXT))?.count).toBe(1);
@@ -156,7 +156,7 @@ describe('owned native Pi Durable SQLite', () => {
     uncertain = true;
     await expect(session.commit(async (tx) => { (await tx.doc(Counter)).count = 2; }, BACKGROUND_CONTEXT)).rejects.toThrow(/after commit/u);
     expect(observed?.value?.count).toBe(1);
-    await expect(session.snapshot(Counter, BACKGROUND_CONTEXT)).rejects.toThrow(/poisoned/u);
+    await expect(session.snapshot(Counter, BACKGROUND_CONTEXT)).rejects.toThrow(/Session failed after a storage error/u);
     await session.close(BACKGROUND_CONTEXT);
     const reopened = createSession((await open()).storage);
     expect(await reopened.snapshot(Counter, BACKGROUND_CONTEXT)).toEqual({ count: 2, delivery: 'unknown' });

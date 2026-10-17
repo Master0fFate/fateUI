@@ -25,7 +25,7 @@ test('an existing Fate profile imports missing Pi providers and a local MCP serv
     await page.getByLabel('Search commands').press('Enter');
     const dialog = page.getByRole('dialog', { name: 'Settings' });
     await dialog.getByRole('tab', { name: /MCP/ }).click();
-    await expect(dialog.getByText(/1 provider entries can be imported/u)).toBeVisible();
+    await expect(dialog.getByText(/1 provider entries importable/u)).toBeVisible();
     await dialog.getByRole('button', { name: 'Import missing Pi providers and MCP servers' }).click();
     await expect(dialog.getByText(/Imported 1 provider entries and 1 MCP servers/u)).toBeVisible();
     const auth = JSON.parse(await readFile(path.join(data, 'auth.json'), 'utf8'));
@@ -33,7 +33,7 @@ test('an existing Fate profile imports missing Pi providers and a local MCP serv
     const saved = JSON.parse(await readFile(path.join(data, 'mcp-servers.json'), 'utf8'));
     expect(saved).toHaveLength(1);
     await dialog.getByRole('button', { name: 'Test saved server' }).click();
-    await expect(dialog.getByRole('status').last()).toContainText('echo connected: 1 tools available (echo).');
+    await expect(dialog.getByRole('status').filter({ hasText: 'echo connected' })).toContainText('echo connected: 1 tools available (echo).');
     expect((await readFile(path.join(agent, 'mcp.json'), 'utf8'))).toContain('mcpServers');
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -52,6 +52,7 @@ export class RecoveryCoordinator {
   private unhealthy: string | null = null;
   private startupAllowed = true;
   private readonly blockedSessions = new Map<string, Set<string>>();
+  private readonly blockers = new Map<string, { id: string; reason: string }[]>();
   private readonly reviewedPrincipals = new Map<string, string>();
   private readonly reviewsInFlight = new Set<string>();
   constructor(readonly repository: LifecycleRepository, private readonly sources: RecoverySources) {}
@@ -67,6 +68,26 @@ export class RecoveryCoordinator {
       const reviewer = this.reviewedPrincipals.get(key);
       if (reviewer && reviewer !== principalId) throw new Error('RECOVERY_REVIEW_REQUIRED: review belongs to another principal.');
     }
+  }
+  blockersFor(projectPath: string, sessionId: string): string[] {
+    return [...new Set((this.blockers.get(JSON.stringify([projectPath, sessionId])) ?? []).map((blocker) => blocker.reason))];
+  }
+  async acknowledgeSession(identity: RequestContext, workspaceId: string, generation: number, sessionId: string,
+    control: RecoveryReviewControl): Promise<void> {
+    const scope = this.scope(identity, workspaceId, generation, sessionId, control);
+    const key = JSON.stringify([scope.projectPath, sessionId]);
+    const blockers = this.blockers.get(key);
+    if (!blockers?.length) return;
+    if (this.reviewsInFlight.has(key)) throw new Error('RECOVERY_REVIEW_REQUIRED: a review is already in progress.');
+    this.reviewsInFlight.add(key);
+    try {
+      const previous = await this.repository.readSessionReview(scope.projectPath, sessionId).catch(() => null);
+      const recordIds = [...new Set([...(previous?.recordIds ?? []), ...blockers.map((blocker) => blocker.id)])].slice(-512);
+      this.scope(identity, workspaceId, generation, sessionId, control);
+      await this.repository.saveSessionReview({ projectPath: scope.projectPath, sessionId, recordIds, principalId: scope.principalId });
+      this.blockers.delete(key);
+      this.blockedSessions.delete(key);
+    } finally { this.reviewsInFlight.delete(key); }
   }
   private checkout(projectPath: string): Promise<CheckoutFacts> {
     return (this.sources.readCheckoutFacts ?? readGoalReviewCheckout)(projectPath);
@@ -214,6 +235,7 @@ export class RecoveryCoordinator {
       latest.set(JSON.stringify([ref.projectPath, ref.sessionId, ref.runId, ref.teamId, ref.nodeId, ref.goalId, ref.taskId, ref.requestId]), record);
     }
     this.blockedSessions.clear();
+    this.blockers.clear();
     this.reviewedPrincipals.clear();
     const memo = <T>(read: (project: string, session: string) => Promise<T>): ((project: string, session: string) => Promise<T>) => {
       const cache = new Map<string, Promise<T>>();
@@ -232,6 +254,8 @@ export class RecoveryCoordinator {
       queue: { load: memo((project, session) => this.sources.queue.load(project, session)) },
       goals: { load: memo((project, session) => this.sources.goals.load(project, session)) },
     };
+    const sessionReview = memo((project, session) => this.repository.readSessionReview(project, session)
+      .then((ack) => new Set(ack?.recordIds ?? []), () => new Set<string>()));
     const childHealthCache = new Map<string, Promise<Awaited<ReturnType<typeof inspectAgentTeamChildStorage>>>>();
     const checkoutCache = new Map<string, Promise<CheckoutFacts>>();
     const checkoutFor = (root: string): Promise<CheckoutFacts> => {
@@ -259,7 +283,10 @@ export class RecoveryCoordinator {
             if (acknowledged && ack) this.reviewedPrincipals.set(key, ack.principalId);
           } catch { acknowledged = false; }
         }
-        if (!acknowledged) blocked.add(ref.goalId ? `goal:${ref.goalId}` : 'other');
+        if (!acknowledged && !(await sessionReview(ref.projectPath, ref.sessionId)).has(record.id)) {
+          blocked.add(ref.goalId ? `goal:${ref.goalId}` : 'other');
+          this.blockers.set(key, [...(this.blockers.get(key) ?? []), { id: record.id, reason: result.reason }]);
+        }
         if (blocked.size) this.blockedSessions.set(key, blocked);
       }
     }
@@ -290,7 +317,7 @@ export class RecoveryCoordinator {
       if (task.state === 'invalid') return unknown('Task storage is invalid or unavailable.');
       const goal = await sources.goals.load(ref.projectPath, ref.sessionId);
       if (ref.goalId && (!goal || goal.id !== ref.goalId)) return unknown('Goal authority is missing or changed.');
-      if (ref.taskId && !ref.teamId && (task.state !== 'ok' || !task.list.tasks.some((item) => item.id === ref.taskId))) return unknown('Task authority is missing.');
+      if (ref.taskId && !ref.teamId && (task.state !== 'ok' || !task.list.tasks.some((item) => item.id === ref.taskId))) return review('Checklist task was removed after it was saved.');
       let team: AgentTeam | null = null;
       if (ref.teamId || ref.worktree) {
         const teams = await sources.readTeams(ref.projectPath, ref.sessionId);
@@ -327,6 +354,7 @@ export class RecoveryCoordinator {
       if (record.status === 'running' || record.status === 'interrupted') return { record, status: 'interrupted', reason: 'Process work stopped; explicit review required before another run.' };
       const teamTask = ref.teamId && ref.taskId ? team?.tasks.find((item) => item.id === ref.taskId) : null;
       if (ref.teamId && ref.taskId && !teamTask) return unknown('Team task is missing from authoritative selected branch.');
+      if (teamTask?.status === 'failed' || teamTask?.status === 'cancelled') return { record, status: 'failed', reason: `Team task ${teamTask.status}; no execution resumed.` };
       if (teamTask && teamTask.status !== 'completed') return teamTask.status === 'interrupted'
         ? { record, status: 'interrupted', reason: 'Team task was interrupted.' } : unknown('Team task is not authoritatively completed.');
       if (ref.goalId && goal?.status !== 'completed') return unknown('Goal is not authoritatively completed with current evidence.');
@@ -334,7 +362,7 @@ export class RecoveryCoordinator {
       // read-only validator is available at this boundary; never certify it.
       if (ref.goalId && record.status === 'completed') return unknown('Goal evidence needs a fresh explicit workspace verification.');
       if (ref.taskId && !ref.teamId && task.state === 'ok' && task.list.tasks.find((item) => item.id === ref.taskId)?.status !== 'done')
-        return unknown('Task is not authoritatively done.');
+        return review('Checklist task was reopened after it was saved.');
       if (record.status === 'completed' && (teamTask?.status === 'completed' || ref.goalId && goal?.status === 'completed'
         || ref.taskId && task.state === 'ok' && task.list.tasks.some((item) => item.id === ref.taskId && item.status === 'done')))
         return { record, status: 'completed', reason: 'Completion confirmed against current authoritative state; no execution resumed.' };

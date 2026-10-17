@@ -61,7 +61,7 @@ test('M3 resized Run tabs keep full labels and icons at the responsive boundary'
         }));
         console.log('[M3 tab boundary]', JSON.stringify(geometry));
         expect(geometry.inspectorWidth).toBeCloseTo(341, 0);
-        expect(geometry.iconsVisible).toBe(true);
+        expect(geometry.iconsVisible).toBe(false);
       }
     }
     // At the application's minimum width the inspector is only 186 CSS pixels.

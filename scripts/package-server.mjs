@@ -13,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const isWithin = (parent, target) => target === parent || target.startsWith(parent + path.sep);
 const desktopPackages = /^(?:electron(?:-builder|-updater)?|transcribe-cpp|uiohook-napi|koffi)(?:@|\/|$)/u;
-const rootPackages = ['@earendil-works/chord', '@earendil-works/pi-ai', '@earendil-works/pi-client', '@earendil-works/pi-coding-agent', '@earendil-works/pi-durable', '@earendil-works/pi-protocol', '@earendil-works/pi-server', '@modelcontextprotocol/sdk', 'ws'];
+const rootPackages = ['@earendil-works/chord', '@earendil-works/pi-ai', '@earendil-works/pi-coding-agent', '@earendil-works/pi-durable', '@modelcontextprotocol/sdk', 'ws'];
 const packageVersion = reference => reference.split('(')[0];
 
 /** Build tool only. It reads the installed YAML parser; no parser is added to the server solely for staging. */
@@ -116,14 +116,14 @@ async function walk(directory, prefix = '') {
 
 // The published Pi 1.0 tarballs declare MIT but omit a LICENSE file. Keep the
 // exact tagged upstream terms, not merely their package.json declarations.
-const piLicenseSource = 'https://github.com/earendil-works/pi/blob/abe508e1b89912adde45528136c3221eb69acdd7/LICENSE';
+const piLicenseSource = 'https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/LICENSE';
 const piLicenseSha256 = '0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48';
-const piLicenseRoots = ['@earendil-works/chord', '@earendil-works/pi-ai', '@earendil-works/pi-client', '@earendil-works/pi-coding-agent', '@earendil-works/pi-durable', '@earendil-works/pi-protocol', '@earendil-works/pi-server'];
+const piLicenseRoots = ['@earendil-works/chord', '@earendil-works/pi-ai', '@earendil-works/pi-coding-agent', '@earendil-works/pi-durable'];
 
 /** Source-only license closure check; an SDK upgrade must reverify this provenance. */
 export function retainedPiLicenseNotice(sourceNotices, roots) {
   sourceNotices = sourceNotices.replaceAll('\r\n', '\n'); // Windows text checkouts preserve identical terms.
-  for (const name of piLicenseRoots) assert.equal(roots[name], '1.1.0', `Unverified Pi license version: ${name}`);
+  for (const name of piLicenseRoots) assert.equal(roots[name], '1.2.0', `Unverified Pi license version: ${name}`);
   const start = sourceNotices.indexOf('## Pi native runtime\n');
   assert(start >= 0, 'Missing maintained Pi license notice.');
   const next = sourceNotices.indexOf('\n## ', start + 1);
@@ -131,7 +131,7 @@ export function retainedPiLicenseNotice(sourceNotices, roots) {
   assert(section.includes(piLicenseSource), 'Missing exact tagged Pi license provenance.');
   const license = /```text\n([\s\S]*?)\n```/u.exec(section)?.[1]?.trim();
   assert(license && hash(license) === piLicenseSha256, 'Maintained Pi license differs from verified upstream terms.');
-  return `\n## Native Pi 1.1.0 MIT license\n\n${piLicenseRoots.join(', ')}.\n\nVerified upstream source: ${piLicenseSource}\n\nFate's scoped SDK modifications are retained in the accompanying patches.\n\n${license}\n`;
+  return `\n## Native Pi 1.2.0 MIT license\n\n${piLicenseRoots.join(', ')}.\n\nVerified upstream source: ${piLicenseSource}\n\nFate's scoped SDK modifications are retained in the accompanying patches.\n\n${license}\n`;
 }
 
 async function inspectRuntime(stage, projection) {

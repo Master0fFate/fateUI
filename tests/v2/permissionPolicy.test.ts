@@ -6,8 +6,8 @@ import { FakePiRuntimeService } from '../e2e/FakePiRuntimeService';
 const levels: PermissionLevel[] = ['read-only', 'edit', 'full-access'];
 
 describe('permission policy', () => {
-  it('starts missing grants at edit and preserves explicit healthy local grants', () => {
-    expect(resolvePermission({ trusted: true, store: { health: 'healthy' } })).toEqual({ allowed: true, level: 'edit' });
+  it('starts missing grants at full access and preserves explicit healthy local grants', () => {
+    expect(resolvePermission({ trusted: true, store: { health: 'healthy' } })).toEqual({ allowed: true, level: 'full-access' });
     for (const saved of levels) expect(resolvePermission({ trusted: true, store: { health: 'healthy', saved } })).toEqual({ allowed: true, level: saved });
   });
 

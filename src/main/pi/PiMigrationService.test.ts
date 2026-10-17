@@ -47,6 +47,22 @@ describe('PiMigrationService', () => {
     expect(await readFile(path.join(pi, 'auth.json'), 'utf8')).toContain('SYNTHETIC2');
   });
 
+  it('summarizes every Pi MCP server without exposing arguments, env, or URL secrets', async () => {
+    const { pi, service } = await fixture();
+    await writeFile(path.join(pi, 'mcp.json'), JSON.stringify({ mcpServers: {
+      local: { command: '/opt/bin/server', args: ['--token', 'ARG-SECRET'], env: { KEY: 'ENV-SECRET' }, lifecycle: 'lazy' },
+      remote: { url: 'https://user:URL-SECRET@mcp.example/path?key=QUERY-SECRET', disabled: true },
+      broken: { url: 'not a url' },
+      junk: 'text',
+    } }));
+    const report = await service.inspect();
+    expect(report.piMcpServers).toEqual([
+      { name: 'local', transport: 'stdio', target: 'server', enabled: true },
+      { name: 'remote', transport: 'http', target: 'mcp.example', enabled: false },
+    ]);
+    expect(JSON.stringify(report.piMcpServers)).not.toMatch(/SECRET/u);
+  });
+
   it('reports project-local extensions and MCP config as blockers without loading them', async () => {
     const { root, service } = await fixture();
     const project = path.join(root, 'project');
@@ -62,7 +78,7 @@ describe('PiMigrationService', () => {
     const { root, pi, fate, service } = await fixture();
     await writeFile(path.join(pi, 'settings.json'), JSON.stringify({ packages: [{ source: 'npm:pi-mcp-adapter@2.34.0' }] }));
     await writeFile(path.join(pi, 'mcp.json'), JSON.stringify({ mcpServers: { docs: { command: 'node', args: ['index.js'] } } }));
-    expect(await service.inspect()).toMatchObject({ bridgeConfigured: true, sharedSettings: true, mcpServersToImport: 1 });
+    expect(await service.inspect()).toMatchObject({ bridgeConfigured: true, sharedSettings: true, mcpServersToImport: 1, piMcpServers: [{ name: 'docs', transport: 'stdio', target: 'node', enabled: true }] });
     expect(await service.importMissing()).toMatchObject({ mcpServersImported: 0 });
     await expect(readFile(path.join(fate, 'mcp-servers.json'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(root).toBeTruthy();

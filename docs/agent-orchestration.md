@@ -37,7 +37,7 @@ Teams limit depth to 2, concurrent non-root turns to 3, and **live, unreleased**
 
 Set the workspace policy once in **Settings → Agent → Agents**. It applies across projects and newly created agents; there is no manual team setup in **Run → Agents**.
 
-- **Prefer isolated worktrees** starts on. New agents use separate Git checkouts by default. Turn it off to prefer sharing the direct parent's checkout.
+- **Prefer isolated worktrees** starts on. New agents use separate Git checkouts by default. Turn it off to prefer sharing the direct parent's checkout. Those checkouts are ordinary Git worktrees created under the project's own `.fate/worktrees/` directory (excluded through `.git/info/exclude`); the server profile stores them under its data root.
 - **Strict mode** starts off. With it off, the parent can explicitly choose the other mode for a particular task. With it on, Fate refuses incompatible launches and resumed turns in the backend; an agent cannot change this policy through a team tool.
 
 Saving applies the policy immediately to future admissions, including in existing and background teams. Running turns finish in their current checkout: a settings change never moves files or discards work. A retained agent in the wrong mode cannot start another turn while strict enforcement applies; relax the setting or spawn a compatible replacement. Review, integration, and cleanup of retained workspaces remain available.

@@ -10,7 +10,17 @@ import { McpConfigService } from './McpConfigService';
 const MAX_CONFIG_BYTES = 256_000;
 const MAX_PROVIDER_BYTES = 4 * 1024 * 1024;
 const SOURCES = ['auth.json', 'models.json'] as const;
+const MAX_PI_SERVERS = 64;
 type JsonObject = Record<string, unknown>;
+export interface PiMcpServerSummary { name: string; transport: 'stdio' | 'http'; target: string; enabled: boolean }
+
+function summarize(name: string, entry: JsonObject): PiMcpServerSummary | null {
+  const enabled = entry.disabled !== true;
+  if (typeof entry.url === 'string') {
+    try { return { name, transport: 'http', target: new URL(entry.url).host, enabled }; } catch { return null; }
+  }
+  return typeof entry.command === 'string' ? { name, transport: 'stdio', target: path.basename(entry.command), enabled } : null;
+}
 
 async function commandAvailable(command: string): Promise<boolean> {
   const suffixes = process.platform === 'win32' && !/\.(?:exe|cmd|bat)$/iu.test(command) ? ['', '.exe', '.cmd', '.bat'] : [''];
@@ -96,6 +106,7 @@ export interface PiMigrationReport {
   providerConflicts: number;
   mcpServersToImport: number;
   mcpServersSkipped: number;
+  piMcpServers: PiMcpServerSummary[];
   missingMcpCommands: string[];
   packageManagerMissing: boolean;
   warnings: string[];
@@ -128,8 +139,9 @@ export class PiMigrationService {
     ];
   }
 
-  private async legacyMcp(existing: readonly McpServerDefinition[]): Promise<{ servers: McpServerDefinition[]; skipped: number; warnings: string[] }> {
+  private async legacyMcp(existing: readonly McpServerDefinition[]): Promise<{ servers: McpServerDefinition[]; skipped: number; warnings: string[]; piServers: PiMcpServerSummary[] }> {
     const found = new Map<string, McpServerDefinition>();
+    const piServers = new Map<string, PiMcpServerSummary>();
     const warnings: string[] = [];
     let skipped = 0;
     const existingNames = new Set(existing.map((server) => server.name));
@@ -143,6 +155,8 @@ export class PiMigrationService {
         continue;
       }
       for (const [name, entry] of Object.entries(config.mcpServers)) {
+        const summary = isObject(entry) && name.length <= 64 ? summarize(name, entry) : null;
+        if (summary && (piServers.has(name) || piServers.size < MAX_PI_SERVERS)) piServers.set(name, summary);
         if (existingNames.has(name)) continue;
         if (found.has(name)) { skipped++; warnings.push(`Multiple Pi MCP definitions exist for ${name}; resolve the conflict before import.`); found.delete(name); existingNames.add(name); continue; }
         if (!isObject(entry)) { skipped++; continue; }
@@ -160,7 +174,7 @@ export class PiMigrationService {
         found.set(name, parsed.data);
       }
     }
-    return { servers: [...found.values()].slice(0, Math.max(0, 32 - existing.length)), skipped: skipped + Math.max(0, found.size - (32 - existing.length)), warnings };
+    return { servers: [...found.values()].slice(0, Math.max(0, 32 - existing.length)), skipped: skipped + Math.max(0, found.size - (32 - existing.length)), warnings, piServers: [...piServers.values()] };
   }
 
   async inspect(projectPath?: string): Promise<PiMigrationReport> {
@@ -227,6 +241,7 @@ export class PiMigrationService {
       providerConflicts: auth.conflicts + models.conflicts,
       mcpServersToImport: mcp.servers.length,
       mcpServersSkipped: mcp.skipped,
+      piMcpServers: mcp.piServers,
       missingMcpCommands,
       packageManagerMissing,
       warnings,

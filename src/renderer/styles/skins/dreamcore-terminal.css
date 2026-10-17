@@ -24,6 +24,7 @@
 .terminal-tab-marker { flex: none; width: 1ch; color: var(--theme-accent); }
 .terminal-tab-short { display: none; }
 .terminal-tab[data-active="true"] { color: var(--theme-text); }
+:root[data-skin="dreamcore"] .inspector-secondary-trigger .terminal-tab { gap: 4px; }
 /* Preserve a text counterpart when the global inspector hides full labels. */
 @container (max-width: 259px) {
   :root[data-skin="dreamcore"] .inspector-secondary-trigger .terminal-tab { gap: 2px; }
@@ -57,7 +58,8 @@
 :root[data-skin="dreamcore"] .session-open { padding: 7px 8px 26px; }
 :root[data-skin="dreamcore"] .folder-open { font-family: var(--font-code); }
 :root[data-skin="dreamcore"] .inspector-primary-trigger { justify-content: flex-start; padding-inline: 8px; }
-:root[data-skin="dreamcore"] .inspector-secondary-trigger { justify-content: flex-start; }
+:root[data-skin="dreamcore"] .inspector-secondary-tooltip { flex: 0 1 auto; }
+:root[data-skin="dreamcore"] .inspector-secondary-trigger { justify-content: flex-start; padding-inline: 4px; }
 :root[data-skin="dreamcore"] .inspector-secondary-trigger[data-state="active"]::after { content: none; }
 
 :root[data-skin="dreamcore"] .welcome--conversation { padding-top: 8px; }
@@ -93,7 +95,7 @@
 :root[data-skin="dreamcore"] .composer-toolbar { flex-wrap: nowrap; gap: 6px; padding-top: 6px; border-top: 1px solid var(--theme-border); white-space: nowrap; }
 :root[data-skin="dreamcore"] .composer-toolbar-leading { flex: 0 0 auto; flex-wrap: nowrap; gap: 3px; }
 :root[data-skin="dreamcore"] .composer-toolbar-trailing { flex: 1 1 0; min-width: 0; flex-wrap: nowrap; justify-content: flex-end; gap: 3px; }
-:root[data-skin="dreamcore"] .composer-toolbar :is(button.permission-toggle, button.composer-tools-toggle, button.composer-icon-action, button.voice-button, .send-button) {
+:root[data-skin="dreamcore"] .composer-toolbar :is(button.permission-toggle, button.composer-tools-toggle, button.composer-icon-action, button.composer-branch, button.voice-button, .send-button) {
   width: auto; min-width: 28px; height: 28px; flex: none; padding: 0 3px; border: 0; border-radius: 0;
   background: transparent; font: 11px/1.4 var(--font-code); box-shadow: none; transform: none;
 }
@@ -107,19 +109,21 @@
   .composer-toolbar .terminal-action-short { display: inline; color: inherit; }
   .composer-toolbar .context-wheel { display: none; }
   .composer-toolbar .model-pill strong { max-width: 16ch; }
+  .composer-toolbar .composer-branch { max-width: 12ch; }
   .composer-toolbar .terminal-action { font-size: 10px; gap: 0; }
 }
 @container composer (max-width: 360px) {
   .composer-toolbar-trailing, .composer-toolbar-leading { gap: 0; }
   .composer-toolbar .model-pill strong { max-width: 7ch; }
+  .composer-toolbar .composer-branch { max-width: 7ch; }
 }
 :root[data-skin="dreamcore"] .context-wheel { width: auto; min-width: 6ch; height: 24px; flex: none; }
 .terminal-context { font: 10px var(--font-code); white-space: nowrap; }
 :root[data-skin="dreamcore"] .context-wheel[data-level="warning"] { color: var(--theme-warning); }
 :root[data-skin="dreamcore"] .context-wheel[data-level="critical"] { color: var(--theme-danger); }
 
-:root[data-skin="dreamcore"] :is(.settings-dialog, .command-palette, .custom-select-content, .model-popover, .permission-popover, .extension-status-popover, .session-reference-popover, .folder-action-menu, .tooltip) { border-radius: 0; box-shadow: none; background: var(--theme-panel); font-family: var(--font-code); }
-:root[data-skin="dreamcore"] .settings-header { flex-basis: 62px; }
+:root[data-skin="dreamcore"] :is(.settings-dialog, .command-palette, .custom-select-content, .model-popover, .permission-popover, .extension-status-popover, .branch-popover, .folder-action-menu, .tooltip) { border-radius: 0; box-shadow: none; background: var(--theme-panel); font-family: var(--font-code); }
+:root[data-skin="dreamcore"] .settings-header { flex-basis: 56px; }
 :root[data-skin="dreamcore"] .settings-header > button { width: auto; font: 11px var(--font-code); }
 :root[data-skin="dreamcore"] .settings-dialog h2 { font-size: 15px; }
 :root[data-skin="dreamcore"] .settings-nav { padding: 12px 8px; }
@@ -137,6 +141,10 @@
 :root[data-skin="dreamcore"] .settings-inline-action:disabled { opacity: .4; cursor: not-allowed; }
 :root[data-skin="dreamcore"] .changes-summary { flex: none; min-height: 56px; flex-wrap: wrap; gap: 2px 6px; padding-block: 4px; }
 :root[data-skin="dreamcore"] .changes-branch { max-width: 110px; }
+:root[data-skin="dreamcore"] .effort-slider-value::before { content: '['; }
+:root[data-skin="dreamcore"] .effort-slider-value::after { content: ']'; }
+:root[data-skin="dreamcore"] .composer-branch { max-width: 110px; }
+:root[data-skin="dreamcore"] .composer[data-compact-toolbar="true"] .composer-branch > .icon-label { display: inline; }
 :root[data-skin="dreamcore"] :is(.git-refresh-button, .git-remote-button, .summary-counts button) { width: auto; border-radius: 0; padding-inline: 3px; }
 :root[data-skin="dreamcore"] .changes-summary > .git-remote-actions { margin-left: 0; }
 :root[data-skin="dreamcore"] .review-runway-bar { flex-wrap: wrap; overflow: visible; background: var(--theme-canvas); }

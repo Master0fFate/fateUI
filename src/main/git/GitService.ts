@@ -3,6 +3,7 @@ import { existsSync, promises as fs, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import type {
+  GitBranchRef,
   GitChange,
   GitCombinedDiff,
   GitCommitDetails,
@@ -13,11 +14,15 @@ import type {
   GitOperationResult,
   GitRef,
   GitStatus,
+  GitRenameBranchInput,
+  GitSwitchBranchInput,
   GitDiff,
   GitWorktree,
 } from '../../shared/contracts/ipc';
 import { FilesystemService, isBinaryBuffer, isSafeExternalPath, languageForPath, MAX_FILE_PREVIEW_BYTES, previewImageMimeType } from '../files/FilesystemService';
 import { worktreeBranchName } from './GitBranchNames';
+import { randomUUID } from 'node:crypto';
+import { GIT_HUNK_TEXT_MAX, type GitHunk, type GitHunksResult } from '../../shared/contracts/ipc';
 import type { CheckoutOwnership } from '../../core/ownership/CheckoutOwnership';
 
 const MAX_GIT_OUTPUT = 8 * 1024 * 1024;
@@ -30,10 +35,14 @@ const MAX_ATTRIBUTE_FILE_BYTES = 1_048_576;
 const MAX_ATTRIBUTE_TOTAL_BYTES = 2 * 1_048_576;
 const MAX_FILTER_DRIVERS = 64;
 const MAX_WORKTREES = 500;
+const MAX_BRANCHES = 2_000;
+const MAX_BRANCH_NAME_LENGTH = 250;
 const MAX_HISTORY_COMMITS = 500;
 const MAX_COMMIT_FILES = 500;
 const MAX_COMBINED_DIFF_BYTES = 4_000_000;
 const MAX_GIT_OPERATION_OUTPUT = 2_000;
+export const MANAGED_DIRECTORY = '.fate';
+const MANAGED_EXCLUDE_LINE = `/${MANAGED_DIRECTORY}/`;
 const SAFE_GIT_CONFIG = [
   '-c', 'core.fsmonitor=false',
   '-c', 'diff.external=',
@@ -105,6 +114,15 @@ export async function validateSelectedRoot(root: string): Promise<void> {
   if (!canonicalTopLevel || canonicalTopLevel !== path.normalize(root)) {
     throw new Error(`The selected project is not the Git worktree root. Open the repository root instead: ${canonicalTopLevel || topLevel}`);
   }
+}
+
+export async function excludeManagedDirectory(root: string): Promise<void> {
+  const commonDirectory = (await executeWithoutWorkTree(root, [...SAFE_GIT_CONFIG, 'rev-parse', '--path-format=absolute', '--git-common-dir'], 32_768)).toString('utf8').trim();
+  const excludePath = path.join(commonDirectory, 'info', 'exclude');
+  const existing = await fs.readFile(excludePath, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return ''; throw error; });
+  if (existing.split(/\r?\n/u).includes(MANAGED_EXCLUDE_LINE)) return;
+  await fs.mkdir(path.dirname(excludePath), { recursive: true });
+  await fs.appendFile(excludePath, `${existing && !existing.endsWith('\n') ? '\n' : ''}${MANAGED_EXCLUDE_LINE}\n`);
 }
 
 export async function inheritedLineEndingConfig(root: string): Promise<string[]> {
@@ -180,7 +198,7 @@ function executeConfigScope(root: string, scope: '--system' | '--global'): Promi
   });
 }
 
-function executeNetwork(root: string, args: string[], additionalConfig: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+function executeWithStderr(root: string, args: string[], additionalConfig: readonly string[], environment: NodeJS.ProcessEnv, timeout: number): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const executable = trustedGitExecutable();
     const executableRelative = path.relative(root, executable);
@@ -188,14 +206,10 @@ function executeNetwork(root: string, args: string[], additionalConfig: readonly
       reject(new Error('Refusing to execute Git from inside the untrusted project directory.'));
       return;
     }
-    const environment = gitEnvironment();
-    environment.GIT_ALLOW_PROTOCOL = 'https:http:ssh:git';
-    const ssh = trustedSshExecutable();
-    if (ssh) environment.GIT_SSH = ssh;
     execFile(
       executable,
       [`--work-tree=${root}`, ...SAFE_GIT_CONFIG, '-c', `core.worktree=${root}`, ...additionalConfig, ...args],
-      { cwd: root, env: environment, encoding: 'buffer', maxBuffer: MAX_GIT_OUTPUT, timeout: MAX_GIT_NETWORK_RUNTIME_MS, windowsHide: true },
+      { cwd: root, env: environment, encoding: 'buffer', maxBuffer: MAX_GIT_OUTPUT, timeout, windowsHide: true },
       (error, stdout, stderr) => {
         const stdoutText = (Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout ?? '')).toString('utf8');
         const stderrText = (Buffer.isBuffer(stderr) ? stderr : Buffer.from(stderr ?? '')).toString('utf8');
@@ -207,6 +221,14 @@ function executeNetwork(root: string, args: string[], additionalConfig: readonly
       },
     );
   });
+}
+
+function executeNetwork(root: string, args: string[], additionalConfig: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+  const environment = gitEnvironment();
+  environment.GIT_ALLOW_PROTOCOL = 'https:http:ssh:git';
+  const ssh = trustedSshExecutable();
+  if (ssh) environment.GIT_SSH = ssh;
+  return executeWithStderr(root, args, additionalConfig, environment, MAX_GIT_NETWORK_RUNTIME_MS);
 }
 
 interface AttributeBudget { bytes: number }
@@ -269,7 +291,7 @@ async function readAttributeFile(attributePath: string, drivers: Set<string>, bu
 export async function safeFilterConfig(root: string): Promise<string[]> {
   const drivers = new Set<string>();
   const budget: AttributeBudget = { bytes: 0 };
-  const output = await execute(root, ['ls-files', '-z', '--cached', '--others', '--', '.gitattributes', ':(glob)**/.gitattributes'], 512_000);
+  const output = await execute(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '.gitattributes', ':(glob)**/.gitattributes'], 512_000);
   const attributePaths = [...new Set(output.toString('utf8').split('\0').filter(Boolean))];
   if (attributePaths.length > MAX_ATTRIBUTE_PATHS) throw new Error('The repository contains too many Git attribute files for safe automatic inspection.');
   for (const attributePath of attributePaths) {
@@ -473,6 +495,57 @@ export function parseGitWorktrees(output: string, currentRoot: string): GitWorkt
   return result;
 }
 
+export function parseGitBranchRefs(output: string, worktrees: readonly GitWorktree[], originHead: string): GitBranchRef[] {
+  const worktreeByBranch = new Map<string, string>();
+  for (const worktree of worktrees) if (worktree.branch && !worktree.current && !worktree.bare) worktreeByBranch.set(worktree.branch, worktree.path);
+  const locals: GitBranchRef[] = [];
+  const remotes: GitBranchRef[] = [];
+  const seen = new Set<string>();
+  for (const line of output.split('\n')) {
+    const [refname = '', upstream = '', head = ''] = line.replace(/\r$/u, '').split('\0');
+    if (refname.startsWith('refs/heads/')) {
+      const name = refname.slice('refs/heads/'.length);
+      seen.add(name);
+      locals.push({ name, kind: 'local', current: head === '*', worktreePath: worktreeByBranch.get(name) ?? null, upstream: upstream || null });
+    } else if (refname.startsWith('refs/remotes/')) {
+      const remoteRef = refname.slice('refs/remotes/'.length);
+      const separator = remoteRef.indexOf('/');
+      const name = remoteRef.slice(separator + 1);
+      if (separator < 0 || name === 'HEAD') continue;
+      remotes.push({ name, kind: 'remote', current: false, worktreePath: null, upstream: remoteRef });
+    }
+  }
+  const remoteOnly = remotes.filter((ref) => !seen.has(ref.name) && seen.add(ref.name));
+  const defaultName = originHead.startsWith('origin/') ? originHead.slice('origin/'.length) : locals.find((ref) => ref.current)?.name;
+  const defaultIndex = locals.findIndex((ref) => ref.name === defaultName);
+  if (defaultIndex > 0) locals.unshift(...locals.splice(defaultIndex, 1));
+  return [...locals, ...remoteOnly].slice(0, MAX_BRANCHES);
+}
+
+export function assertBranchNameShape(name: string): void {
+  if (!name || name.length > MAX_BRANCH_NAME_LENGTH || name.startsWith('-') || name.includes('@{') || /[\u0000-\u001f\u007f\s~^:?*[\\]/u.test(name)) {
+    throw new Error(`Invalid branch name: ${name}`);
+  }
+}
+
+async function assertBranchName(root: string, name: string): Promise<void> {
+  assertBranchNameShape(name);
+  try {
+    await execute(root, ['check-ref-format', '--branch', name], 16_384);
+  } catch {
+    throw new Error(`Invalid branch name: ${name}`);
+  }
+}
+
+async function refExists(root: string, ref: string): Promise<boolean> {
+  try {
+    await execute(root, ['show-ref', '--verify', '--quiet', ref], 16_384);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function parseCommitFiles(nameStatusOutput: string, stats: Map<string, Numstat>, limit = MAX_COMMIT_FILES): { files: GitCommitFile[]; total: number; truncated: boolean } {
   const fields = nameStatusOutput.split('\0');
   const files: GitCommitFile[] = [];
@@ -573,6 +646,11 @@ async function resolvePushTarget(root: string, branch: string, upstream: GitUpst
   return remote ? { remote, branch: upstream?.branch ?? branch } : null;
 }
 
+async function resolveRemoteTracking(root: string, branch: string): Promise<{ upstream: GitUpstream | null; target: GitPushTarget | null }> {
+  const upstream = await currentUpstream(root, branch);
+  return { upstream, target: await resolvePushTarget(root, branch, upstream) };
+}
+
 function utf8Prefix(value: string, maxBytes: number): { value: string; truncated: boolean } {
   const encoded = Buffer.from(value, 'utf8');
   if (encoded.length <= maxBytes) return { value, truncated: false };
@@ -600,10 +678,14 @@ export class GitService {
 
   constructor(
     private readonly files: FilesystemService,
-    private readonly worktreesRoot = path.join(homedir(), '.pi', 'fateGUI', 'worktrees'),
+    private readonly worktreesRoot?: string,
     private readonly temporaryRoot = tmpdir(),
     private readonly ownership?: CheckoutOwnership,
   ) {}
+
+  private managedWorktreeRoot(root: string): string {
+    return this.worktreesRoot ?? path.join(root, MANAGED_DIRECTORY, 'worktrees');
+  }
 
   private async hooksDirectory(): Promise<string> {
     await fs.mkdir(this.temporaryRoot, { recursive: true, mode: 0o700 });
@@ -701,20 +783,11 @@ export class GitService {
 
   private async readStatus(root: string): Promise<GitStatus> {
     let statusOutput: string;
-    let stats = new Map<string, Numstat>();
+    let filterConfig: string[];
     try {
       await validateSelectedRoot(root);
-      const filterConfig = [...await inheritedLineEndingConfig(root), ...await safeFilterConfig(root)];
+      filterConfig = (await Promise.all([inheritedLineEndingConfig(root), safeFilterConfig(root)])).flat();
       statusOutput = (await execute(root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all', '--ignore-submodules=all'], MAX_GIT_OUTPUT, filterConfig)).toString('utf8');
-      try {
-        const numstat = await execute(root, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', 'HEAD', '--'], MAX_GIT_OUTPUT, filterConfig);
-        stats = parseNumstat(numstat.toString('utf8'));
-      } catch (error) {
-        // Repositories without HEAD and oversized diff summaries still retain
-        // useful status. Their directly-read untracked counts are filled below.
-        const code = (error as ExecFailure).code;
-        if (!outputTooLarge(error) && !(typeof code === 'number' && code !== 0)) throw error;
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : '';
       if (message.includes('not a git repository')) {
@@ -723,9 +796,18 @@ export class GitService {
       throw error;
     }
     const parsed = parsePorcelainStatus(statusOutput);
-    const upstream = parsed.branch ? await currentUpstream(root, parsed.branch) : null;
-    const target = parsed.branch ? await resolvePushTarget(root, parsed.branch, upstream) : null;
-    const pushTarget = target ? `${target.remote}/${target.branch}` : null;
+    const [stats, remote] = await Promise.all([
+      execute(root, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', 'HEAD', '--'], MAX_GIT_OUTPUT, filterConfig)
+        .then((numstat) => parseNumstat(numstat.toString('utf8')), (error: unknown) => {
+          // Repositories without HEAD and oversized diff summaries still retain
+          // useful status. Their directly-read untracked counts are filled below.
+          const code = (error as ExecFailure).code;
+          if (!outputTooLarge(error) && !(typeof code === 'number' && code !== 0)) throw error;
+          return new Map<string, Numstat>();
+        }),
+      parsed.branch ? resolveRemoteTracking(root, parsed.branch) : { upstream: null, target: null },
+    ]);
+    const pushTarget = remote.target ? `${remote.target.remote}/${remote.target.branch}` : null;
     const truncated = parsed.changes.length > MAX_CHANGES;
     const projected = parsed.changes.slice(0, MAX_CHANGES);
     const changes = await mapLimited(projected, 16, async (change, index): Promise<GitChange> => {
@@ -781,6 +863,80 @@ export class GitService {
     return result;
   }
 
+  async listBranches(): Promise<GitBranchRef[]> {
+    const root = this.files.getRoot();
+    await validateSelectedRoot(root);
+    const [refs, worktrees, originHead] = await Promise.all([
+      execute(root, ['for-each-ref', '--format=%(refname)%00%(upstream:short)%00%(HEAD)', 'refs/heads', 'refs/remotes'], 1_000_000),
+      this.worktrees(),
+      execute(root, ['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'], 16_384).catch(() => Buffer.alloc(0)),
+    ]);
+    return parseGitBranchRefs(refs.toString('utf8'), worktrees, originHead.toString('utf8').trim());
+  }
+
+  async switchBranch(input: GitSwitchBranchInput): Promise<GitStatus> {
+    const root = this.files.getRoot();
+    return this.ownership ? this.ownership.mutation(root, () => this.switchBranchUnlocked(root, input)) : this.switchBranchUnlocked(root, input);
+  }
+
+  private async switchBranchUnlocked(root: string, { name, create, base }: GitSwitchBranchInput): Promise<GitStatus> {
+    const initial = await this.readStatus(root);
+    if (!initial.repository) throw new Error('Branch controls require a repository.');
+    await assertBranchName(root, name);
+    if (base !== undefined) await assertBranchName(root, base);
+    const hooksDirectory = await this.hooksDirectory();
+    try {
+      const switchConfig = [
+        ...await inheritedLineEndingConfig(root),
+        ...await safeFilterConfig(root),
+        '-c', `core.hooksPath=${hooksDirectory}`,
+        '-c', 'protocol.allow=never',
+        '-c', 'protocol.file.allow=never',
+        '-c', 'protocol.ext.allow=never',
+      ];
+      if (create) {
+        if (await refExists(root, `refs/heads/${name}`)) throw new Error(`Branch already exists: ${name}`);
+        await executeWithStderr(root, ['switch', '-c', name, ...(base ? [base] : [])], switchConfig, gitEnvironment(), MAX_GIT_RUNTIME_MS);
+      } else {
+        await executeWithStderr(root, ['switch', '--guess', '--', name], switchConfig, gitEnvironment(), MAX_GIT_RUNTIME_MS);
+      }
+      if (this.files.getRoot() !== root) throw new Error('The active project changed before the branch switch completed.');
+      return this.statusAfterCheckoutChange(root);
+    } finally {
+      await fs.rm(hooksDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  async renameBranch(input: GitRenameBranchInput): Promise<GitStatus> {
+    const root = this.files.getRoot();
+    return this.ownership ? this.ownership.mutation(root, () => this.renameBranchUnlocked(root, input)) : this.renameBranchUnlocked(root, input);
+  }
+
+  private async renameBranchUnlocked(root: string, { from, to }: GitRenameBranchInput): Promise<GitStatus> {
+    const initial = await this.readStatus(root);
+    if (!initial.repository) throw new Error('Branch controls require a repository.');
+    const source = from ?? initial.branch;
+    if (!source) throw new Error('HEAD is detached. Name the branch to rename.');
+    await assertBranchName(root, source);
+    await assertBranchName(root, to);
+    if (!await refExists(root, `refs/heads/${source}`)) throw new Error(`Branch does not exist: ${source}`);
+    if (await refExists(root, `refs/heads/${to}`)) throw new Error(`Branch already exists: ${to}`);
+    await executeWithStderr(root, ['branch', '-m', '--', source, to], [], gitEnvironment(), MAX_GIT_RUNTIME_MS);
+    if (this.files.getRoot() !== root) throw new Error('The active project changed before the branch rename completed.');
+    return this.statusAfterCheckoutChange(root);
+  }
+
+  private statusAfterCheckoutChange(root: string): Promise<GitStatus> {
+    this.files.invalidate(root);
+    this.statusRequest = null;
+    this.lastStatus = null;
+    this.historyRequest = null;
+    this.diffCache.clear();
+    this.diffRequests.clear();
+    this.commitDetailsCache.clear();
+    return this.status();
+  }
+
   async resolveWorktree(candidatePath: string): Promise<string> {
     const canonical = path.normalize(await fs.realpath(candidatePath));
     const worktrees = await this.worktrees();
@@ -801,8 +957,10 @@ export class GitService {
     const head = (await execute(root, ['rev-parse', '--verify', 'HEAD'], 16_384)).toString('utf8').trim();
     if (!/^[0-9a-f]{40,64}$/u.test(head)) throw new Error('Create the first commit before starting an isolated worktree session.');
 
-    await fs.mkdir(this.worktreesRoot, { recursive: true });
-    const managedRoot = path.normalize(await fs.realpath(this.worktreesRoot));
+    const worktreesRoot = this.managedWorktreeRoot(root);
+    if (!this.worktreesRoot) await excludeManagedDirectory(root);
+    await fs.mkdir(worktreesRoot, { recursive: true });
+    const managedRoot = path.normalize(await fs.realpath(worktreesRoot));
     const hooksDirectory = await this.hooksDirectory();
     const filterConfig = await safeFilterConfig(root);
     const worktreeConfig = [
@@ -883,7 +1041,7 @@ export class GitService {
   private async discardCreatedWorktreeUnlocked(worktree: GitWorktree): Promise<void> {
     const root = this.files.getRoot();
     const canonical = await this.resolveWorktree(worktree.path);
-    const managedRoot = path.normalize(await fs.realpath(this.worktreesRoot));
+    const managedRoot = path.normalize(await fs.realpath(this.managedWorktreeRoot(root)));
     const relative = path.relative(managedRoot, canonical);
     if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
       throw new Error('Refusing to remove a worktree outside Fate UI managed storage.');
@@ -1096,6 +1254,81 @@ export class GitService {
       await execute(root, ['clean', '-f', '--', relativePath]);
     }
     if (this.files.getRoot() !== root) throw new Error('The active project changed before the Git revert completed.');
+    this.files.invalidate(root);
+    this.statusRequest = null;
+    this.lastStatus = null;
+    this.historyRequest = null;
+    this.diffCache.clear();
+    this.diffRequests.clear();
+    this.statusGeneration += 1;
+    return this.status();
+  }
+
+  private async unifiedDiff(relativePath: string, root: string): Promise<{ fileHeader: string; hunks: GitHunk[] } | null> {
+    const diffOutput = execute(root, ['diff', '--no-color', '--no-ext-diff', '--unified=3', 'HEAD', '--', relativePath]);
+    const listed = (await execute(root, ['ls-files', '-z', '--', relativePath])).toString('utf8').replace(/\0/gu, '').trim();
+    if (!listed) {
+      diffOutput.catch(() => undefined);
+      return null;
+    }
+    const output = (await diffOutput).toString('utf8');
+    const lines = output.split('\n');
+    if (lines.at(-1) === '') lines.pop();
+    const headerLines: string[] = [];
+    const hunks: GitHunk[] = [];
+    let current: string[] | null = null;
+    let header: RegExpExecArray | null = null;
+    const flush = () => {
+      if (!current || !header) return;
+      const text = current.join('\n');
+      hunks.push({
+        index: hunks.length,
+        header: current[0]!,
+        oldStart: Number(header[1]),
+        oldLines: header[2] === undefined ? 1 : Number(header[2]),
+        newStart: Number(header[3]),
+        newLines: header[4] === undefined ? 1 : Number(header[4]),
+        text: text.length > GIT_HUNK_TEXT_MAX ? text.slice(0, GIT_HUNK_TEXT_MAX) : text,
+        truncated: text.length > GIT_HUNK_TEXT_MAX,
+      });
+    };
+    for (const line of lines) {
+      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u.exec(line);
+      if (match) {
+        flush();
+        current = [line];
+        header = match;
+      } else if (current) current.push(line);
+      else headerLines.push(line);
+    }
+    flush();
+    return { fileHeader: headerLines.join('\n'), hunks };
+  }
+
+  async hunks(relativePath: string): Promise<GitHunksResult> {
+    await this.files.confinePath(relativePath);
+    const root = this.files.getRoot();
+    await validateSelectedRoot(root);
+    const parsed = await this.unifiedDiff(relativePath, root);
+    return { path: relativePath, tracked: parsed !== null, hunks: parsed?.hunks ?? [] };
+  }
+
+  async revertHunk(relativePath: string, index: number, header: string): Promise<GitStatus> {
+    await this.files.confinePath(relativePath);
+    const root = this.files.getRoot();
+    await validateSelectedRoot(root);
+    const parsed = await this.unifiedDiff(relativePath, root);
+    const hunk = parsed?.hunks[index];
+    if (!parsed || !hunk || hunk.header !== header) throw new Error('The working tree changed since this hunk was listed. Refresh the diff and try again.');
+    if (hunk.truncated) throw new Error('This hunk is too large to revert on its own. Revert the whole file instead.');
+    const patchFile = path.join(tmpdir(), `fate-hunk-${randomUUID()}.patch`);
+    await fs.writeFile(patchFile, `${parsed.fileHeader}\n${hunk.text}\n`, { flag: 'wx', mode: 0o600 });
+    try {
+      await execute(root, ['apply', '--reverse', '--whitespace=nowarn', '--', patchFile]);
+    } finally {
+      await fs.rm(patchFile, { force: true }).catch(() => undefined);
+    }
+    if (this.files.getRoot() !== root) throw new Error('The active project changed before the hunk revert completed.');
     this.files.invalidate(root);
     this.statusRequest = null;
     this.lastStatus = null;

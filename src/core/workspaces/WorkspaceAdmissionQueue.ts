@@ -25,7 +25,7 @@ export interface WorkspaceAdmissionPort<Runtime extends RuntimeSelectionView> {
   settled(): Promise<void>;
   observeSelection(sessionId: string | null): void;
   snapshot(): { selectedSessionId: string | null; selectionRevision: number };
-  assertCurrent(command: SessionAdmission, authorize: () => AdmissionAuthority, allowStop?: boolean): { runtime: Runtime; sessionId: string | null };
+  assertCurrent(command: SessionAdmission, authorize: () => AdmissionAuthority, allowStop?: boolean, select?: boolean): { runtime: Runtime; sessionId: string | null };
   run<T>(command: SessionAdmission, authorize: () => AdmissionAuthority,
     perform: (captured: { runtime: Runtime; sessionId: string | null }) => T | Promise<T>, select?: boolean, allowStop?: boolean): Promise<T>;
 }
@@ -60,10 +60,10 @@ export class WorkspaceAdmissionQueue<Runtime extends RuntimeSelectionView = Runt
   }
 
   /** Also call immediately after awaited preparation, before invoking a runtime method. */
-  assertCurrent(command: SessionAdmission, authorize: () => AdmissionAuthority, allowStop = false): { runtime: Runtime; sessionId: string | null } {
+  assertCurrent(command: SessionAdmission, authorize: () => AdmissionAuthority, allowStop = false, select = false): { runtime: Runtime; sessionId: string | null } {
     if (this.sealed) throw new WorkspaceAdmissionError('STALE_WORKSPACE');
     const scope = authorize();
-    if (!allowStop) this.assertStorageAdmission(command.expectedSessionId, scope.principalId);
+    if (!allowStop) this.assertStorageAdmission(select ? null : command.expectedSessionId, scope.principalId);
     if (command.workspaceGeneration !== this.generation || scope.currentGeneration !== this.generation) throw new WorkspaceAdmissionError('STALE_WORKSPACE');
     if (scope.controlGeneration === null || !Number.isSafeInteger(command.controlGeneration) || command.controlGeneration !== scope.controlGeneration) throw new WorkspaceAdmissionError('CONTROL_REQUIRED');
     if (!scope.permission) throw new WorkspaceAdmissionError('PERMISSION_REQUIRED');
@@ -77,13 +77,13 @@ export class WorkspaceAdmissionQueue<Runtime extends RuntimeSelectionView = Runt
     perform: (captured: { runtime: Runtime; sessionId: string | null }) => T | Promise<T>,
     select = false, allowStop = false): Promise<T> {
     if (!allowStop) {
-      try { this.assertStorageAdmission(command.expectedSessionId, authorize().principalId); }
+      try { this.assertStorageAdmission(select ? null : command.expectedSessionId, authorize().principalId); }
       catch (error) { return Promise.reject(error); }
     }
     if (this.sealed) return Promise.reject(new WorkspaceAdmissionError('STALE_WORKSPACE'));
     this.outstanding += 1;
     const execute = async (): Promise<T> => {
-      const captured = this.assertCurrent(command, authorize, allowStop);
+      const captured = this.assertCurrent(command, authorize, allowStop, select);
       const result = await perform(captured);
       if (select) this.snapshot();
       return result;

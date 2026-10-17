@@ -133,7 +133,7 @@ The only supported `appearance` keys are `interfaceFont`, `codeFont`, `compactMo
 | `context`, `resources` | Context metrics, token charts, resource groups and rows |
 | `music` | Dock, transport, local/remote source input, populated playlist |
 | `settings`, `dialogs` | Settings sections, selectors, general popovers/dialogs and confirmations |
-| `modelPicker`, `tooltips` | Model/reasoning/provider pickers, options, app tooltips and native-title tooltips |
+| `modelPicker`, `tooltips` | Model/reasoning/provider pickers, the reasoning effort slider, options, app tooltips and native-title tooltips |
 | `files`, `changes` | File tree, preview chrome, review controls, Git rows |
 | `browser` | Tab strip, new/close tab buttons, address field, Back/Forward/Reload, local-file/annotation/device controls; not the Chromium page itself |
 | `learning`, `automations` | Memory library/review forms; `automations` remains a legacy pack key with no current UI target |
@@ -141,6 +141,10 @@ The only supported `appearance` keys are `interfaceFont`, `codeFont`, `compactMo
 Allowed properties are `controlRadius` (0–12 px), `surfaceRadius` (0–16 px), `padding` (4–24 px), `rowHeight` (24–48 px minimum), `fontSize` (11–16 px base), `surface` (`canvas`, `panel`, `raised`), and `border` (`border`, `borderStrong`, `textSoft`). Colors always come from the selected palette. Controls and metadata retain their no-wrap/truncation rules; compact action labels may stay smaller than body text. Long messages, code, descriptions, and warnings remain readable rather than being forced onto one line.
 
 The composer keeps Memory, its tools menu, model selection, and send/stop controls on one line. Secondary actions move into the tools menu and labels shorten as space shrinks. Skin options cannot disable these layout protections or remove controls.
+
+### Reasoning effort slider
+
+The model popover shows reasoning as a slider by default; the arrow on the `Reasoning` row switches to the dropdown menu and back, and that choice persists. The slider is a pointer-driven control, not a native range input: the thumb follows the pointer, snaps to the nearest level on release, and the keyboard moves one level per arrow key. Hooks: `.effort-slider` (the `role="slider"` element; `data-dragging` while the pointer is down, `data-level` with the selected index, `data-max` at the top level, `aria-disabled` when the next model has no reasoning), `.effort-slider-rail`, `.effort-slider-track` (the empty wedge), `.effort-slider-fill` (the filled wedge, masked to `--effort`), `.effort-slider-thumb`, `.effort-slider-value` (the level name floating above the thumb), and `.model-setting-toggle` (the arrow, `aria-expanded` when the menu is shown). Two registered custom properties drive the look and animate between levels: `--effort` (percentage along the rail) and `--heat` (0 to 1), so a skin can scale size, glow, or colour with the selected level. Version 2 packs get `controlRadius` applied to the thumb and toggle through `--surface-control-radius`, and colours always come from the palette.
 
 ### Questionnaire field
 

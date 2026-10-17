@@ -16,7 +16,7 @@ const SEARCH_YIELD_INTERVAL = 128;
 const DIRECTORY_ENTRY_STAT_CONCURRENCY = 32;
 // Reuse the same default-locale ordering without constructing a collator for every heap comparison.
 const filenameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-const ignoredDirectories = new Set(['.git', 'node_modules']);
+const ignoredDirectories = new Set(['.git', '.fate', 'node_modules']);
 const safeExternalExtensions = new Set([
   '.c', '.cc', '.cpp', '.cs', '.css', '.csv', '.go', '.h', '.hpp', '.ini', '.java', '.json', '.jsx', '.log',
   '.md', '.rs', '.scss', '.sql', '.toml', '.ts', '.tsx', '.txt', '.vue', '.xml', '.yaml', '.yml',
@@ -547,7 +547,7 @@ export class FilesystemService {
       scannedChildren += 1;
       if (scannedChildren > MAX_DIRECTORY_SCAN_ENTRIES) { scanTruncated = true; break; }
       this.assertRootOperation(operation);
-      if (child.name === '.git' || child.name === 'node_modules') continue;
+      if (ignoredDirectories.has(child.name)) continue;
       visibleChildren += 1;
       retainDirectoryEntry(selected, child);
     }
@@ -607,7 +607,7 @@ export class FilesystemService {
           await new Promise<void>((resolve) => setImmediate(resolve));
           this.assertSearchRoot(expectedRoot, generation);
         }
-        if (child.name === '.git' || child.name === 'node_modules' || child.isSymbolicLink()) continue;
+        if (ignoredDirectories.has(child.name) || child.isSymbolicLink()) continue;
         const kind = child.isDirectory() ? 'directory' : child.isFile() ? 'file' : null;
         if (!kind) continue;
         const childPath = directoryPath ? `${directoryPath}/${child.name}` : child.name;

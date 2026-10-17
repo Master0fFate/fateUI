@@ -479,9 +479,10 @@ export async function readSessionSnapshot(filePath: string, sessionId: string, e
             name = nextName || null;
           }
           if (value.type === 'message') {
-            messageCount += 1;
             const message = record(parsed.message) ? parsed.message : null;
-            if (message?.role === 'user' && !firstMessage) firstMessage = messageText(message.content) || undefined;
+            const text = message?.role === 'user' || message?.role === 'assistant' ? messageText(message.content) : '';
+            if (text) messageCount += 1;
+            if (message?.role === 'user' && !firstMessage) firstMessage = text || undefined;
             if (message?.role === 'user' || message?.role === 'assistant') {
               const timestamp = typeof message.timestamp === 'number' ? message.timestamp
                 : typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;

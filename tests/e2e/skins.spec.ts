@@ -156,7 +156,7 @@ test('Skins previews independently, preserves live work, and restores after rest
       skin: document.documentElement.dataset.skin,
       theme: document.documentElement.dataset.theme,
       canvas: document.documentElement.style.getPropertyValue('--theme-canvas'),
-    }))).toEqual({ skin: 'dreamcore', theme: 'monochrome', canvas: '#090a0b' });
+    }))).toEqual({ skin: 'dreamcore', theme: 'monochrome', canvas: '#050505' });
 
     await settings.getByRole('tab', { name: /Compaction/u }).click();
     await settings.getByRole('checkbox', { name: /^Compact mode/u }).click();
