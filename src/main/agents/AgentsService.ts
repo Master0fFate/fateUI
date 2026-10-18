@@ -180,7 +180,6 @@ export class AgentsService {
 
   async saveAgent(input: AgentSave): Promise<AgentDefinition> {
     this.admitWork();
-    if (input.value.google && input.value.defaults.permission === 'full-access') throw new Error('Google stays off for Full access Agents. Choose Edit files or Read only to turn it on.');
     const agent = await this.repository.saveAgent(input);
     if (!agent.enabled) await this.cancelMatching((active) => active.agent.id === agent.id);
     const state = await this.repository.state(agent.id);

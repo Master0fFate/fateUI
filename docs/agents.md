@@ -21,6 +21,7 @@ The dot next to an Agent shows a run in progress, or unread items in its inbox (
 
 ## Where an Agent works
 
+- **What it can do.** Ask an Agent what it can do, or for something it lacks such as mail or a schedule. It calls `fate_capabilities`, which lists what is on right now and the exact setup steps for the rest, and walks you through them.
 - **Its own folder.** Each Agent's conversation runs in a folder Fate UI owns, under the data directory at `agents/v1/homes/<agent id>`. Files, terminal and Memory Learning follow it like a project. Memory Learning's **PROJECT** store for that folder is the Agent's own memory; the **GLOBAL** profile applies as usual.
 - **Your projects, through runs.** A run is an ordinary conversation in a trusted project, started with the Agent's instructions. It can use Agent Teams, GoalMax (the Agent picks `goal` mode for multi-step outcomes) and that project's Memory Learning. You can open it, read it and steer it like any session. A project switch or a session switch does not stop it.
 - **Persona.** The **avatar** is one emoji shown before the Agent's name in the sidebar, in the chat header and on its replies. Nothing is downloaded. The **tone** (up to 500 characters, for example “warm and brief”) is added to the Agent's system prompt after its instructions. Runs keep the plain instructions; the Agent reports their results in its own tone.
@@ -61,7 +62,7 @@ An Agent can read your Gmail and your primary Google Calendar, and send mail or 
 - Each decision and outcome is appended to `google/receipts.jsonl` in the data directory.
 - If Google does not confirm a send or change, for example after a timeout or a server error, the outcome is reported as unknown and nothing is retried. Check Sent or the calendar before asking again.
 - Recurring events are not changed, and attendees are not notified.
-- Google tools work only in the Agent's own conversation, never in runs, and stay off for Full access Agents. Mail is text from other people; with shell access, a message could steer an Agent into sending your data elsewhere.
+- Google tools work only in the Agent's own conversation, never in runs. They also work at Full access, but mail is text from other people: with the shell, a message could steer an Agent into sending your data elsewhere. Give a Google Agent Full access only if you accept that.
 - The client secret and the sign-in are encrypted with the operating system's key store in `google/account.bin`. **Disconnect** revokes the sign-in at Google.
 - A Routine such as “every morning, summarize my unread mail” reads without asking. A send it proposes waits in the Agent's conversation until you open it and answer; the taskbar flashes while Fate UI is in the background.
 
@@ -69,7 +70,7 @@ An Agent can read your Gmail and your primary Google Calendar, and send mail or 
 
 - An Agent's **permission** (Read only, Edit files or Full access) caps its conversation and every run it starts. The permission you set in the Agent's conversation lowers it further. Project trust still applies; a run can only target a trusted project.
 - **Edit files** writes without asking per file, like a normal conversation. Every change is in the run's conversation.
-- **Full access** adds shell commands and MCP servers, for that Agent only, and turns Google off. Choose it per Agent; existing Agents keep their permission.
+- **Full access** adds shell commands and MCP servers, for that Agent only. Choose it per Agent; existing Agents keep their permission.
 - Agent Teams children in a run are capped at the run's permission.
 - The browser is available only in the Agent's own conversation while it is the selected conversation. Runs do not use the browser.
 - The Agent's conversation and its runs have `web_search` and `web_fetch` at every permission level, and the Agent uses them before the browser for simple lookups. Search queries go to Parallel; **Settings → Agent → Web search** turns search off. See [Web search and fetch](features.md#web-search-and-fetch).

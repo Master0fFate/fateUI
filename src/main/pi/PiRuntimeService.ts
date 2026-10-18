@@ -132,6 +132,7 @@ import { createMonitorDashboardTool, MONITOR_DASHBOARD_TOOL_NAME } from './monit
 import type { MonitorDashboard, MonitorReadInput } from '../../shared/contracts/monitorDashboard';
 import { agentSessionPermission, bindAgentSessionPreset, filterAgentSessionTools, getAgentSessionPreset, presetPermission, readAgentSessionPreset, validateAgentSkills } from '../agents/AgentSessionPreset';
 import { AGENT_HOME_TOOL_NAMES, createRunInProjectTool, type AgentMessage, type AgentRunHandle, type AgentRunOutcome, type AgentRunStarter, type AgentRunTarget } from '../agents/AgentRunTool';
+import { createCapabilitiesTool, type CapabilityState } from '../agents/AgentCapabilities';
 import type { GoogleAccount } from '../google/GoogleAccount';
 import { GOOGLE_TOOL_NAMES, createGoogleTools } from '../google/GoogleTools';
 import { agentDefaultsSchema, type SavedAgentSession } from '../../shared/contracts/agents';
@@ -507,15 +508,13 @@ const DEFERRED_TOOLS = new Set<string>([
   'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp', 'remember',
 ]);
 
-function agentHomePrompt(homePath: string, permission: PermissionLevel, webSearch: boolean, google: boolean): string {
+function agentHomePrompt(homePath: string, permission: PermissionLevel, webSearch: boolean): string {
   return [
     `This chat runs in your own folder, ${homePath}, which holds your notes and scratch files.${permission === 'full-access' ? '' : ' Your file tools reach only that folder.'}`,
     'For anything in the user\'s projects, call run_in_project with the project folder name or absolute path and a self-contained request, then tell the user the run started.',
     'The run\'s result arrives in this chat as a message. Report it to the user in your own words.',
     `For quick lookups, ${webSearch ? 'use web_search to find pages and web_fetch to read one' : 'use web_fetch to read a public URL'} instead of the browser. Open the browser only for pages that need clicks or sign-in.`,
-    ...(permission === 'full-access'
-      ? ['Gmail and Google Calendar stay off while you have Full access, because mail from other people could steer a shell. If the user wants them, they set your permission to Edit files and turn on Google on your card in Settings → Agent → Saved agents.']
-      : google ? [] : ['Gmail and Google Calendar are built into Fate UI but off for you. If the user asks for mail or calendar, walk them through it: in Google Cloud Console they create a project, enable the Gmail API and the Google Calendar API, set the OAuth consent screen to External with their address as a test user and publish it to In production, and create an OAuth client of type Desktop app. In Settings → Agent → Google they paste the client ID and secret, select Save client, then Connect, and select Allow sending if you should send mail or change events. Last, they turn on Google on your card in Settings → Agent → Saved agents. Your chat restarts with the mail and calendar tools.']),
+    'Fate UI also has Gmail and Google Calendar, memory, MCP servers, a shell, PDFs, images and scheduled Routines and Watches, some of which the user may not have turned on yet. When the user asks what you can do, or wants something you lack, call fate_capabilities. It lists what is on right now and the exact setup steps for the rest; walk the user through them one step at a time instead of saying you cannot.',
   ].join('\n');
 }
 
@@ -681,7 +680,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ...await boundedContextPrompts(effectiveCwd, 'Project'),
         ...(preset ? [`Saved Agent ${preset.name}, revision ${preset.revision}.\n${preset.instructions}`] : []),
         ...(preset?.tone ? [`Speak in this tone: ${preset.tone}`] : []),
-        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission, webTools.some((tool) => tool.name === 'web_search'), preset.google === true)] : []),
+        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission, webTools.some((tool) => tool.name === 'web_search'))] : []),
       ];
       // Every root has a live tool-call ceiling, including retained tool handles
       // offered before a reduction. Slot binding grants authority after restore.
@@ -722,7 +721,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ],
         { searchTools: true, ...(getImageGenerationSettings ? { getImageGenerationSettings } : {}), ...(paths ? { imageAgentDir: paths.piAgentDir } : {}), ...(attestationSink ? { attestations: attestationSink } : {}) },
       );
-      const googleAllowed = Boolean(preset && !preset.runId && preset.google && preset.defaults.permission !== 'full-access');
+      const googleAllowed = Boolean(preset && !preset.runId && preset.google);
       const ownedTools = customTools.filter((tool) => (googleAllowed || !GOOGLE_TOOL_NAMES.has(tool.name))
         && (preset?.runId ? !tool.name.startsWith('browser_') && !AGENT_HOME_TOOL_NAMES.has(tool.name) : preset || !AGENT_HOME_TOOL_NAMES.has(tool.name)));
       // A corrupt optional MCP config must not prevent normal project sessions.
@@ -1464,6 +1463,24 @@ export class PiRuntimeService {
       binding: { projectKey: projectLearningKey(project.path), sessionId: session?.sessionId ?? null, runtimeGeneration: generation, scope },
       session,
       valid: () => this.project === project && project.trusted && (slot ? !slot.disposed && slot.runtime.session === session && slot.learningGeneration === generation : this.initialization === generation),
+    };
+  }
+
+  private async agentCapabilities(sessionId: string): Promise<CapabilityState> {
+    const slot = this.findLiveSlot(sessionId);
+    const preset = slot ? getAgentSessionPreset(slot.runtime.session) : undefined;
+    if (!slot || !preset || preset.runId) throw new Error('Only an Agent chat can list its capabilities.');
+    const [status, servers] = await Promise.all([
+      this.googleAccount?.status().catch(() => null) ?? null,
+      new McpConfigService(this.paths?.dataRoot).list().catch(() => []),
+    ]);
+    return {
+      permission: slot.permissionLevel,
+      agentPermission: preset.defaults.permission,
+      tools: new Set(slot.runtime.session.getActiveToolNames()),
+      google: { enabled: preset.google === true, status },
+      memory: this.learningService?.layers() ?? null,
+      mcpServers: servers.filter((server) => server.enabled).length,
     };
   }
 
@@ -5760,7 +5777,7 @@ export class PiRuntimeService {
       agentFor: (sessionId) => {
         const slot = this.findLiveSlot(sessionId);
         const preset = slot ? getAgentSessionPreset(slot.runtime.session) : undefined;
-        if (!slot || !preset || preset.runId || !preset.google || slot.permissionLevel === 'full-access') throw new Error('Google tools work only in an Agent chat with Google turned on and without Full access.');
+        if (!slot || !preset || preset.runId || !preset.google) throw new Error('Google tools work only in an Agent chat with Google turned on.');
         return preset.agentId;
       },
       approve: async (sessionId, question, [accept, decline], signal) => {
@@ -5769,7 +5786,7 @@ export class PiRuntimeService {
         return answer && { approved: answer.source === 'option' && answer.answer === accept, note: answer.source === 'custom' ? answer.answer : null };
       },
     }) : [])];
-    tools.push(this.createRememberTool());
+    tools.push(this.createRememberTool(), createCapabilitiesTool((sessionId) => this.agentCapabilities(sessionId)));
     for (const tool of tools) installToolExecutionAdmission(tool, () => {
       if (this.hostStopping) throw new Error('The core is shutting down; a live root session cannot admit retained tools.');
       this.executionAdmissionGuard();

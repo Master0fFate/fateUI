@@ -2,8 +2,9 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import type { AgentPermission } from '../../shared/contracts/agents';
+import { CAPABILITIES_TOOL_NAME } from './AgentCapabilities';
 
-export const AGENT_HOME_TOOL_NAMES: ReadonlySet<string> = new Set(['run_in_project']);
+export const AGENT_HOME_TOOL_NAMES: ReadonlySet<string> = new Set(['run_in_project', CAPABILITIES_TOOL_NAME]);
 export interface ProjectRunRequest { project: string; request: string; mode: 'turn' | 'goal' }
 export type ProjectRunStarter = (sessionId: string, input: ProjectRunRequest) => Promise<string>;
 export interface AgentHomeContext { agentId: string; permission: AgentPermission; model: { provider: string; id: string } | null }
