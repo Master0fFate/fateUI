@@ -35,7 +35,7 @@ test('Settings owns workspace policy while Run Agents reviews and retains work',
     await expect(settings.getByRole('combobox', { name: 'Agent orchestration mode' })).toHaveCount(0);
     await settings.getByText('Strict mode', { exact: true }).click();
     await settings.getByRole('button', { name: 'Save changes' }).click();
-    await expect(settings.getByRole('status')).toContainText('Settings saved');
+    await expect(settings.getByRole('status').filter({ hasText: 'Settings saved' })).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.piDesktop.getSettings())).toMatchObject({ agentWorkspace: { preferredMode: 'worktree', strict: true } });
     await settings.getByRole('region', { name: 'Agent workspace policy' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: await evidenceOutputPath('agent-workspace-settings.png') });
@@ -60,7 +60,7 @@ test('Settings owns workspace policy while Run Agents reviews and retains work',
     await expect(strict).toBeChecked();
     await settings.getByRole('radio', { name: 'Shared checkout' }).check();
     await settings.getByRole('button', { name: 'Save changes' }).click();
-    await expect(settings.getByRole('status')).toContainText('Settings saved');
+    await expect(settings.getByRole('status').filter({ hasText: 'Settings saved' })).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.piDesktop.getSettings())).toMatchObject({ agentWorkspace: { preferredMode: 'shared', strict: true } });
     await page.getByRole('button', { name: 'Close settings' }).click();
     await expect(agents.getByLabel('Reviewer Agent Team node active')).toBeVisible();
