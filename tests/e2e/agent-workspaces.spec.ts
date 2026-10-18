@@ -30,7 +30,7 @@ test('Settings owns workspace policy while Run Agents reviews and retains work',
     const strict = settings.getByRole('checkbox', { name: 'Strict workspace mode' });
     await expect(preferred).toBeChecked();
     await expect(strict).not.toBeChecked();
-    await expect(settings.getByRole('heading', { name: 'Agents' })).toBeVisible();
+    await expect(settings.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible();
     await expect(settings.getByText(/one unified agent system/u)).toBeVisible();
     await expect(settings.getByRole('combobox', { name: 'Agent orchestration mode' })).toHaveCount(0);
     await settings.getByText('Strict mode', { exact: true }).click();

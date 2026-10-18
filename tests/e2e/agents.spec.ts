@@ -15,7 +15,7 @@ async function contained(page: Page) {
     }) && panel.scrollWidth <= panel.clientWidth + 1;
   })).toBe(true);
 }
-async function toolbarMatchesResources(page: Page) {
+async function toolbarMatchesSessions(page: Page) {
   const measure = () => page.locator('.sidebar-tab-content[data-state="active"] .sidebar-tab-toolbar').evaluate((toolbar) => {
     const metrics = (element: Element) => {
       const { x, y, width, height } = element.getBoundingClientRect();
@@ -25,12 +25,12 @@ async function toolbarMatchesResources(page: Page) {
     return { search: metrics(toolbar.querySelector('.sidebar-search')!), action: metrics(toolbar.querySelector('.sidebar-toolbar-action > button')!) };
   });
   const agentsToolbar = await measure();
-  await page.getByRole('tab', { name: 'Resources', exact: true }).click();
-  const resourcesToolbar = await measure();
+  await page.getByRole('tab', { name: 'Sessions', exact: true }).click();
+  const sessionsToolbar = await measure();
   for (const key of ['search', 'action'] as const) {
-    for (const dimension of ['x', 'y', 'height'] as const) expect(Math.abs(agentsToolbar[key][dimension] - resourcesToolbar[key][dimension])).toBeLessThanOrEqual(1);
-    expect(agentsToolbar[key].background).toBe(resourcesToolbar[key].background);
-    expect(agentsToolbar[key].radius).toBe(resourcesToolbar[key].radius);
+    for (const dimension of ['x', 'y', 'height'] as const) expect(Math.abs(agentsToolbar[key][dimension] - sessionsToolbar[key][dimension])).toBeLessThanOrEqual(1);
+    expect(agentsToolbar[key].background).toBe(sessionsToolbar[key].background);
+    expect(agentsToolbar[key].radius).toBe(sessionsToolbar[key].radius);
   }
   await agents(page);
 }
@@ -54,7 +54,7 @@ for (const skin of ['default', 'dreamcore', 'm3-expressive'] as const) {
       await agents(page);
       await expect(page.locator('html')).toHaveAttribute('data-skin', skin);
       await expect(page.getByText('No agents yet')).toBeVisible();
-      await toolbarMatchesResources(page);
+      await toolbarMatchesSessions(page);
       await contained(page);
       await page.screenshot({ path: await evidenceOutputPath('agents', `${skin}-empty.png`), animations: 'disabled' });
 
@@ -68,7 +68,7 @@ for (const skin of ['default', 'dreamcore', 'm3-expressive'] as const) {
       await expect(settings.getByRole('region', { name: 'Agent Reviewer' })).toBeVisible();
       await settings.getByRole('button', { name: 'Close settings', exact: true }).click();
 
-      await page.getByRole('button', { name: /^Reviewer/ }).click();
+      await page.getByRole('button', { name: /^Reviewer/ }).getByText('Reviewer', { exact: true }).click();
       await expect.poll(() => page.evaluate(async () => (await window.piDesktop.getRuntimeState()).project?.agentId)).toBeTruthy();
       await expect(page.getByRole('tab', { name: 'Agents', exact: true })).toHaveAttribute('data-state', 'active');
       await expect(page.locator('.session-row--current')).toContainText('Reviewer');
