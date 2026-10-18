@@ -93,6 +93,7 @@ export class MultiProjectRuntimeManager<R> {
   registerKnownProject(project: ProjectState): void {
     if (!project.trusted || !project.path || !project.name) throw new Error('A trusted, known project is required.');
     const previous = this.projectStates.get(project.path);
+    if (previous?.trusted && previous.agentId && !project.agentId) return;
     if (previous && (previous.name !== project.name || !previous.trusted) && this.coordinator.has(project.path)) {
       throw new Error('Close the previous project runtime before replacing its registration.');
     }
