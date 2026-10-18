@@ -203,7 +203,7 @@ describe('actual reviewed UNKNOWN startup composition', () => {
       const controls = f.adapter.controls.get(f.sessionId)!; controls.barriers.hold('settle');
       expect(await service.prompt({ text: 'Explicit test turn', behavior: 'prompt' })).toMatchObject({ accepted: true });
       await controls.barriers.reached('settle'); expect(session.isStreaming).toBe(true);
-      slot.sessionTurnPhase = 'idle'; delivery.mockClear();
+      slot.sessionTurnPhase = 'ending'; delivery.mockClear();
       await internal.sendChildGeneratedMessage(slot, session, message, 'followUp', false);
       expect(delivery).not.toHaveBeenCalled();
       internal.flushDeferredChildMessages(slot, session, slot.sessionGeneration);
