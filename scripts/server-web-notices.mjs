@@ -100,7 +100,7 @@ async function sourceLock(sourceRoot) {
   const sdk = await fs.realpath(path.join(sourceRoot, 'node_modules/@earendil-works/pi-coding-agent'));
   const yaml = createRequire(path.join(sdk, 'package.json'))('yaml');
   const bytes = await fs.readFile(path.join(sourceRoot, 'pnpm-lock.yaml'));
-  return { value: yaml.parse(bytes.toString('utf8')), sha256: hash(bytes) };
+  return { value: yaml.parseAllDocuments(bytes.toString('utf8')).at(-1).toJS(), sha256: hash(bytes) };
 }
 
 /**
