@@ -33,6 +33,7 @@ const defaults: AppSettings = {
   compactSessions: false,
   advancedPromptImprovement: false,
   crashTelemetryEnabled: false,
+  betaUpdates: false,
   webSearchEnabled: true,
   skinId: 'default',
   themeId: 'catppuccin-mocha',

@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { UpdateCheckResult } from '../../shared/contracts/ipc';
+import type { UpdateCheckInput, UpdateCheckResult } from '../../shared/contracts/ipc';
 
 export const REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/Master0fFate/pi-fategui/main/PRODVER';
 export const RELEASES_URL = 'https://github.com/Master0fFate/pi-fategui/releases';
 export const RELEASE_DOWNLOAD_BASE = 'https://github.com/Master0fFate/pi-fategui/releases/download';
 export const RELEASE_API_BASE = 'https://api.github.com/repos/Master0fFate/pi-fategui/releases/tags';
+export const RELEASE_LIST_URL = 'https://api.github.com/repos/Master0fFate/pi-fategui/releases?per_page=30';
 export const UPDATE_CHECK_TIMEOUT_MS = 10_000;
 export const UPDATE_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 
@@ -171,6 +172,8 @@ export const updateMessages = {
   current: 'FateGUI is up to date.',
   available: 'Update available. Click to download.',
   development: 'You are running a newer or development version of FateGUI.',
+  beta: 'You are running a beta version of FateGUI.',
+  currentBeta: 'This FateGUI beta is up to date.',
 } as const;
 
 export interface SemanticVersion {
@@ -243,6 +246,23 @@ export function publishedReleaseHasAssets(
     return [asset.name];
   }));
   return uploadedAssets.has(expectedAssetName) && uploadedAssets.has('SHA256SUMS');
+}
+
+export function newestPublishedVersion(text: string): SemanticVersion | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(value)) return null;
+  let newest: SemanticVersion | null = null;
+  for (const release of value) {
+    if (!isRecord(release) || release.draft !== false || typeof release.tag_name !== 'string') continue;
+    const version = parseSemanticVersion(release.tag_name);
+    if (version && (!newest || compareSemanticVersions(version, newest) > 0)) newest = version;
+  }
+  return newest;
 }
 
 function comparePrerelease(left: readonly string[] | null, right: readonly string[] | null): number {
@@ -319,7 +339,7 @@ export class UpdateService {
     this.removeFile = options.removeFile ?? ((filePath) => fs.rm(filePath, { force: true }));
   }
 
-  async check(): Promise<UpdateCheckResult> {
+  async check({ beta = false }: UpdateCheckInput = {}): Promise<UpdateCheckResult> {
     let localText: string;
     try {
       localText = await this.readVersionFile(this.localVersionPath);
@@ -334,7 +354,7 @@ export class UpdateService {
     timeout.unref?.();
     let remoteText: string;
     try {
-      const response = await this.fetchVersion(this.remoteVersionUrl, {
+      const response = await this.fetchVersion(beta ? RELEASE_LIST_URL : this.remoteVersionUrl, {
         signal: controller.signal,
         headers: { 'cache-control': 'no-cache', 'user-agent': 'Fate-UI-update-check' },
       });
@@ -346,7 +366,7 @@ export class UpdateService {
       clearTimeout(timeout);
     }
 
-    const remoteVersion = parseSemanticVersion(remoteText);
+    const remoteVersion = beta ? newestPublishedVersion(remoteText) : parseSemanticVersion(remoteText);
     if (!remoteVersion) return { status: 'remote-invalid', message: updateMessages.remoteInvalid };
     const comparison = compareSemanticVersions(localVersion, remoteVersion);
     if (comparison < 0) {
@@ -366,17 +386,18 @@ export class UpdateService {
         productionVersion: remoteVersion.normalized,
       };
     }
+    const isBeta = localVersion.prerelease !== null;
     if (comparison > 0) {
       return {
-        status: 'development',
-        message: updateMessages.development,
+        status: isBeta ? 'beta' : 'development',
+        message: isBeta ? `${updateMessages.beta} Installed version: ${localVersion.normalized}` : updateMessages.development,
         installedVersion: localVersion.normalized,
         productionVersion: remoteVersion.normalized,
       };
     }
     return {
       status: 'current',
-      message: `${updateMessages.current} Installed version: ${localVersion.normalized}`,
+      message: `${isBeta ? updateMessages.currentBeta : updateMessages.current} Installed version: ${localVersion.normalized}`,
       installedVersion: localVersion.normalized,
       productionVersion: remoteVersion.normalized,
     };

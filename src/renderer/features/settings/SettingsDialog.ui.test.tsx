@@ -27,7 +27,7 @@ const settings: AppSettings = {
   compactMode: false,
   compactSessions: false,
   advancedPromptImprovement: false,
-  crashTelemetryEnabled: false,
+  crashTelemetryEnabled: false, betaUpdates: false,
   webSearchEnabled: true,
   skinId: 'default',
   themeId: 'catppuccin-mocha',

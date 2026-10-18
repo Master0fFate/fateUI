@@ -73,7 +73,7 @@ import { formatReleaseDisplayVersion } from '../../../shared/releaseMetadata';
 
 const fallback: AppSettings = {
   appearance: 'dark', defaultModel: null, disabledModels: [], thinkingLevel: 'medium', agentTeamMode: 'v2', agentWorkspace: defaultAgentWorkspacePolicy, confirmRiskyCommands: true, piCodemode: false, dailyBudgetUsd: null,
-  terminalShell: null, reduceMotion: false, performanceMode: false, holyShitMode: false, musicPlayerEnabled: false, sendMessageWithModifier: false, compactMode: false, compactSessions: false, advancedPromptImprovement: false, crashTelemetryEnabled: false, webSearchEnabled: true, skinId: 'default', themeId: 'midnight',
+  terminalShell: null, reduceMotion: false, performanceMode: false, holyShitMode: false, musicPlayerEnabled: false, sendMessageWithModifier: false, compactMode: false, compactSessions: false, advancedPromptImprovement: false, crashTelemetryEnabled: false, betaUpdates: false, webSearchEnabled: true, skinId: 'default', themeId: 'midnight',
   interfaceFont: 'noto-sans', codeFont: 'jetbrains-mono',
   imageGeneration: { provider: 'auto', model: null, customProvider: null },
   speech: defaultSpeechSettings,
@@ -452,7 +452,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
     setCheckingForUpdates(true);
     setUpdateResult(null);
     try {
-      setUpdateResult(await getDesktopApi().checkForUpdates());
+      setUpdateResult(await getDesktopApi().checkForUpdates({ beta: settings.betaUpdates }));
     } catch {
       setUpdateResult({
         status: 'remote-unavailable',
@@ -971,7 +971,11 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
               {activeSection === 'hosts' && <HostSettings />}
               {activeSection === 'system' && (
                 <div className="settings-panel" role="tabpanel" id="settings-panel-system" aria-labelledby="settings-tab-system">
-                  <div className="settings-title"><div><h3>Pi diagnostics</h3></div></div>
+                  <div className="settings-title"><div><h3>Updates</h3></div></div>
+                  <div className="settings-group">
+                    <label className="settings-toggle"><div><strong>Beta branch</strong><small>Check for Updates also offers pre-releases.</small></div><input type="checkbox" checked={settings.betaUpdates} onChange={(event) => setSettings({ ...settings, betaUpdates: event.target.checked })} /><span aria-hidden="true" /></label>
+                  </div>
+                  <div className="settings-title settings-title--spaced"><div><h3>Pi diagnostics</h3></div></div>
                   {diagnosticsError
                     ? <p className="settings-error">{diagnosticsError}</p>
                     : diagnostics

@@ -1371,7 +1371,7 @@ export const speechHotkeyStatusSchema = z.object({
 }).strict();
 
 export const updateCheckResultSchema = z.object({
-  status: z.enum(['local-unreadable', 'local-invalid', 'remote-unavailable', 'remote-invalid', 'release-not-ready', 'current', 'available', 'development']),
+  status: z.enum(['local-unreadable', 'local-invalid', 'remote-unavailable', 'remote-invalid', 'release-not-ready', 'current', 'available', 'development', 'beta']),
   message: z.string().min(1).max(300),
   installedVersion: z.string().min(1).max(100).optional(),
   productionVersion: z.string().min(1).max(100).optional(),
@@ -1385,6 +1385,7 @@ export const updateDownloadProgressSchema = z.object({
 }).strict();
 export const updateInstallStartedSchema = z.object({ installing: z.literal(true) }).strict();
 export const updateVersionInputSchema = z.object({ version: z.string().min(1).max(100) }).strict();
+export const updateCheckInputSchema = z.object({ beta: z.boolean().optional() }).strict();
 
 const mcpServerNameSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 const mcpServerBaseSchema = z.object({ name: mcpServerNameSchema, enabled: z.boolean() });
@@ -1447,6 +1448,7 @@ export const appSettingsSchema = z.object({
   compactSessions: z.boolean().default(false),
   advancedPromptImprovement: z.boolean().default(false),
   crashTelemetryEnabled: z.boolean().default(false),
+  betaUpdates: z.boolean().default(false),
   webSearchEnabled: z.boolean().default(true),
   skinId: skinIdSchema.default('default'),
   skinAppearanceOverrides: skinAppearanceOverridesSchema.optional(),
@@ -1607,6 +1609,7 @@ export type TerminalEvent = z.infer<typeof terminalEventSchema>;
 export type ImageGenerationSettings = z.infer<typeof imageGenerationSettingsSchema>;
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 export type UpdateCheckResult = z.infer<typeof updateCheckResultSchema>;
+export type UpdateCheckInput = z.infer<typeof updateCheckInputSchema>;
 export type MusicStatus = z.infer<typeof musicStatusSchema>;
 export type MusicTrack = z.infer<typeof musicTrackSchema>;
 export type MusicQueue = z.infer<typeof musicQueueSchema>;
@@ -1764,7 +1767,7 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   queryUsage: (input?: UsageQueryInput) => Promise<UsageQueryResult>;
   inspectPiMigration: () => Promise<PiMigrationReport>;
   importPiMigration: () => Promise<z.infer<typeof piMigrationResultSchema>>;
-  checkForUpdates: () => Promise<UpdateCheckResult>;
+  checkForUpdates: (input?: UpdateCheckInput) => Promise<UpdateCheckResult>;
   openUpdateDownload: () => Promise<void>;
   downloadAndInstallUpdate: (version: string) => Promise<void>;
   onUpdatesProgress: (listener: (progress: { downloaded: number; total: number; percent: number; version: string }) => void) => () => void;

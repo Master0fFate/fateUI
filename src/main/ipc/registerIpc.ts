@@ -110,6 +110,7 @@ import {
   terminalWriteInputSchema,
   themeCatalogSchema,
   updateCheckResultSchema,
+  updateCheckInputSchema,
   updateInstallStartedSchema,
   updateVersionInputSchema,
   windowControlInputSchema,
@@ -1362,8 +1363,7 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     return saved;
   });
   handle(ipcChannels.updatesCheck, async (_event, input) => {
-    emptyInputSchema.parse(input);
-    return updateCheckResultSchema.parse(await updates.check());
+    return updateCheckResultSchema.parse(await updates.check(updateCheckInputSchema.parse(input)));
   });
   handle(ipcChannels.updatesOpenDownload, async (_event, input) => {
     emptyInputSchema.parse(input);
