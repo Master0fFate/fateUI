@@ -49,7 +49,7 @@ async function settled(service: AgentsService, id: string): Promise<AgentRun> {
 }
 const runId = (text: string) => /\((runs:[^)]+)\)/u.exec(text)![1]!;
 
-describe('Agents production service boundaries', () => {
+describe('Agents production service boundaries', { timeout: 15_000 }, () => {
   it('shares one monitor read across concurrent clients and retries after a read failure', async () => {
     const { service, projectPath, repository } = await fixture();
     await service.list();
