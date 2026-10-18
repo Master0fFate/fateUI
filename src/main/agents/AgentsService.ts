@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   agentRunSchema,
-  type AgentChange, type AgentDefinition, type AgentLibrary, type AgentRun, type AgentSave, type LegacyImportItem, type RoutineDefinition, type RoutineSave, type SavedAgentSession,
+  type AgentChange, type AgentDefinition, type AgentLibrary, type AgentPermission, type AgentRun, type AgentSave, type LegacyImportItem, type RoutineDefinition, type RoutineSave, type SavedAgentSession,
   type WatchDefinition, type WatchSave,
 } from '../../shared/contracts/agents';
 import type { LegacyAutomations } from '../automations/LegacyAutomations';
@@ -27,6 +27,7 @@ export interface AgentsHost {
   trustedProjects(): Promise<readonly string[]>;
   currentModel(): { provider: string; id: string } | null;
   currentProjectPath(): string | null;
+  homePermission?: (projectPath: string, sessionId: string, permission: AgentPermission) => Promise<void>;
   notify?: (change: AgentChange, os: boolean) => void;
   sessionsRoot?: string;
   /** Host storage gate for new saved-agent work; abort and inspection remain available. */
@@ -183,7 +184,10 @@ export class AgentsService {
     const agent = await this.repository.saveAgent(input);
     if (!agent.enabled) await this.cancelMatching((active) => active.agent.id === agent.id);
     const state = await this.repository.state(agent.id);
-    if (state?.homeProjectPath && state.homeSessionId) await this.host.liveWorkspace(state.homeProjectPath)?.refreshAgentSession(state.homeSessionId);
+    if (state?.homeProjectPath && state.homeSessionId) {
+      await this.host.homePermission?.(state.homeProjectPath, state.homeSessionId, agent.defaults.permission);
+      await this.host.liveWorkspace(state.homeProjectPath)?.refreshAgentSession(state.homeSessionId);
+    }
     this.changed({ agentId: agent.id });
     this.wake();
     return agent;
@@ -242,6 +246,7 @@ export class AgentsService {
       if (!agent.enabled) throw new Error('Enable this Agent before opening its chat.');
       const home = await this.homeFor(agent);
       await this.repository.updateState(agentId, (current) => ({ ...current, homeSessionId: home.sessionId, homeProjectPath: home.path, appliedRevision: agent.revision, lastOpenedAt: Date.now() }));
+      await this.host.homePermission?.(home.path, home.sessionId, agent.defaults.permission);
       return home;
     })();
     this.opening.set(agentId, operation);

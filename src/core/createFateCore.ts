@@ -378,6 +378,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
         trustedProjects: () => projects.trustedProjectPaths(),
         currentModel: () => { const model = focused().model; return model ? { provider: model.provider, id: model.id } : null; },
         currentProjectPath: () => { const project = focused().project; return project?.trusted && !project.agentId ? project.path : null; },
+        homePermission: (projectPath, sessionId, permission) => sessionPermissions.set(projectPath, sessionId, permission),
         sessionsRoot: paths.sessionsRoot,
         assertAdmission: (root, sessionId) => recovery.assertAdmission(root, sessionId),
         ...(options.savedAgents.notify ? { notify: options.savedAgents.notify } : {}),

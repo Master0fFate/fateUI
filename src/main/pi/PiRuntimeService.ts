@@ -3667,6 +3667,15 @@ export class PiRuntimeService {
   }
 
   async refreshAgentSession(sessionId: string): Promise<void> {
+    const cold = this.coldSession;
+    if (cold?.snapshot.summary.id === sessionId && this.project) {
+      const permissionLevel = await this.permissionForColdSession(this.project.path, sessionId);
+      if (this.coldSession === cold) {
+        cold.permissionLevel = permissionLevel;
+        this.emitState();
+      }
+      return;
+    }
     const slot = this.findLiveSlot(sessionId);
     if (!slot || slot.activeRunId !== null || this.sessionHasActiveWork(slot.runtime.session) || this.hasOwnedAgentWork(sessionId) || this.goalMax.hasRunnableGoal(sessionId)) return;
     const selected = this.selectedSlot === slot;
@@ -3749,7 +3758,7 @@ export class PiRuntimeService {
       const pendingThinkingLevel = this.coldPendingThinkingLevels.get(summary.id) ?? null;
       const savedPermission = await this.permissionForColdSession(projectPath, summary.id, () => selectionGeneration === this.coldSelectionGeneration);
       const preset = readAgentSessionPreset({ getEntries: () => snapshot.entries });
-      const permissionLevel = preset ? presetPermission(preset, savedPermission) : savedPermission;
+      const permissionLevel = preset?.runId ? presetPermission(preset, savedPermission) : savedPermission;
       if (selectionGeneration !== this.coldSelectionGeneration || this.project?.path !== projectPath) throw this.replacementSuperseded();
       this.coldSession = {
         snapshot,
