@@ -7,6 +7,7 @@ import type { AgentWorkspacePolicy } from '../../shared/contracts/multiAgent';
 import type { TaskEvent } from '../../shared/contracts/tasks';
 import type { MonitorRunsSource } from './monitor/MonitorDashboard';
 import type { AgentRunStarter } from '../agents/AgentRunTool';
+import type { GoogleAccount } from '../google/GoogleAccount';
 import type { PiBrowserRuntimeIntegration } from './BrowserRuntimeBridge';
 import type { GoalMaxPersistence } from './goalmaxxing/GoalMaxRepository';
 import type { ImageGenerationSettingsResolver } from './PiImageTool';
@@ -129,6 +130,7 @@ export interface MultiProjectPiRuntimeDeps {
   browserIntegration: PiBrowserRuntimeIntegration | null;
   monitorRuns?: (projectPath: string) => Promise<MonitorRunsSource>;
   agentRunStarter?: AgentRunStarter;
+  google?: GoogleAccount;
   defaults: () => Promise<SessionDefaults>;
   getDisabledModels?: () => readonly string[];
   /** Live global policy used by all focused and background Agent Team runtimes. */
@@ -552,6 +554,7 @@ export class MultiProjectPiRuntime {
     if (this.deps.learning) service.setLearningService(this.deps.learning);
     if (this.deps.monitorRuns) service.setMonitorRunsSource(this.deps.monitorRuns);
     if (this.deps.agentRunStarter) service.setAgentRunStarter(this.deps.agentRunStarter);
+    if (this.deps.google) service.setGoogleAccount(this.deps.google);
     service.setSessionSettledListener(() => this.deps.notifySessionSettled?.());
     if (this.deps.getDisabledModels) service.setDisabledModelsSource(this.deps.getDisabledModels);
     if (this.deps.getAgentWorkspacePolicy) service.setAgentWorkspacePolicySource(this.deps.getAgentWorkspacePolicy);

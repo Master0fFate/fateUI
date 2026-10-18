@@ -45,11 +45,31 @@ The dot next to an Agent shows a run in progress, or unread items in its inbox (
 - Only public `http` and `https` pages on ports 80 and 443 are fetched. Private, loopback, link-local and cloud metadata addresses are refused, also after DNS resolution and redirects. A page may redirect five times, answer within 20 seconds and be at most 2 MB.
 - Each hit is listed with the Agent's runs; **Open run** opens the Agent's conversation.
 
+## Gmail and Google Calendar
+
+An Agent can read your Gmail and your primary Google Calendar, and send mail or change events after you approve each one. You use your own Google OAuth client.
+
+1. In Google Cloud Console, create a project and enable the **Gmail API** and the **Google Calendar API**.
+2. On the OAuth consent screen, choose External, add your address as a test user, then publish the app to **In production**. In Testing, Google ends the sign-in every 7 days. Google shows an unverified-app warning at sign-in; the app is your own.
+3. Create an OAuth client of type **Desktop app**.
+4. In **Settings → Agent → Google**, paste the client ID and secret, select **Save client**, then **Connect**. Your browser opens Google's sign-in. Fate UI asks only to read Gmail and Calendar events.
+5. To let Agents send mail and change events, select **Allow sending**. Google asks for those two permissions.
+6. Turn on **Google** on the card of each Agent that should use it.
+
+- `google_mail_search`, `google_mail_read` and `google_calendar_read` read without asking. Search returns up to 20 messages; a thread shows its last 20 messages.
+- `google_mail_send` and `google_calendar_change` show the exact message or change in the conversation and wait up to 30 minutes for your answer. Writing your own answer declines and passes your note to the Agent.
+- Each decision and outcome is appended to `google/receipts.jsonl` in the data directory.
+- If Google does not confirm a send or change, for example after a timeout or a server error, the outcome is reported as unknown and nothing is retried. Check Sent or the calendar before asking again.
+- Recurring events are not changed, and attendees are not notified.
+- Google tools work only in the Agent's own conversation, never in runs, and stay off for Full access Agents. Mail is text from other people; with shell access, a message could steer an Agent into sending your data elsewhere.
+- The client secret and the sign-in are encrypted with the operating system's key store in `google/account.bin`. **Disconnect** revokes the sign-in at Google.
+- A Routine such as “every morning, summarize my unread mail” reads without asking. A send it proposes waits in the Agent's conversation until you open it and answer; the taskbar flashes while Fate UI is in the background.
+
 ## Permissions and limits
 
 - An Agent's **permission** (Read only, Edit files or Full access) caps its conversation and every run it starts. The permission you set in the Agent's conversation lowers it further. Project trust still applies; a run can only target a trusted project.
 - **Edit files** writes without asking per file, like a normal conversation. Every change is in the run's conversation.
-- **Full access** adds shell commands and MCP servers, for that Agent only. Choose it per Agent; existing Agents keep their permission.
+- **Full access** adds shell commands and MCP servers, for that Agent only, and turns Google off. Choose it per Agent; existing Agents keep their permission.
 - Agent Teams children in a run are capped at the run's permission.
 - The browser is available only in the Agent's own conversation while it is the selected conversation. Runs do not use the browser.
 - The Agent's conversation and its runs have `web_search` and `web_fetch` at every permission level, and the Agent uses them before the browser for simple lookups. Search queries go to Parallel; **Settings → Agent → Web search** turns search off. See [Web search and fetch](features.md#web-search-and-fetch).

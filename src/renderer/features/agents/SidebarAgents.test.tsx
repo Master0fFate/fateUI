@@ -8,7 +8,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { SidebarAgents } from './SidebarAgents';
 
 const agentId = 'a392d8b9-76cc-4158-a381-1151ccf818fb';
-const agent: AgentDefinition = { schemaVersion: 1, id: agentId, name: 'Reviewer', scope: 'user', projectPath: null, description: 'Careful review', instructions: 'System persona', skillRefs: [], defaults: { model: null, permission: 'read-only', thinkingLevel: 'high', workspace: 'shared' }, enabled: true, deleted: false, revision: 1, createdAt: 1, updatedAt: 1 };
+const agent: AgentDefinition = { schemaVersion: 1, id: agentId, name: 'Reviewer', scope: 'user', projectPath: null, description: 'Careful review', instructions: 'System persona', skillRefs: [], defaults: { model: null, permission: 'read-only', thinkingLevel: 'high', workspace: 'shared' }, enabled: true, google: false, deleted: false, revision: 1, createdAt: 1, updatedAt: 1 };
 let library: AgentLibrary;
 let api: Record<string, ReturnType<typeof vi.fn>>;
 beforeEach(() => {

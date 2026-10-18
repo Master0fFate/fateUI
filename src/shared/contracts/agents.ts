@@ -17,7 +17,7 @@ const tone = z.string().trim().max(500);
 const avatar = z.string().trim().max(16).refine((value) => !/[\s\p{Cc}]/u.test(value) && [...new Intl.Segmenter().segment(value)].length <= 2, 'Use one emoji as the avatar.');
 export const agentDraftSchema = z.object({
   name, description: z.string().max(1000), instructions: z.string().max(65_536),
-  skillRefs: z.array(z.string().min(1).max(200)).max(50), defaults: agentDefaultsSchema, enabled: z.boolean(),
+  skillRefs: z.array(z.string().min(1).max(200)).max(50), defaults: agentDefaultsSchema, enabled: z.boolean(), google: z.boolean().default(false),
   tone: tone.optional(), avatar: avatar.optional(),
 }).strict();
 export const agentDefinitionSchema = agentDraftSchema.extend({
@@ -64,7 +64,7 @@ export const agentRunSchema = z.object({
 export const savedAgentSessionSchema = z.object({
   schemaVersion: z.literal(1), agentId: id, revision, name, instructions: z.string().max(65_536), tone: tone.optional(),
   skillRefs: z.array(z.string().min(1).max(200)).max(50), defaults: agentDefaultsSchema,
-  background: z.boolean(), runId: z.string().nullable(), projectPath: z.string().min(1),
+  background: z.boolean(), runId: z.string().nullable(), projectPath: z.string().min(1), google: z.boolean().optional(),
 }).strict();
 export const agentLibrarySchema = z.object({
   agents: z.array(agentDefinitionSchema).max(500), routines: z.array(routineDefinitionSchema).max(500),

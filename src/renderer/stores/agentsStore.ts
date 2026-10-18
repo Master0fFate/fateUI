@@ -7,7 +7,7 @@ import { useUiStore } from './uiStore';
 
 export const emptyAgentLibrary = (): AgentLibrary => ({ agents: [], routines: [], runs: [], states: [], diagnostics: [], revisions: {}, nextDue: {}, watches: [], watchStates: [] });
 export const emptyAgentInbox = (): AgentInboxOverview => ({ items: [], unread: {}, muted: [] });
-export const agentDraft = ({ name, description, instructions, skillRefs, defaults, enabled, tone, avatar }: AgentDefinition): AgentDraft => ({ name, description, instructions, skillRefs, defaults, enabled, tone: tone ?? '', avatar: avatar ?? '' });
+export const agentDraft = ({ name, description, instructions, skillRefs, defaults, enabled, google, tone, avatar }: AgentDefinition): AgentDraft => ({ name, description, instructions, skillRefs, defaults, enabled, google, tone: tone ?? '', avatar: avatar ?? '' });
 export const agentLabel = ({ name, avatar }: { name: string; avatar?: string | undefined }): string => avatar ? `${avatar} ${name}` : name;
 export const routineDraft = ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify }: RoutineDefinition): RoutineDraft => ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify });
 export const watchDraft = ({ name, agentId, url, condition, text, price, intervalMinutes, enabled }: WatchDefinition): WatchDraft => ({ name, agentId, url, condition, text, price, intervalMinutes, enabled });

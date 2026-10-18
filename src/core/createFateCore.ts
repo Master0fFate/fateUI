@@ -9,6 +9,7 @@ import { RecoveryCoordinator } from './recovery/RecoveryCoordinator';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { AgentRepository } from '../main/agents/AgentRepository';
 import { AgentsService, type AgentsHost } from '../main/agents/AgentsService';
+import type { GoogleAccount } from '../main/google/GoogleAccount';
 import type { LegacyAutomations } from '../main/automations/LegacyAutomations';
 import { LearningRepository } from '../main/learning/LearningRepository';
 import { LearningService } from '../main/learning/LearningService';
@@ -86,6 +87,7 @@ export interface FateCoreOptions {
     readonly notify?: AgentsHost['notify'];
     readonly legacy?: Pick<LegacyAutomations, 'list'>;
   };
+  readonly google?: GoogleAccount;
 }
 
 function sameHostPath(left: string, right: string): boolean {
@@ -304,6 +306,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
         if (!savedAgents) throw new Error('Agents are unavailable.');
         return savedAgents.startProjectRun(home, input);
       },
+      ...(options.google ? { google: options.google } : {}),
       ...(options.providerAuthUrlPresenter ? { providerAuthUrlPresenter: options.providerAuthUrlPresenter } : {}),
       ...(options.attention ? { notifySessionSettled: () => options.attention!.sessionSettled() } : {}),
       recordAttestation: createMutationRecorder(attestations, logs, checkpoints),

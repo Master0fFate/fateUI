@@ -180,6 +180,7 @@ export class AgentsService {
 
   async saveAgent(input: AgentSave): Promise<AgentDefinition> {
     this.admitWork();
+    if (input.value.google && input.value.defaults.permission === 'full-access') throw new Error('Google stays off for Full access Agents. Choose Edit files or Read only to turn it on.');
     const agent = await this.repository.saveAgent(input);
     if (!agent.enabled) await this.cancelMatching((active) => active.agent.id === agent.id);
     const state = await this.repository.state(agent.id);
@@ -229,7 +230,7 @@ export class AgentsService {
     const current = await this.repository.getAgent(preset.agentId).catch(() => null);
     if (!current) return preset;
     const { item } = current;
-    return { ...preset, revision: item.revision, name: item.name, instructions: item.instructions, tone: item.tone ?? '', skillRefs: item.skillRefs,
+    return { ...preset, revision: item.revision, name: item.name, instructions: item.instructions, tone: item.tone ?? '', skillRefs: item.skillRefs, google: item.google,
       defaults: { ...item.defaults, model: item.defaults.model ?? preset.defaults.model } };
   }
 
