@@ -41,7 +41,7 @@ import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { projectPathKey, useProjectStore, type KnownProject } from '../../stores/projectStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import { openAgentNotice, useAgentsStore } from '../../stores/agentsStore';
+import { openAgent, openAgentNotice, useAgentInboxReads, useAgentsStore } from '../../stores/agentsStore';
 import { SidebarResources } from '../resources/SidebarResources';
 import { ConversationPaths, conversationPathViews, type ForkAction } from './ConversationPaths';
 
@@ -151,10 +151,13 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
     if (typeof getDesktopApiOptional()?.onAgentLibraryChanged !== 'function') return;
     return getDesktopApi().onAgentLibraryChanged((event) => {
       void useAgentsStore.getState().load();
+      const viewing = event.agentId !== undefined && event.agentId === useRuntimeStore.getState().runtime.project?.agentId && document.hasFocus();
       if (event.focus && event.runId) void openAgentNotice(event.runId);
-      else if (event.message && event.runId) useUiStore.getState().showToast({ kind: event.status === 'failed' ? 'error' : event.status === 'needs-attention' ? 'warning' : 'info', title: 'Agents', message: event.message, agentRun: { runId: event.runId } });
+      else if (event.focus && event.agentId) void openAgent(event.agentId);
+      else if (event.message && !viewing) useUiStore.getState().showToast({ kind: event.status === 'failed' ? 'error' : event.status === 'needs-attention' ? 'warning' : 'info', title: 'Agents', message: event.message, ...(event.runId ? { agentRun: { runId: event.runId } } : {}) });
     });
   }, []);
+  useAgentInboxReads();
   const gitBranch = useWorkspaceStore((state) => state.git?.repository && state.git.branch ? state.git.branch : null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'manual' | 'recent' | 'oldest' | 'alphabetical'>('recent');

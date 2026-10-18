@@ -8,7 +8,16 @@ An **Agent** is a saved persona with exactly one ongoing conversation of its own
 2. Click the Agent in the sidebar. Its conversation opens in the main pane and the sidebar stays on **Agents**. There is one conversation per Agent; it is not listed under any project.
 3. Ask for work in a project, for example “check why the build fails in fateUI”. The Agent starts a **run** with the `run_in_project` tool and answers right away. When the run finishes, its result is posted into the Agent's conversation and the Agent continues from there.
 
-The dot next to an Agent shows a run in progress, a new result, or a failed run. The **Monitor** in the inspector lists an Agent's runs while its conversation is open, and a project's Agent runs while that project is open. **Open run** shows the run's own conversation.
+The dot next to an Agent shows a run in progress, or unread items in its inbox (red when one of them failed). The **Monitor** in the inspector lists an Agent's runs while its conversation is open, and a project's Agent runs while that project is open. **Open run** shows the run's own conversation.
+
+## Inbox and notifications
+
+- Finished, failed and interrupted runs and Routine messages land in the **Inbox**. Select the bell in the Agents toolbar to open it; the bell shows a dot while something is unread. **Unread** filters the list and **Read all** clears it.
+- Click an item to open its source: a run opens its own conversation; a Routine, or a run that never got a conversation, opens the Agent's chat. Opening an item marks it read, and so does looking at the Agent's chat.
+- The inbox is kept on disk under `agents/v1/inbox/<agent id>` in the data directory, with the latest 100 items per Agent. After a crash, runs that were cut off show up as **Interrupted** once their lease runs out, about a minute after the last heartbeat. They are not replayed. Runs stopped because Fate UI closed show up as interrupted on the next start.
+- While Fate UI is not the focused window, every finished or failed run raises a desktop notification; clicking it opens the same place as the inbox item. While Fate UI is focused you get the in-app toast instead, and nothing at all for the Agent chat you are looking at.
+- **Mute notifications** on an Agent's row turns off its desktop notifications. Its inbox keeps filling.
+- A Routine that could not send its message always notifies. A Routine that sent its message notifies only if that Routine had desktop notifications on in an earlier version.
 
 ## Where an Agent works
 

@@ -1,7 +1,7 @@
 import * as Popover from '@radix-ui/react-popover';
-import { Bot, MoreHorizontal, Pencil, Plus, Power, Search, Trash2 } from 'lucide-react';
+import { Bell, BellDot, BellOff, BellRing, Bot, MoreHorizontal, Pencil, Plus, Power, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import type { AgentDefinition, AgentLibrary } from '../../../shared/contracts/agents';
+import type { AgentDefinition, AgentInboxItem, AgentLibrary } from '../../../shared/contracts/agents';
 import { AppTooltip } from '../../components/AppTooltip';
 import { formatRelativeTime } from '../../lib/relativeTime';
 import { getDesktopApi } from '../../platform/api';
@@ -9,22 +9,22 @@ import { useSkinComponents } from '../../skins/SkinProvider';
 import { agentDraft, agentError, openAgent, useAgentsStore } from '../../stores/agentsStore';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
+import { AgentInboxPanel } from './AgentInbox';
 
 type Attention = 'running' | 'completed' | 'error';
-const attentionLabels: Record<Attention, string> = { running: 'Agent working', completed: 'New result', error: 'Run failed' };
 const permissionLabels = { 'read-only': 'Read only', edit: 'Edit files', 'full-access': 'Full access' } as const;
 const folderName = (projectPath: string) => projectPath.split(/[\\/]/u).filter(Boolean).pop() ?? projectPath;
 
-function agentStatus(agent: AgentDefinition, library: AgentLibrary, now: number): { attention: Attention | null; detail: string } {
+function agentStatus(agent: AgentDefinition, library: AgentLibrary, unread: AgentInboxItem | undefined, now: number): { attention: Attention | null; detail: string } {
   const runs = library.runs.filter((run) => run.agentId === agent.id && run.routineId === null);
   const active = runs.find((run) => run.status === 'running' || run.status === 'queued');
   if (active) return { attention: 'running', detail: `Working in ${folderName(active.projectPath)}` };
   if (!agent.enabled) return { attention: null, detail: 'Off' };
+  const attention = unread ? unread.status === 'failed' || unread.status === 'interrupted' ? 'error' : 'completed' : null;
   const last = runs.find((run) => run.finishedAt !== null);
-  if (!last?.finishedAt) return { attention: null, detail: permissionLabels[agent.defaults.permission] };
-  const seen = library.states.find((state) => state.agentId === agent.id)?.lastOpenedAt ?? 0;
+  if (!last?.finishedAt) return { attention, detail: permissionLabels[agent.defaults.permission] };
   const failed = last.status === 'failed' || last.status === 'needs-attention';
-  return { attention: last.finishedAt > seen ? failed ? 'error' : 'completed' : null, detail: `${failed ? 'Run failed' : 'Run done'} · ${formatRelativeTime(last.finishedAt, now)}` };
+  return { attention, detail: `${failed ? 'Run failed' : 'Run done'} · ${formatRelativeTime(last.finishedAt, now)}` };
 }
 
 export function SidebarAgents() {
@@ -32,11 +32,20 @@ export function SidebarAgents() {
   const currentAgentId = useRuntimeStore((state) => state.runtime.project?.agentId ?? null);
   const compactSessions = useUiStore((state) => state.compactSessions);
   const library = useAgentsStore((state) => state.library);
+  const inbox = useAgentsStore((state) => state.inbox);
   const busy = useAgentsStore((state) => state.busy);
   const loading = useAgentsStore((state) => state.loading);
   const [query, setQuery] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [showInbox, setShowInbox] = useState(false);
   const now = useMemo(() => Date.now(), [library]);
+  const latestUnread = useMemo(() => {
+    const latest = new Map<string, AgentInboxItem>();
+    for (const item of inbox.items) if (item.readAt === null && !latest.has(item.agentId)) latest.set(item.agentId, item);
+    return latest;
+  }, [inbox]);
+  const muted = useMemo(() => new Set(inbox.muted), [inbox]);
+  const unread = library.agents.reduce((sum, agent) => sum + (inbox.unread[agent.id] ?? 0), 0);
   useEffect(() => { void useAgentsStore.getState().load(); }, []);
 
   const needle = query.trim().toLocaleLowerCase();
@@ -58,6 +67,9 @@ export function SidebarAgents() {
       {[
         { key: 'edit', label: 'Edit agent', icon: Pencil, onClick: () => useAgentsStore.getState().edit(agent.id) },
         { key: 'toggle', label: agent.enabled ? 'Turn off' : 'Turn on', icon: Power, onClick: () => toggle(agent) },
+        muted.has(agent.id)
+          ? { key: 'notify', label: 'Unmute notifications', icon: BellRing, onClick: () => perform(() => getDesktopApi().setAgentNotifications({ agentId: agent.id, notify: true })) }
+          : { key: 'notify', label: 'Mute notifications', icon: BellOff, onClick: () => perform(() => getDesktopApi().setAgentNotifications({ agentId: agent.id, notify: false })) },
         { key: 'delete', label: 'Delete agent', icon: Trash2, onClick: () => setConfirmingDelete(agent.id), className: 'session-delete-button' },
       ].map(({ key, label, icon: Icon, onClick, className }) => (
         <AppTooltip key={key} content={label} wrapTrigger>
@@ -80,10 +92,11 @@ export function SidebarAgents() {
       );
     }
     const current = agent.id === currentAgentId;
-    const { attention, detail } = agentStatus(agent, library, now);
+    const { attention, detail } = agentStatus(agent, library, latestUnread.get(agent.id), now);
+    const label = attention === 'running' ? 'Agent working' : `${inbox.unread[agent.id] ?? 1} unread${attention === 'error' ? ' · failed' : ''}`;
     const dot = !current && attention && (
-      <AppTooltip content={attentionLabels[attention]} side="right" sideOffset={6}>
-        <span className="session-attention-dot" data-attention={attention} role="img" aria-label={attentionLabels[attention]} />
+      <AppTooltip content={label} side="right" sideOffset={6}>
+        <span className="session-attention-dot" data-attention={attention} role="img" aria-label={label} />
       </AppTooltip>
     );
     const open = { type: 'button' as const, disabled: current || busy || !agent.enabled, onClick: () => void openAgent(agent.id) };
@@ -127,13 +140,18 @@ export function SidebarAgents() {
     <div className="sidebar-tab-toolbar session-toolbar">
       <label className="session-search sidebar-search">
         <Symbol text="/"><Search size={15} aria-hidden="true" /></Symbol>
-        <input className="icon-label" type="search" aria-label="Search agents" placeholder="Search agents" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input className="icon-label" type="search" aria-label={showInbox ? 'Search inbox' : 'Search agents'} placeholder={showInbox ? 'Search inbox' : 'Search agents'} value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
       <AppTooltip content="New agent" wrapTrigger triggerClassName="sidebar-toolbar-action sidebar-toolbar-action--primary session-toolbar-action--new">
         <button type="button" aria-label="New agent" disabled={busy} onClick={() => useAgentsStore.getState().edit('new')}><ActionContent text="new"><Plus size={15} /></ActionContent></button>
       </AppTooltip>
+      <AppTooltip content={unread ? `Inbox · ${unread} new` : 'Inbox'} wrapTrigger triggerClassName="sidebar-toolbar-action">
+        <button type="button" aria-label={unread ? `Inbox, ${unread} new` : 'Inbox'} aria-pressed={showInbox} onClick={() => setShowInbox((open) => !open)}>
+          <ActionContent text={unread ? `inbox ${unread}` : 'inbox'}>{unread ? <BellDot size={15} /> : <Bell size={15} />}</ActionContent>
+        </button>
+      </AppTooltip>
     </div>
-    <div className="folder-list" aria-label="Agents" aria-busy={loading}>
+    {showInbox ? <AgentInboxPanel query={needle} /> : <div className="folder-list" aria-label="Agents" aria-busy={loading}>
       <div className="session-list">{visible.map(row)}</div>
       {!loading && !visible.length && (
         <div className="empty-sessions">
@@ -141,6 +159,6 @@ export function SidebarAgents() {
           <p>{library.agents.length ? 'No match' : 'No agents yet'}</p>
         </div>
       )}
-    </div>
+    </div>}
   </>;
 }
