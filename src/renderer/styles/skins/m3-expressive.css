@@ -72,6 +72,7 @@
 :root[data-skin="m3-expressive"][data-compact-sessions="true"] .session-preview-open small { font-size: 9px; line-height: 14px; white-space: nowrap; }
 :root[data-skin="m3-expressive"] .session-row:not(.session-row--preview):not(.session-row--compact) { min-height: 50px; }
 :root[data-skin="m3-expressive"] .session-open:not(.session-open--compact) { padding: 7px 14px; }
+:root[data-skin="m3-expressive"] .session-row:not(.session-row--preview):not(.session-row--compact) > .session-attention-dot { top: 30px; bottom: auto; left: 4px; }
 /* Fork rows receive density on their list, not .session-row--compact. Override
    the normal 50px session floor only here, independently of compact UI mode. */
 :root[data-skin="m3-expressive"] .session-path-list--compact { margin-left: 12px; padding-left: 5px; }
