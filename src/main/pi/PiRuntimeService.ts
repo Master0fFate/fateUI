@@ -503,6 +503,14 @@ const DEFERRED_TOOLS = new Set<string>([
   'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp',
 ]);
 
+function agentHomePrompt(homePath: string): string {
+  return [
+    `This chat runs in your own folder, ${homePath}. Its tools reach only that folder; files anywhere else are out of reach here.`,
+    'For anything in the user\'s folders, call run_in_project with the project folder name or absolute path and a self-contained request, then tell the user the run started.',
+    'The run\'s result arrives in this chat as a message. Report it to the user in your own words.',
+  ].join('\n');
+}
+
 function agentRunOutcome(session: AgentSession, failed: boolean): AgentRunOutcome {
   const last = [...session.messages].reverse().find((message) => message.role === 'assistant');
   const summary = last?.role === 'assistant' ? last.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('\n').slice(0, 4000) : '';
@@ -662,6 +670,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ...await boundedContextPrompts(agentDir, 'Global'),
         ...await boundedContextPrompts(effectiveCwd, 'Project'),
         ...(preset ? [`Saved Agent ${preset.name}, revision ${preset.revision}.\n${preset.instructions}`] : []),
+        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd)] : []),
       ];
       // Every root has a live tool-call ceiling, including retained tool handles
       // offered before a reduction. Slot binding grants authority after restore.
@@ -3609,7 +3618,7 @@ export class PiRuntimeService {
   async deliverAgentMessage(sessionPath: string, sessionId: string, message: AgentMessage): Promise<void> {
     if (this.coldSession?.snapshot.summary.id === sessionId) await this.materializeColdSession();
     const slot = this.findLiveSlot(sessionId) ?? await this.createAdditionalSlot(sessionPath, sessionId);
-    await this.sendChildGeneratedMessage(slot, slot.runtime.session, { customType: message.customType, content: [{ type: 'text', text: message.text }], display: true, details: message.details }, 'followUp', true);
+    await this.sendChildGeneratedMessage(slot, slot.runtime.session, { customType: message.customType, content: [{ type: 'text', text: message.text }], display: message.customType === 'fate-agent-routine', details: message.details }, 'followUp', true);
     if (slot.disposed) return;
     slot.modifiedAt = new Date().toISOString();
     this.setSessionAttention(slot, 'running');
