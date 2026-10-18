@@ -64,7 +64,7 @@ export const workspaceMetadataSchema = z.object({
 }).strict().superRefine((value, context) => {
   if (value.mode === 'worktree' && (!value.branch || !value.baseCommit || !value.commonDirectory)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Worktree metadata requires branch, baseCommit, and commonDirectory.' });
 });
-const toolName = z.enum(['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash', 'generate_image']);
+const toolName = z.enum(['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image']);
 const model = z.object({
   provider: z.string().min(1).max(200),
   id: z.string().min(1).max(500),
@@ -108,7 +108,7 @@ export const agentTeamNodeSchema = z.object({
   role: z.string().min(1).max(80),
   agentName: z.string().min(1).max(100),
   permissionLevel: permission,
-  enabledTools: z.array(toolName).max(8),
+  enabledTools: z.array(toolName).max(11),
   model,
   thinkingLevel: thinking,
   status: agentTeamNodeStatusSchema,

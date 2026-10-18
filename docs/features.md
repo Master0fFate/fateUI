@@ -24,7 +24,7 @@ So read these links as "related activity to investigate," never as proof of who 
 
 ### Direct-write ledger rows (limited)
 
-Activity's ledger rows list successful direct `write`/`edit` tool calls and checkpoint `restore` operations for the current project: each row records the project-relative path, the actor (main agent, historical standalone agent, or team node), the permission level at write time, and a prior→post SHA-256 transition (or `new file` / `oversize prior` when no prior hash was captured). The list is virtualized and bounded to the most recent 1,000 rows shown.
+Activity's ledger rows list successful direct `write`/`edit` tool calls, PDFs saved by `pdf_fill` and `pdf_create` (recorded as writes), and checkpoint `restore` operations for the current project: each row records the project-relative path, the actor (main agent, historical standalone agent, or team node), the permission level at write time, and a prior→post SHA-256 transition (or `new file` / `oversize prior` when no prior hash was captured). The list is virtualized and bounded to the most recent 1,000 rows shown.
 
 It is deliberately narrow. It does **not** cover shell commands, formatters, scripts, external editor edits, manual terminal mutations, the current working-tree diff, or commit history. It records that a controlled write completed and produced the recorded written-content hash — not authorship, not causality, and not a durable audit log.
 
@@ -78,6 +78,18 @@ Status, history, commits, Monaco diffs, and project-confined file browsing witho
 ### Branches
 
 The composer shows a branch chip for repository projects. On an empty session it opens a picker: switch to a local or remote branch, or create a branch from the current one by typing its name. Branches checked out in another worktree are not listed. Once the session has a message the branch is fixed for that session and the picker is read-only. The agent names, switches, and renames branches through the `git_branch` tool (list, switch, create, rename), which runs with hooks and unsafe protocols disabled. Listing works at every permission level; switching, creating, and renaming need Edit files or Full access. Status, changes, and history refresh after the tool completes.
+
+## PDFs
+
+Root sessions, saved Agents and Agent Team members work with PDFs through three tools:
+
+- `pdf_read`, at every permission level, returns the page count, document metadata, the AcroForm fields (name, type, current value, options, tooltip label, required and read-only flags) and the text of the selected pages, for example `pages: "1-3,7"`. One call returns up to 50,000 characters or 100 pages and names the pages to request next. Files can be up to 25 MiB. `read` refuses PDFs and points to `pdf_read`.
+- `pdf_fill`, at Edit files and Full access, sets text, checkbox, radio, dropdown and list fields and saves a new PDF, by default `<name>-filled.pdf` next to the source. It overwrites the source only when the call sets `replaceSource`. It writes nothing when any field name or value is invalid, can flatten the form, and removes an XFA layer so viewers show the filled values.
+- `pdf_create`, at Edit files and Full access, renders simple Markdown (headings, paragraphs, lists, quotes, code blocks, rules) to a new A4 or Letter PDF.
+
+Both write tools use the same confined write path as `write`, so every saved PDF appears in Activity as a ledger row and can be rewound.
+
+Limits: text comes from the PDF's text layer, so scanned pages return no text and there is no OCR. PDFs that rely on external CJK character maps can return incomplete text. Encrypted PDFs that open without a password can be read but not filled; password-protected PDFs cannot be read. Signature and button fields are listed but cannot be set. The built-in PDF fonts cover Windows-1252 only: other characters in `pdf_fill` values are saved and drawn by the PDF viewer, and such forms cannot be flattened; `pdf_create` prints them as `?`.
 
 ## Manual terminal and embedded browser
 
