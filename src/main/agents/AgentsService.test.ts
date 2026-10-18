@@ -11,7 +11,7 @@ import { AgentsService, type AgentsHost, type AgentWorkspace } from './AgentsSer
 const roots: string[] = [];
 const services: AgentsService[] = [];
 afterEach(async () => { await Promise.all(services.splice(0).map((service) => service.dispose())); vi.restoreAllMocks(); await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
-const draft: AgentDraft = { name: 'Analyst', description: '', instructions: 'Agent system persona.', skillRefs: [], enabled: true, defaults: { model: { provider: 'test', id: 'model' }, thinkingLevel: 'high', permission: 'edit', workspace: 'shared' } };
+const draft: AgentDraft = { name: 'Analyst', description: '', instructions: 'Agent system persona.', skillRefs: [], enabled: true, google: false, defaults: { model: { provider: 'test', id: 'model' }, thinkingLevel: 'high', permission: 'edit', workspace: 'shared' } };
 async function fixture() {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agents-service-')));
   roots.push(root);

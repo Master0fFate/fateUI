@@ -29,6 +29,7 @@ import {
   diagnosticsSchema,
   type PiDesktopApi,
 } from '../shared/contracts/ipc';
+import { googleClientInputSchema, googleConnectInputSchema, googleStatusSchema } from '../shared/contracts/google';
 import { hookListSchema } from '../shared/contracts/hooks';
 import { lspServerListSchema } from '../shared/contracts/lsp';
 import { usageQueryInputSchema, usageQueryResultSchema } from '../shared/contracts/usage';
@@ -45,6 +46,10 @@ export const preferencesApi = {
   getMcpServers: () => invoke(ipcChannels.mcpGet, emptyInputSchema, mcpServerListSchema),
   setMcpServers: (servers) => invoke(ipcChannels.mcpSet, mcpServerListSchema, mcpServerListSchema, servers),
   testMcpServer: (name) => invoke(ipcChannels.mcpProbe, mcpProbeInputSchema, mcpProbeResultSchema, { name }),
+  getGoogleStatus: () => invoke(ipcChannels.googleGet, emptyInputSchema, googleStatusSchema),
+  setGoogleClient: (input) => invoke(ipcChannels.googleSetClient, googleClientInputSchema, googleStatusSchema, input),
+  connectGoogle: (input) => invoke(ipcChannels.googleConnect, googleConnectInputSchema, googleStatusSchema, input),
+  disconnectGoogle: () => invoke(ipcChannels.googleDisconnect, emptyInputSchema, googleStatusSchema),
   getHooks: () => invoke(ipcChannels.hooksGet, emptyInputSchema, hookListSchema),
   setHooks: (hooks) => invoke(ipcChannels.hooksSet, hookListSchema, hookListSchema, hooks),
   getLspServers: () => invoke(ipcChannels.lspGet, emptyInputSchema, lspServerListSchema),

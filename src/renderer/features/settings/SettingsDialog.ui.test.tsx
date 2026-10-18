@@ -60,6 +60,7 @@ function installBridge(
     getThemes: vi.fn(async () => loadedThemes),
     setSettings,
     getDiagnostics: vi.fn(async () => null),
+    getGoogleStatus: vi.fn(async () => ({ secureStorage: true, clientId: null, account: null, access: 'none', connecting: false })),
     getLogs: vi.fn(async () => []),
     getSpeechStatus: vi.fn(async () => speechStatus),
     downloadSpeechModel: vi.fn(async () => speechStatus),

@@ -17,6 +17,8 @@ import type { AgentHome, AgentsService } from '../agents/AgentsService';
 import { appReleaseDisplayVersion, releaseMetadata } from '../releaseMetadata';
 import type { LearningService } from '../learning/LearningService';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import type { GoogleAccount } from '../google/GoogleAccount';
+import { googleClientInputSchema, googleConnectInputSchema, googleStatusSchema } from '../../shared/contracts/google';
 import { McpConfigService } from '../pi/McpConfigService';
 import { McpService } from '../pi/McpService';
 import { PiMigrationService } from '../pi/PiMigrationService';
@@ -220,6 +222,7 @@ export interface IpcServices {
   settings: SettingsService;
   learning?: LearningService;
   agents?: AgentsService;
+  google?: GoogleAccount;
   terminal: TerminalService;
   logs: AppLogService;
   music: Pick<MusicService, 'getStatus' | 'load' | 'resolveTrack' | 'clearQueue' | 'reset' | 'setDurationSink'>;
@@ -514,7 +517,7 @@ async function applyPendingRecovery(
   await recovery?.markClean();
 }
 
-export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, terminal, logs, music, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
+export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, google, terminal, logs, music, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
   const sessionHandlers = createSessionHandlers(runtime);
   const runtimeHandlers = createRuntimeHandlers(runtime, (projectPath) => projects.prepareSessionListPath(projectPath));
   const goalHandlers = createGoalHandlers(runtime);
@@ -1322,6 +1325,20 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     const { name } = mcpProbeInputSchema.parse(input);
     const tools = await new McpService(await mcpConfig.list(), () => true).probe(name);
     return mcpProbeResultSchema.parse({ tools });
+  });
+  const googleAccount = () => {
+    if (!google) throw new Error('Google is unavailable in this window.');
+    return google;
+  };
+  handle(ipcChannels.googleGet, async (_event, input) => {
+    emptyInputSchema.parse(input);
+    return googleStatusSchema.parse(await googleAccount().status());
+  });
+  handle(ipcChannels.googleSetClient, async (_event, input) => googleStatusSchema.parse(await googleAccount().setClient(googleClientInputSchema.parse(input))));
+  handle(ipcChannels.googleConnect, async (_event, input) => googleStatusSchema.parse(await googleAccount().connect(googleConnectInputSchema.parse(input).access)));
+  handle(ipcChannels.googleDisconnect, async (_event, input) => {
+    emptyInputSchema.parse(input);
+    return googleStatusSchema.parse(await googleAccount().disconnect());
   });
   handle(ipcChannels.piMigrationInspect, async (_event, input) => {
     emptyInputSchema.parse(input);

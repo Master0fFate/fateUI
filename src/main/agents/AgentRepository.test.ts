@@ -9,7 +9,7 @@ import { agentDraftSchema, routineDraftSchema, type AgentDraft } from '../../sha
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
-export const agentDraft: AgentDraft = { name: 'Reviewer', description: 'Review carefully', instructions: 'Be precise.', skillRefs: [], defaults: { model: null, thinkingLevel: 'high', permission: 'read-only', workspace: 'shared' }, enabled: true };
+export const agentDraft: AgentDraft = { name: 'Reviewer', description: 'Review carefully', instructions: 'Be precise.', skillRefs: [], defaults: { model: null, thinkingLevel: 'high', permission: 'read-only', workspace: 'shared' }, enabled: true, google: false };
 async function fixture() {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agents-repository-')));
   roots.push(root);

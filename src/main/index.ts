@@ -1,5 +1,5 @@
 import { resolveStatePersistenceBackend } from '../shared/v2FeaturePolicy';
-import { app, BrowserWindow, dialog, protocol, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, protocol, safeStorage, session, shell, systemPreferences } from 'electron';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { createFateCore } from '../core/createFateCore';
 import { hostCheckoutOwnership } from '../core/ownership/CheckoutOwnership';
@@ -28,6 +28,7 @@ import { AppLogService } from './logging/AppLogService';
 import { CrashTelemetryService } from './logging/CrashTelemetry';
 import { LegacyAutomations } from './automations/LegacyAutomations';
 import { notifyAgentRun } from './agents/AgentNotifications';
+import { GoogleAccount } from './google/GoogleAccount';
 import { MEDIA_SCHEME, MusicService, PublicHttpsProxy } from './music/MusicService';
 import { BrowserRuntimeBridge } from './pi/BrowserRuntimeBridge';
 import type { PiRuntimeService } from './pi/PiRuntimeService';
@@ -372,6 +373,11 @@ app.whenReady().then(async () => {
     await openLaunchConnection(profile);
   }
   if (!connections.isLocal) dispatcher.setPendingProjectPath(null);
+  const google = new GoogleAccount({
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (text) => safeStorage.encryptString(text),
+    decrypt: (data) => safeStorage.decryptString(data),
+  }, (url) => shell.openExternal(url));
   coreStartup = createFateCore({
     paths: createDesktopFatePaths({ piAgentDir: getAgentDir() }),
     ...(process.env.FATE_STATE_PERSISTENCE === undefined ? {} : { statePersistence: resolveStatePersistenceBackend(process.env.FATE_STATE_PERSISTENCE) }),
@@ -394,6 +400,7 @@ app.whenReady().then(async () => {
     } },
     savedAgents: { scheduleRoutines: false, legacy: legacyAutomations,
       notify: (change, osNotification) => { notifyAgentRun(change, osNotification); } },
+    google,
   });
   core = await coreStartup;
   if (hostStopping) { core.shutdownCore(); return; }
@@ -477,7 +484,7 @@ app.whenReady().then(async () => {
     }
   }
   await recovery.load();
-  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), terminal, logs, music, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy });
+  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy });
   // Refresh every models.dev-managed provider's model list once per Fate GUI
   // start. Runs beside startup, never blocking it; offline keeps the cache.
   // A saved remote target never starts local scheduled work or an automatic provider refresh.

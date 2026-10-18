@@ -38,6 +38,7 @@ import { builtInSkins, builtInSkinName, skinPackThemeId, type SkinId, type SkinC
 import { getSkinDefinitions, persistAppliedSkin, setSkinDefinitions } from '../../skin';
 import { SkinPackSettings, type RemovedSkin } from './SkinPackSettings';
 import { McpSettings } from './McpSettings';
+import { GoogleSettings } from './GoogleSettings';
 import { SavedAgentsSettings } from './SavedAgentsSettings';
 import { HookSettings } from './HookSettings';
 import { LspSettings } from './LspSettings';
@@ -777,6 +778,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                       <details className="workspace-preference-details"><summary>How it works</summary><p>Applies after saving to all newly created agents. Strict mode also applies to resumed work; running work stays in place.</p><p>No project restart is needed for workspace policy changes. Worktrees start from committed files, not uncommitted changes, and are not security sandboxes.</p></details>
                     </div>
                   </section>
+                  <GoogleSettings />
                   <SavedAgentsSettings compact={appearance.compactMode} />
                   <div className="settings-title settings-title--spaced"><div><h3>Pi tools and budget</h3></div></div>
                   <label className="settings-toggle">

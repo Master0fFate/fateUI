@@ -47,6 +47,30 @@ export class QuestionnaireCoordinator {
     this.changed(sessionId);
   }
 
+  async ask(sessionId: string, question: Question, isCurrent: () => boolean, signal: AbortSignal): Promise<Answer | null> {
+    if (this.pending.has(sessionId)) throw new Error('Another question is waiting for the user. Try again after it is answered.');
+    const abort = () => this.cancel(sessionId);
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+      return await this.wait(sessionId, question, 0, 1, isCurrent, signal);
+    } finally {
+      signal.removeEventListener('abort', abort);
+      this.cancel(sessionId);
+    }
+  }
+
+  private wait(sessionId: string, question: Question, index: number, total: number, isCurrent: () => boolean, signal: AbortSignal | undefined): Promise<Answer | null> {
+    return new Promise<Answer | null>((resolve) => {
+      const view: PendingQuestionnaire = {
+        id: randomUUID(), sessionId, index, total,
+        question: question.question, options: question.options,
+      };
+      this.pending.set(sessionId, { view, resolve });
+      this.changed(sessionId);
+      if (signal?.aborted || !isCurrent()) this.cancel(sessionId);
+    });
+  }
+
   createTool(isCurrent: (sessionId: string) => boolean): ToolDefinition {
     return defineTool({
       name: 'ask_user_question',
@@ -83,15 +107,7 @@ export class QuestionnaireCoordinator {
         try {
           for (const [index, question] of questions.entries()) {
             if (signal?.aborted || !isCurrent(sessionId)) break;
-            const answer = await new Promise<Answer | null>((resolve) => {
-              const view: PendingQuestionnaire = {
-                id: randomUUID(), sessionId, index, total: questions.length,
-                question: question.question, options: question.options,
-              };
-              this.pending.set(sessionId, { view, resolve });
-              this.changed(sessionId);
-              if (signal?.aborted || !isCurrent(sessionId)) this.cancel(sessionId);
-            });
+            const answer = await this.wait(sessionId, question, index, questions.length, () => isCurrent(sessionId), signal);
             if (!answer) break;
             answers.push(answer);
           }

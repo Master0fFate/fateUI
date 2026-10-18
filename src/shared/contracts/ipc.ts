@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { DesktopConnectionApi } from './connections';
 import { memoryLearningSettingsSchema, learningTurnSchema, type LearningApi } from './learning';
 import { agentChannels, type AgentsApi } from './agents';
+import type { GoogleClientInput, GoogleConnectInput, GoogleStatus } from './google';
 import type { MonitorDashboard, MonitorReadInput } from './monitorDashboard';
 import { MAX_SPEECH_STREAM_FEED_SAMPLES, SPEECH_PCM_BYTES_PER_SAMPLE } from '../speech';
 import {
@@ -216,6 +217,10 @@ export const ipcChannels = {
   mcpGet: 'mcp:get',
   mcpSet: 'mcp:set',
   mcpProbe: 'mcp:probe',
+  googleGet: 'google:get',
+  googleSetClient: 'google:set-client',
+  googleConnect: 'google:connect',
+  googleDisconnect: 'google:disconnect',
   hooksGet: 'hooks:get',
   hooksSet: 'hooks:set',
   lspGet: 'lsp:get',
@@ -1746,6 +1751,10 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   getMcpServers: () => Promise<McpServerDefinition[]>;
   setMcpServers: (servers: McpServerDefinition[]) => Promise<McpServerDefinition[]>;
   testMcpServer: (name: string) => Promise<z.infer<typeof mcpProbeResultSchema>>;
+  getGoogleStatus: () => Promise<GoogleStatus>;
+  setGoogleClient: (input: GoogleClientInput) => Promise<GoogleStatus>;
+  connectGoogle: (input: GoogleConnectInput) => Promise<GoogleStatus>;
+  disconnectGoogle: () => Promise<GoogleStatus>;
   getHooks: () => Promise<HookDefinition[]>;
   setHooks: (hooks: HookDefinition[]) => Promise<HookDefinition[]>;
   getLspServers: () => Promise<LspServerDefinition[]>;

@@ -130,6 +130,8 @@ import { createMonitorDashboardTool, MONITOR_DASHBOARD_TOOL_NAME } from './monit
 import type { MonitorDashboard, MonitorReadInput } from '../../shared/contracts/monitorDashboard';
 import { agentSessionPermission, bindAgentSessionPreset, filterAgentSessionTools, getAgentSessionPreset, presetPermission, readAgentSessionPreset, validateAgentSkills } from '../agents/AgentSessionPreset';
 import { AGENT_HOME_TOOL_NAMES, createRunInProjectTool, type AgentMessage, type AgentRunHandle, type AgentRunOutcome, type AgentRunStarter, type AgentRunTarget } from '../agents/AgentRunTool';
+import type { GoogleAccount } from '../google/GoogleAccount';
+import { GOOGLE_TOOL_NAMES, createGoogleTools } from '../google/GoogleTools';
 import { agentDefaultsSchema, type SavedAgentSession } from '../../shared/contracts/agents';
 import { InMemoryTaskRepository, type TaskPersistence } from './tasks/TaskRepository';
 import { InMemorySessionQueueRepository, type SessionQueuePersistence } from './SessionQueueRepository';
@@ -711,7 +713,9 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ],
         { searchTools: true, ...(getImageGenerationSettings ? { getImageGenerationSettings } : {}), ...(paths ? { imageAgentDir: paths.piAgentDir } : {}), ...(attestationSink ? { attestations: attestationSink } : {}) },
       );
-      const ownedTools = customTools.filter((tool) => preset?.runId ? !tool.name.startsWith('browser_') && !AGENT_HOME_TOOL_NAMES.has(tool.name) : preset || !AGENT_HOME_TOOL_NAMES.has(tool.name));
+      const googleAllowed = Boolean(preset && !preset.runId && preset.google && preset.defaults.permission !== 'full-access');
+      const ownedTools = customTools.filter((tool) => (googleAllowed || !GOOGLE_TOOL_NAMES.has(tool.name))
+        && (preset?.runId ? !tool.name.startsWith('browser_') && !AGENT_HOME_TOOL_NAMES.has(tool.name) : preset || !AGENT_HOME_TOOL_NAMES.has(tool.name)));
       // A corrupt optional MCP config must not prevent normal project sessions.
       // Settings > MCP still reports the validation error so the user can repair it.
       const mcpServers = await new McpConfigService(paths?.dataRoot).list().catch(() => []);
@@ -1353,6 +1357,7 @@ export class PiRuntimeService {
   private readonly tasks: TaskService;
   private monitorRunsSource: ((projectPath: string) => Promise<MonitorRunsSource>) | null = null;
   private agentRunStarter: AgentRunStarter | null = null;
+  private googleAccount: GoogleAccount | null = null;
   private readonly monitorEvents = new Map<string, Array<{ id: string; title: string; detail: string; state: 'normal' | 'attention'; timestamp: number }>>();
   private readonly disconnectedNormalizer = new PiEventNormalizer(() => null);
   private initialization = 0;
@@ -3635,6 +3640,7 @@ export class PiRuntimeService {
   }
 
   setAgentRunStarter(starter: AgentRunStarter | null): void { this.agentRunStarter = starter; }
+  setGoogleAccount(account: GoogleAccount | null): void { this.googleAccount = account; }
 
   private settleAgentRun(slot: RuntimeSlot): void {
     const settle = slot.agentRunSettled;
@@ -5702,6 +5708,11 @@ export class PiRuntimeService {
     }
   }
 
+  private canAskUser(sessionId: string): boolean {
+    const slot = this.findLiveSlot(sessionId);
+    return Boolean(this.project?.trusted && slot && !slot.sessionInvalidated && slot.runtime.session.sessionId === sessionId);
+  }
+
   private orchestrationTools(modelRuntime: ModelRuntime): ToolDefinition[] {
     const agents = this.agentTeams.createRootTools(modelRuntime);
     const workflow = this.agentWorkflows.createTool(modelRuntime);
@@ -5720,16 +5731,25 @@ export class PiRuntimeService {
           && slot.sessionGeneration === generation && slot.runtime.session === session && session.sessionId === sessionId,
       };
     });
-    const tools = [...agents, workflow, catalog, createMonitorDashboardTool((input, sessionId) => this.getMonitorDashboard(input, sessionId)), this.questionnaires.createTool((sessionId) => {
-      const slot = this.findLiveSlot(sessionId);
-      return Boolean(this.project?.trusted && slot && !slot.sessionInvalidated && slot.runtime.session.sessionId === sessionId);
-    }), ...this.createSessionMessagingTools(), ...this.goalMax.createTools(), ...taskTools, ...browser, createRunInProjectTool(async (sessionId, input) => {
+    const tools = [...agents, workflow, catalog, createMonitorDashboardTool((input, sessionId) => this.getMonitorDashboard(input, sessionId)), this.questionnaires.createTool((sessionId) => this.canAskUser(sessionId)), ...this.createSessionMessagingTools(), ...this.goalMax.createTools(), ...taskTools, ...browser, createRunInProjectTool(async (sessionId, input) => {
       const slot = this.findLiveSlot(sessionId);
       const preset = slot ? getAgentSessionPreset(slot.runtime.session) : undefined;
       if (!slot || !preset || preset.runId || !this.agentRunStarter) throw new Error('Only an Agent chat can start project runs.');
       const model = slot.runtime.session.model;
       return this.agentRunStarter({ agentId: preset.agentId, permission: slot.permissionLevel, model: model ? { provider: model.provider, id: model.id } : null }, input);
-    })];
+    }), ...(this.googleAccount ? createGoogleTools(this.googleAccount, {
+      agentFor: (sessionId) => {
+        const slot = this.findLiveSlot(sessionId);
+        const preset = slot ? getAgentSessionPreset(slot.runtime.session) : undefined;
+        if (!slot || !preset || preset.runId || !preset.google || slot.permissionLevel === 'full-access') throw new Error('Google tools work only in an Agent chat with Google turned on and without Full access.');
+        return preset.agentId;
+      },
+      approve: async (sessionId, question, [accept, decline], signal) => {
+        if (this.selectedSlot?.runtime.session.sessionId !== sessionId) this.onSessionSettled?.(sessionId);
+        const answer = await this.questionnaires.ask(sessionId, { question, options: [{ label: accept }, { label: decline }] }, () => this.canAskUser(sessionId), signal);
+        return answer && { approved: answer.source === 'option' && answer.answer === accept, note: answer.source === 'custom' ? answer.answer : null };
+      },
+    }) : [])];
     for (const tool of tools) installToolExecutionAdmission(tool, () => {
       if (this.hostStopping) throw new Error('The core is shutting down; a live root session cannot admit retained tools.');
       this.executionAdmissionGuard();
