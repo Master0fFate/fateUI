@@ -5,7 +5,7 @@ How to build, verify, package, and release Fate UI from source. For the contribu
 ## Prerequisites
 
 - Node.js **22.19.0 or newer**
-- pnpm **11.17.0**
+- pnpm **12.14.0**
 - Git on `PATH`
 - A Windows, macOS, or Linux desktop environment
 - Build tools for native modules on Linux (`build-essential` and Python 3)

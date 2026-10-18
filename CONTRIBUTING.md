@@ -19,7 +19,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Requirements are Node.js 22.19+, pnpm 11.17.0, Git, and a supported desktop environment. Linux native modules require a compiler toolchain and Python 3.
+Requirements are Node.js 22.19+, pnpm 12.14.0, Git, and a supported desktop environment. Linux native modules require a compiler toolchain and Python 3.
 
 ## Architecture rules
 

@@ -26,7 +26,7 @@ Pi 1.0 packages are present, but fresh unspecified profiles still select legacy 
 
 ## Node companion prerequisites
 
-The independent companion requires **Node 22.19 or later**; its target runtime must also support the selected native SQLite/Durable dependencies. Development uses **pnpm 11.17.0** and the frozen lockfile. Node and Electron native-module builds are separate.
+The independent companion requires **Node 22.19 or later**; its target runtime must also support the selected native SQLite/Durable dependencies. Development uses **pnpm 12.14.0** and the frozen lockfile. Node and Electron native-module builds are separate.
 
 The server package builder currently enables **Linux x64 only**. Use an explicitly supplied, reviewed package for the chosen commit; verify its manifest, checksums, internal-link inventory, notices and target-native results. No accepted current V2 download is established by this guide. Follow the [package guide](../../build/server-package/README.md); a server-only `--without-web` archive cannot serve the web UI. Do not reuse a desktop installation or Electron-rebuilt PTY as a Node package.
 
