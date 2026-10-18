@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron';
 import {
-  agentChannels, agentsEmptyInputSchema, agentLibraryResultSchema, agentSaveSchema, agentDefinitionSchema, routineSaveSchema, routineDefinitionSchema,
+  agentChannels, agentsEmptyInputSchema, agentLibraryResultSchema, agentSaveSchema, agentDefinitionSchema, routineSaveSchema, routineDefinitionSchema, watchSaveSchema, watchDefinitionSchema,
   libraryItemSchema, agentOpenSchema, agentRunIdSchema, automationCopyInputSchema, agentChangedSchema, legacyImportListSchema,
 } from '../../shared/contracts/agents';
 import { runtimeStateSchema, type RuntimeState } from '../../shared/contracts/ipc';
@@ -21,6 +21,7 @@ export function registerAgentsIpc(handle: Register, agents: AgentsService | unde
   handle(agentChannels.agentsList, async (_event, input) => { agentsEmptyInputSchema.parse(input); return agentLibraryResultSchema.parse(await service().list()); });
   handle(agentChannels.agentsSave, async (_event, input) => agentDefinitionSchema.parse(await service().saveAgent(agentSaveSchema.parse(input))));
   handle(agentChannels.agentsSaveRoutine, async (_event, input) => routineDefinitionSchema.parse(await service().saveRoutine(routineSaveSchema.parse(input))));
+  handle(agentChannels.agentsSaveWatch, async (_event, input) => watchDefinitionSchema.parse(await service().saveWatch(watchSaveSchema.parse(input))));
   handle(agentChannels.agentsDelete, async (_event, input) => { await service().remove(libraryItemSchema.parse(input)); });
   handle(agentChannels.agentsOpen, async (event, input) => runtimeStateSchema.parse(await activate.home(await service().open(agentOpenSchema.parse(input).agentId), owner(event))));
   handle(agentChannels.agentsCancel, async (_event, input) => { await service().cancel(agentRunIdSchema.parse(input).runId); });

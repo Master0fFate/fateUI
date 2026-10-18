@@ -120,6 +120,7 @@ export function selectDesktopMethods(bridge: DesktopOnlyApi): DesktopOnlyApi {
     saveAgentDefinition: bridge.saveAgentDefinition,
     saveImageAs: bridge.saveImageAs,
     saveRoutineDefinition: bridge.saveRoutineDefinition,
+    saveWatchDefinition: bridge.saveWatchDefinition,
     selectBrowserAnnotation: bridge.selectBrowserAnnotation,
     selectProject: bridge.selectProject,
     selectProjectFile: bridge.selectProjectFile,

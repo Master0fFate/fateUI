@@ -11,7 +11,7 @@ export type AgentRunStarter = (home: AgentHomeContext, input: ProjectRunRequest)
 export interface AgentRunTarget { sessionPath: string; sessionId: string; request: string; mode: 'turn' | 'goal'; permission: AgentPermission; timeLimitMs: number }
 export interface AgentRunOutcome { failed: boolean; summary: string; error: string | null }
 export interface AgentRunHandle { sessionId: string; settled: Promise<AgentRunOutcome>; abort(): Promise<void> }
-export interface AgentMessage { customType: 'fate-agent-run-result' | 'fate-agent-routine'; text: string; details: Record<string, unknown> }
+export interface AgentMessage { customType: 'fate-agent-run-result' | 'fate-agent-routine' | 'fate-agent-watch'; text: string; details: Record<string, unknown> }
 
 export function createRunInProjectTool(start: ProjectRunStarter): ToolDefinition {
   return defineTool({

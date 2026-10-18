@@ -12,7 +12,7 @@ describe('named Agents preload bridge', () => {
     expect(electron.invoke).not.toHaveBeenCalled();
   });
   it('validates library responses and does not expose arbitrary IPC', async () => {
-    const library = { agents: [], routines: [], states: [], runs: [], revisions: {}, nextDue: {}, diagnostics: [] };
+    const library = { agents: [], routines: [], states: [], runs: [], revisions: {}, nextDue: {}, diagnostics: [], watches: [], watchStates: [] };
     electron.invoke.mockResolvedValueOnce(library);
     expect(await agentsApi.getAgentLibrary()).toEqual(library);
     expect(electron.invoke).toHaveBeenCalledWith(agentChannels.agentsList, {});

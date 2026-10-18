@@ -1,12 +1,13 @@
 import { getDesktopApi, getDesktopApiOptional } from '../platform/api';
 import { create } from 'zustand';
-import type { AgentDefinition, AgentDraft, AgentLibrary, LegacyImportItem, RoutineDefinition, RoutineDraft } from '../../shared/contracts/agents';
+import type { AgentDefinition, AgentDraft, AgentLibrary, LegacyImportItem, RoutineDefinition, RoutineDraft, WatchDefinition, WatchDraft } from '../../shared/contracts/agents';
 import { useRuntimeStore } from './runtimeStore';
 import { useUiStore } from './uiStore';
 
-export const emptyAgentLibrary = (): AgentLibrary => ({ agents: [], routines: [], runs: [], states: [], diagnostics: [], revisions: {}, nextDue: {} });
+export const emptyAgentLibrary = (): AgentLibrary => ({ agents: [], routines: [], runs: [], states: [], diagnostics: [], revisions: {}, nextDue: {}, watches: [], watchStates: [] });
 export const agentDraft = ({ name, description, instructions, skillRefs, defaults, enabled }: AgentDefinition): AgentDraft => ({ name, description, instructions, skillRefs, defaults, enabled });
 export const routineDraft = ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify }: RoutineDefinition): RoutineDraft => ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify });
+export const watchDraft = ({ name, agentId, url, condition, text, price, intervalMinutes, enabled }: WatchDefinition): WatchDraft => ({ name, agentId, url, condition, text, price, intervalMinutes, enabled });
 export function agentError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   try { const parsed = JSON.parse(text) as { message?: unknown }; if (typeof parsed.message === 'string') return parsed.message; } catch { /* Plain errors need no decoding. */ }

@@ -3622,7 +3622,7 @@ export class PiRuntimeService {
   async deliverAgentMessage(sessionPath: string, sessionId: string, message: AgentMessage): Promise<void> {
     if (this.coldSession?.snapshot.summary.id === sessionId) await this.materializeColdSession();
     const slot = this.findLiveSlot(sessionId) ?? await this.createAdditionalSlot(sessionPath, sessionId);
-    await this.sendChildGeneratedMessage(slot, slot.runtime.session, { customType: message.customType, content: [{ type: 'text', text: message.text }], display: message.customType === 'fate-agent-routine', details: message.details }, 'followUp', true);
+    await this.sendChildGeneratedMessage(slot, slot.runtime.session, { customType: message.customType, content: [{ type: 'text', text: message.text }], display: message.customType !== 'fate-agent-run-result', details: message.details }, 'followUp', true);
     if (slot.disposed) return;
     slot.modifiedAt = new Date().toISOString();
     this.setSessionAttention(slot, 'running');

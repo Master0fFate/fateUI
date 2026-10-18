@@ -15,6 +15,23 @@ The dot next to an Agent shows a run in progress, a new result, or a failed run.
 - **Its own folder.** Each Agent's conversation runs in a folder Fate UI owns, under the data directory at `agents/v1/homes/<agent id>`. Files, terminal and Memory Learning follow it like a project. Memory Learning's **PROJECT** store for that folder is the Agent's own memory; the **GLOBAL** profile applies as usual.
 - **Your projects, through runs.** A run is an ordinary conversation in a trusted project, started with the Agent's instructions. It can use Agent Teams, GoalMax (the Agent picks `goal` mode for multi-step outcomes) and that project's Memory Learning. You can open it, read it and steer it like any session. A project switch or a session switch does not stop it.
 - **Routines** send a message into the Agent's conversation on an interval, for example “every morning, check the open pull requests”. Add them on the Agent's card in Settings. They run only while Fate UI is open; missed intervals are skipped, not replayed.
+- **Watches** check a public web page on an interval without waking the Agent. Add them on the Agent's card in Settings with **+ Watch**: a page address, a condition and how often to check. Only a hit posts a message into the Agent's conversation, which starts a turn, and shows a notification.
+
+## Watches
+
+| Condition | Hits when |
+| --- | --- |
+| Any change | The page's visible text differs from the last check. The first check only records the page. Edits that only change relative times such as “5 minutes ago” are ignored. The message lists up to 20 added and 20 removed lines. |
+| Text appears | The text is on the page and was not at the last check, including the first check. Case and spacing are ignored. |
+| Text disappears | The text is not on the page and was there at the last check, including the first check. |
+| Price below / Price above | The first US dollar amount on the page (`$1,299.99`, `US$ 20`, `20 USD`) is strictly below or above the threshold and was not at the last check. A page without one counts as a failed check. |
+
+- A watch fires once when its condition starts to hold and again only after it stopped holding. The last page fingerprint, text match and price are kept on disk, so a restart does not fire again.
+- A check reads the page itself, not a browser: pages that build their text with JavaScript have no readable text and fail. The **Watch on** line shows the next check, the last price and the last hit.
+- A failed check retries after 2, 4, 8 and 16 minutes. The fifth failure in a row pauses the watch with a notification, and the Agent shows **Watch paused** in the sidebar. **Resume** on the watch checks again right away. Saving a watch also checks right away; it keeps the last result unless the page, condition, text or price changed.
+- Checks run only while Fate UI is open. Missed checks are skipped, not replayed, the same as Routines.
+- Only public `http` and `https` pages on ports 80 and 443 are fetched. Private, loopback, link-local and cloud metadata addresses are refused, also after DNS resolution and redirects. A page may redirect five times, answer within 20 seconds and be at most 2 MB.
+- Each hit is listed with the Agent's runs; **Open run** opens the Agent's conversation.
 
 ## Permissions and limits
 
