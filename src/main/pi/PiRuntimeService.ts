@@ -709,7 +709,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
           getExamplesPath(),
           ...services.resourceLoader.getSkills().skills.map((skill) => skill.baseDir),
         ],
-        { ...(getImageGenerationSettings ? { getImageGenerationSettings } : {}), ...(paths ? { imageAgentDir: paths.piAgentDir } : {}), ...(attestationSink ? { attestations: attestationSink } : {}) },
+        { searchTools: true, ...(getImageGenerationSettings ? { getImageGenerationSettings } : {}), ...(paths ? { imageAgentDir: paths.piAgentDir } : {}), ...(attestationSink ? { attestations: attestationSink } : {}) },
       );
       const ownedTools = customTools.filter((tool) => preset?.runId ? !tool.name.startsWith('browser_') && !AGENT_HOME_TOOL_NAMES.has(tool.name) : preset || !AGENT_HOME_TOOL_NAMES.has(tool.name));
       // A corrupt optional MCP config must not prevent normal project sessions.

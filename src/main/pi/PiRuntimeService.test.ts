@@ -1319,9 +1319,9 @@ describe('PiRuntimeService', () => {
   });
 
   it('gates controlled tools without disabling active extension capabilities', () => {
-    expect(activeToolsForPermission(['read', 'bash', 'edit', 'write', 'generate_image', 'imagegen'], 'edit')).toEqual(['read', 'edit', 'write', 'generate_image', 'imagegen']);
-    expect(activeToolsForPermission(['read', 'edit', 'write', 'generate_image', 'imagegen'], 'read-only')).toEqual(['read', 'generate_image', 'imagegen']);
-    expect(activeToolsForPermission(['read', 'generate_image', 'imagegen'], 'full-access')).toEqual(['read', 'generate_image', 'imagegen', 'write', 'edit', 'bash']);
+    expect(activeToolsForPermission(['read', 'bash', 'edit', 'write', 'generate_image', 'imagegen'], 'edit')).toEqual(['read', 'edit', 'write', 'generate_image', 'imagegen', 'grep', 'find', 'ls']);
+    expect(activeToolsForPermission(['read', 'edit', 'write', 'generate_image', 'imagegen'], 'read-only')).toEqual(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls']);
+    expect(activeToolsForPermission(['read', 'generate_image', 'imagegen'], 'full-access')).toEqual(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'write', 'edit', 'bash']);
   });
 
   it('fails closed if an extension replaces a Fate-owned orchestration tool', () => {
@@ -2812,15 +2812,15 @@ describe('PiRuntimeService', () => {
 
     const readOnly = await service.setPermissionLevel('read-only');
     expect(readOnly.permissionLevel).toBe('read-only');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen']);
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls']);
 
     const fullAccess = await service.setPermissionLevel('full-access');
     expect(fullAccess.permissionLevel).toBe('full-access');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'write', 'edit', 'bash']);
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'write', 'edit', 'bash']);
 
     const editable = await service.setPermissionLevel('edit');
     expect(editable.permissionLevel).toBe('edit');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'write', 'edit']);
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'write', 'edit']);
     await service.dispose();
   });
 

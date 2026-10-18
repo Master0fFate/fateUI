@@ -26,11 +26,11 @@ import {
 const MAX_PI_READ_BYTES = 8 * 1024 * 1024;
 
 const toolsByPermissionLevel: Record<PermissionLevel, readonly string[]> = {
-  'read-only': ['read', 'generate_image'],
-  edit: ['read', 'write', 'edit', 'generate_image'],
-  'full-access': ['read', 'write', 'edit', 'bash', 'generate_image'],
+  'read-only': ['read', 'grep', 'find', 'ls', 'generate_image'],
+  edit: ['read', 'grep', 'find', 'ls', 'write', 'edit', 'generate_image'],
+  'full-access': ['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash', 'generate_image'],
 };
-const permissionControlledTools = new Set(['read', 'write', 'edit', 'bash', 'generate_image']);
+const permissionControlledTools = new Set(['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash', 'generate_image']);
 
 /** Minimum child permission that grants each ordinary tool. */
 const toolMinimumPermission: Record<string, PermissionLevel> = {

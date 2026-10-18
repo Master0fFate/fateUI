@@ -56,8 +56,7 @@ function effectivePermission(requested: PermissionLevel, caller: PermissionLevel
 function modelKey(model: Pick<ParentModel, 'provider' | 'id'>): string { return `${model.provider}\0${model.id}`; }
 
 function childToolsForPermission(permission: PermissionLevel): ChildToolName[] {
-  const base = [toolNamesForPermission(permission)[0]!, 'grep', 'find', 'ls', ...toolNamesForPermission(permission).slice(1)];
-  return base.filter((name): name is ChildToolName => (childToolNames as readonly string[]).includes(name));
+  return toolNamesForPermission(permission).filter((name): name is ChildToolName => (childToolNames as readonly string[]).includes(name));
 }
 
 function operationKey(callerNodeId: string, operationId: string): string { return `${callerNodeId}\0${operationId}`; }

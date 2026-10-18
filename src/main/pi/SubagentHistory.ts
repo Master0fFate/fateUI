@@ -51,8 +51,7 @@ function delegationPermission(parent: SubagentParentContext): PermissionLevel {
 }
 
 function childToolNamesForPermission(permissionLevel: PermissionLevel): ChildToolName[] {
-  const base = [toolNamesForPermission(permissionLevel)[0]!, 'grep', 'find', 'ls', ...toolNamesForPermission(permissionLevel).slice(1)];
-  return base.filter((name): name is ChildToolName => (childToolNames as readonly string[]).includes(name));
+  return toolNamesForPermission(permissionLevel).filter((name): name is ChildToolName => (childToolNames as readonly string[]).includes(name));
 }
 
 function sourceForAgent(agent: string | undefined): SubagentAgentSource {
