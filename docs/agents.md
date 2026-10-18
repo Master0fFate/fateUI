@@ -23,6 +23,7 @@ The dot next to an Agent shows a run in progress, a new result, or a failed run.
 - **Full access** adds shell commands and MCP servers, for that Agent only. Choose it per Agent; existing Agents keep their permission.
 - Agent Teams children in a run are capped at the run's permission.
 - The browser is available only in the Agent's own conversation while it is the selected conversation. Runs do not use the browser.
+- The Agent's conversation and its runs have `web_search` and `web_fetch` at every permission level, and the Agent uses them before the browser for simple lookups. Search queries go to Parallel; **Settings → Agent → Web search** turns search off. See [Web search and fetch](features.md#web-search-and-fetch).
 - User-installed Pi extensions and project-local code are not loaded into Agent conversations or runs.
 - A run stops after 30 minutes. At most four runs are active at once, and a project keeps at most four live conversations; when they are full, the run fails instead of closing your work. Interrupted runs are not replayed.
 - Editing an Agent applies to its conversation the next time it starts; an idle conversation restarts right away.

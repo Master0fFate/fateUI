@@ -1441,6 +1441,7 @@ export const appSettingsSchema = z.object({
   compactSessions: z.boolean().default(false),
   advancedPromptImprovement: z.boolean().default(false),
   crashTelemetryEnabled: z.boolean().default(false),
+  webSearchEnabled: z.boolean().default(true),
   skinId: skinIdSchema.default('default'),
   skinAppearanceOverrides: skinAppearanceOverridesSchema.optional(),
   themeId: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/).default('catppuccin-mocha'),

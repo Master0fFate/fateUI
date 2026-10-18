@@ -279,7 +279,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
     }) : undefined;
     const dependencies: MultiProjectPiRuntimeDeps = {
       adapter: options.adapter ?? createPiSdkAdapter(paths, { codemode: () => settings.get().piCodemode, dailyBudgetUsd: () => settings.get().dailyBudgetUsd,
-        currentAgentPreset: async (preset) => savedAgents ? savedAgents.currentPreset(preset) : preset }),
+        currentAgentPreset: async (preset) => savedAgents ? savedAgents.currentPreset(preset) : preset, webSearch: () => settings.get().webSearchEnabled }),
       ...(nativeWorkflowSchedulerFactory ? { nativeWorkflowSchedulerFactory } : {}),
       requireFreshExecutionIntent: explicitWorkOnly,
       paths,

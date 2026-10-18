@@ -110,6 +110,7 @@ import { RecoveredExecutionPolicy } from './RecoveredExecutionPolicy';
 import { AgentWorkflowCoordinator } from './AgentWorkflowCoordinator';
 import { createSdkChildSession, installToolExecutionAdmission, finalAssistant, type SubagentChildSessionFactory } from './SubagentSessionFactory';
 import type { ImageGenerationSettingsResolver } from './PiImageTool';
+import { createWebTools } from './web/WebTools';
 import { defaultImageGenerationSettings } from '../../shared/imageGeneration';
 import { AgentTeamCoordinator } from './multi-agent/AgentTeamCoordinator';
 import { agentTeamStorageRoots, reconcileAgentTeamHistory } from './multi-agent/AgentTeamHistory';
@@ -503,11 +504,12 @@ const DEFERRED_TOOLS = new Set<string>([
   'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp',
 ]);
 
-function agentHomePrompt(homePath: string, permission: PermissionLevel): string {
+function agentHomePrompt(homePath: string, permission: PermissionLevel, webSearch: boolean): string {
   return [
     `This chat runs in your own folder, ${homePath}, which holds your notes and scratch files.${permission === 'full-access' ? '' : ' Your file tools reach only that folder.'}`,
     'For anything in the user\'s projects, call run_in_project with the project folder name or absolute path and a self-contained request, then tell the user the run started.',
     'The run\'s result arrives in this chat as a message. Report it to the user in your own words.',
+    `For quick lookups, ${webSearch ? 'use web_search to find pages and web_fetch to read one' : 'use web_fetch to read a public URL'} instead of the browser. Open the browser only for pages that need clicks or sign-in.`,
   ].join('\n');
 }
 
@@ -642,6 +644,7 @@ export interface PiSdkAdapterOptions {
   codemode?: () => boolean;
   dailyBudgetUsd?: () => number | null;
   currentAgentPreset?: (preset: SavedAgentSession) => Promise<SavedAgentSession>;
+  webSearch?: () => boolean;
 }
 
 export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptions = {}): PiSdkAdapter => ({
@@ -666,11 +669,12 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         settingsManager,
       }).resolve();
       const userExtensionPaths = preset ? [] : selectUserExtensionPaths(resolvedResources.extensions);
+      const webTools = createWebTools(() => options.webSearch?.() !== false);
       const appendSystemPrompt = [
         ...await boundedContextPrompts(agentDir, 'Global'),
         ...await boundedContextPrompts(effectiveCwd, 'Project'),
         ...(preset ? [`Saved Agent ${preset.name}, revision ${preset.revision}.\n${preset.instructions}`] : []),
-        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission)] : []),
+        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission, webTools.some((tool) => tool.name === 'web_search'))] : []),
       ];
       // Every root has a live tool-call ceiling, including retained tool handles
       // offered before a reduction. Slot binding grants authority after restore.
@@ -720,7 +724,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         : null;
       const pullRequestTools = createPullRequestTools(effectiveCwd, () => toolAccess.fullAccess);
       const branchTools = createBranchTools(new GitService(await FilesystemService.forRoot(effectiveCwd), undefined, undefined, hostCheckoutOwnership()), () => toolAccess.permissionLevel);
-      const allTools = [...confinedTools, ...ownedTools, ...fate.lspTools, ...pullRequestTools, ...branchTools, ...(mcpTool ? [mcpTool] : [])];
+      const allTools = [...confinedTools, ...ownedTools, ...fate.lspTools, ...pullRequestTools, ...branchTools, ...webTools, ...(mcpTool ? [mcpTool] : [])];
       if (!preset) for (const tool of allTools) if (DEFERRED_TOOLS.has(tool.name)) tool.exposure = 'deferred';
       const savedContext = preset ? sessionManager.buildSessionContext() : null;
       const modelChoice = savedContext?.model ? { provider: savedContext.model.provider, id: savedContext.model.modelId } : preset?.defaults.model;
@@ -741,7 +745,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
       });
       if (mcpTool) installToolExecutionAdmission(mcpTool, () => toolAccess.assertExecutionAdmission?.());
-      for (const tool of [...pullRequestTools, ...branchTools]) installToolExecutionAdmission(tool, () => toolAccess.assertExecutionAdmission?.());
+      for (const tool of [...pullRequestTools, ...branchTools, ...webTools]) installToolExecutionAdmission(tool, () => toolAccess.assertExecutionAdmission?.());
       toolAccessBySession.set(created.session, toolAccess);
       ownedCustomToolsBySession.set(created.session, [...ownedTools, ...(mcpTool ? [mcpTool] : [])]);
       if (preset) bindAgentSessionPreset(created.session, preset, allTools.map((tool) => tool.name));
@@ -753,7 +757,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         created.session.getActiveToolNames().filter((name) => !GOALMAX_TOOL_NAME_SET.has(name)),
         agentSessionPermission(created.session, 'edit'),
       )));
-      if (!preset) created.session.setActiveToolsByName([...created.session.getActiveToolNames(), ...(codemode ? ['codemode'] : []), 'tool_search']);
+      if (!preset) created.session.setActiveToolsByName([...created.session.getActiveToolNames(), ...(codemode ? ['codemode'] : []), 'tool_search', ...webTools.map((tool) => tool.name)]);
       return {
         ...created,
         services,

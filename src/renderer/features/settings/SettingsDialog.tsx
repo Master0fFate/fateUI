@@ -72,7 +72,7 @@ import { formatReleaseDisplayVersion } from '../../../shared/releaseMetadata';
 
 const fallback: AppSettings = {
   appearance: 'dark', defaultModel: null, disabledModels: [], thinkingLevel: 'medium', agentTeamMode: 'v2', agentWorkspace: defaultAgentWorkspacePolicy, confirmRiskyCommands: true, piCodemode: false, dailyBudgetUsd: null,
-  terminalShell: null, reduceMotion: false, performanceMode: false, holyShitMode: false, musicPlayerEnabled: false, sendMessageWithModifier: false, compactMode: false, compactSessions: false, advancedPromptImprovement: false, crashTelemetryEnabled: false, skinId: 'default', themeId: 'midnight',
+  terminalShell: null, reduceMotion: false, performanceMode: false, holyShitMode: false, musicPlayerEnabled: false, sendMessageWithModifier: false, compactMode: false, compactSessions: false, advancedPromptImprovement: false, crashTelemetryEnabled: false, webSearchEnabled: true, skinId: 'default', themeId: 'midnight',
   interfaceFont: 'noto-sans', codeFont: 'jetbrains-mono',
   imageGeneration: { provider: 'auto', model: null, customProvider: null },
   speech: defaultSpeechSettings,
@@ -782,6 +782,11 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   <label className="settings-toggle">
                     <div><strong>Codemode</strong><small>Lets the model script several tools in one call. Applies to new sessions.</small></div>
                     <input type="checkbox" aria-label="Enable Pi codemode" checked={settings.piCodemode} onChange={(event) => setSettings({ ...settings, piCodemode: event.target.checked })} />
+                    <span aria-hidden="true" />
+                  </label>
+                  <label className="settings-toggle">
+                    <div><strong>Web search</strong><small>Sends search queries to Parallel (search.parallel.ai). Turning it on applies to new sessions.</small></div>
+                    <input type="checkbox" aria-label="Enable web search" checked={settings.webSearchEnabled} onChange={(event) => setSettings({ ...settings, webSearchEnabled: event.target.checked })} />
                     <span aria-hidden="true" />
                   </label>
                   <label className="settings-input-row"><span>Daily budget (USD)</span><input aria-label="Daily budget in USD" inputMode="decimal" value={settings.dailyBudgetUsd ?? ''} placeholder="No limit" onChange={(event) => { const value = Number(event.target.value); setSettings({ ...settings, dailyBudgetUsd: event.target.value.trim() === '' || !Number.isFinite(value) || value < 0 ? null : value }); }} /></label>

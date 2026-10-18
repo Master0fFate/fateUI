@@ -56,6 +56,15 @@ Every assistant turn records provider-reported tokens and cost into `usage/v1/<p
 
 Root sessions load the Pi SDK's `tool_search` extension. Rarely used tools (agent orchestration, tasks, Monitor, session messages, image generation, branch, push and pull request tools, and `fate_mcp`) stay deferred until the model looks them up. **Settings → Agent → Codemode** also loads the `codemode` extension into new root sessions, so the model can run several tools from one script. Codemode is off by default.
 
+## Web search and fetch
+
+Root sessions, Agent conversations and Agent runs have two network tools at every permission level.
+
+- `web_search` sends an objective and up to five queries to Parallel's free Search MCP at `search.parallel.ai` and returns up to 10 results as title, URL and excerpt, at most 16,000 characters. Searches time out after 45 seconds. Use of the service is subject to Parallel's customer terms and privacy policy. **Settings → Agent → Web search** turns it off: open sessions stop searching once the setting is saved, and turning it back on applies to new sessions.
+- `web_fetch` reads one public http or https URL on port 80 or 443 and returns the page as markdown, or as text for plain text, JSON and XML. It returns 20,000 characters per call; `offset` continues a longer page. It refuses private, loopback, link-local, multicast and cloud-metadata addresses, checks every DNS answer and every redirect target, follows at most 5 redirects, stops after 20 seconds and reads at most 2 MiB. Images, PDFs and other binary types are refused. Fetching never goes through Parallel.
+
+Agent Teams children do not get these tools. Use the embedded browser for pages that need scripts, clicks or sign-in.
+
 ## Hooks and Code Intelligence
 
 **Hooks** (Settings → Hooks) run your own shell commands on the agent tool lifecycle: before a tool call, after a tool result, when the agent stops, and at session start. They apply to the root agent and every Agent Team member. See [Hooks](hooks.md).
