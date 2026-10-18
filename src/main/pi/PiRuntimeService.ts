@@ -503,10 +503,10 @@ const DEFERRED_TOOLS = new Set<string>([
   'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp',
 ]);
 
-function agentHomePrompt(homePath: string): string {
+function agentHomePrompt(homePath: string, permission: PermissionLevel): string {
   return [
-    `This chat runs in your own folder, ${homePath}. Its tools reach only that folder; files anywhere else are out of reach here.`,
-    'For anything in the user\'s folders, call run_in_project with the project folder name or absolute path and a self-contained request, then tell the user the run started.',
+    `This chat runs in your own folder, ${homePath}, which holds your notes and scratch files.${permission === 'full-access' ? '' : ' Your file tools reach only that folder.'}`,
+    'For anything in the user\'s projects, call run_in_project with the project folder name or absolute path and a self-contained request, then tell the user the run started.',
     'The run\'s result arrives in this chat as a message. Report it to the user in your own words.',
   ].join('\n');
 }
@@ -670,7 +670,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ...await boundedContextPrompts(agentDir, 'Global'),
         ...await boundedContextPrompts(effectiveCwd, 'Project'),
         ...(preset ? [`Saved Agent ${preset.name}, revision ${preset.revision}.\n${preset.instructions}`] : []),
-        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd)] : []),
+        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission)] : []),
       ];
       // Every root has a live tool-call ceiling, including retained tool handles
       // offered before a reduction. Slot binding grants authority after restore.
