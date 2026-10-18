@@ -813,7 +813,7 @@ export const subagentRunSchema = z.object({
   agentName: z.string().min(1).max(80),
   agentSource: subagentAgentSourceSchema,
   permissionLevel: permissionLevelSchema,
-  enabledTools: z.array(z.enum(['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash', 'generate_image'])).max(8),
+  enabledTools: z.array(z.enum(['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image'])).max(11),
   skills: z.array(z.string().min(1).max(64)).default([]),
   skillMode: subagentSkillModeSchema.default('all'),
   preloadedSkills: z.array(z.string().min(1).max(64)).default([]),

@@ -28,9 +28,9 @@ Every project — opened from the terminal or picked by hand — gets the same *
 
 New trusted Pi sessions start in project-confined **Edit files** mode. Existing sessions restore valid host-owned grants within the current host limit. The active level controls Fate's governed tools:
 
-- Every level can read, search and list the active project with `read`, `grep`, `find` and `ls`.
+- Every level can read, search and list the active project with `read`, `grep`, `find` and `ls`, and read PDFs with `pdf_read`.
 - **Read only** removes project and host mutation tools. If image generation is enabled, `generate_image` can still make a billable provider request and save its output under `~/.pi/agent/generated-images/`; it never writes into the project.
-- **Edit files** confines Pi file operations to the active project.
+- **Edit files** adds `write`, `edit`, `pdf_fill` and `pdf_create`, and confines Pi file operations to the active project.
 - **Full access** is intentionally unsandboxed and requires explicit confirmation. Pi can then run shell commands and access host paths with your user account's permissions.
 
 Permissions belong to the host's project/session record, not to permission claims in conversation text. A missing record uses Edit files. Corrupt or unreadable metadata blocks execution and automatic continuation. Permission writes retain `session-permissions.intent.json` until the grant transaction finishes. A pending, unreadable, or malformed intent blocks fresh stores too; failed storage does not become a Full-access grant.

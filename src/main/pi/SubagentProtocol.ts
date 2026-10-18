@@ -19,7 +19,7 @@ export const DEFAULT_MAILBOX_TTL_SECONDS = 5 * 60;
 
 export const permissions = ['read-only', 'edit', 'full-access'] as const;
 export const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-export const childToolNames = ['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash', 'generate_image'] as const;
+export const childToolNames = ['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image'] as const;
 export const skillModes = ['all', 'selected', 'none'] as const;
 export const notificationModes = ['never', 'next-turn', 'immediate'] as const;
 export const childTerminalStatuses = new Set(['completed', 'error', 'cancelled', 'timed-out', 'budget-exceeded', 'skipped', 'interrupted'] as const);

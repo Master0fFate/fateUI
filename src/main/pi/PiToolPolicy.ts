@@ -16,6 +16,7 @@ import { BASH_TIMEOUT_GUIDELINE, BASH_TIMEOUT_HINT, createBoundedBashOperations,
 import { rasterImageMimeType } from '../files/FilesystemService';
 import { PiDesktopError } from './errors';
 import { createConfiguredImageGenerator, createGenerateImageTool, createGeneratedImageStore, type ImageGenerationSettingsResolver } from './PiImageTool';
+import { createPdfTools, MAX_PDF_BYTES } from './PiPdfTools';
 import {
   MAX_PRE_HASH_BYTES,
   type AttestationContext,
@@ -26,11 +27,11 @@ import {
 const MAX_PI_READ_BYTES = 8 * 1024 * 1024;
 
 const toolsByPermissionLevel: Record<PermissionLevel, readonly string[]> = {
-  'read-only': ['read', 'grep', 'find', 'ls', 'generate_image'],
-  edit: ['read', 'grep', 'find', 'ls', 'write', 'edit', 'generate_image'],
-  'full-access': ['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash', 'generate_image'],
+  'read-only': ['read', 'grep', 'find', 'ls', 'pdf_read', 'generate_image'],
+  edit: ['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'generate_image'],
+  'full-access': ['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image'],
 };
-const permissionControlledTools = new Set(['read', 'grep', 'find', 'ls', 'write', 'edit', 'bash', 'generate_image']);
+const permissionControlledTools = new Set(['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image']);
 
 /** Minimum child permission that grants each ordinary tool. */
 const toolMinimumPermission: Record<string, PermissionLevel> = {
@@ -38,9 +39,12 @@ const toolMinimumPermission: Record<string, PermissionLevel> = {
   grep: 'read-only',
   find: 'read-only',
   ls: 'read-only',
+  pdf_read: 'read-only',
   generate_image: 'read-only',
   write: 'edit',
   edit: 'edit',
+  pdf_fill: 'edit',
+  pdf_create: 'edit',
   bash: 'full-access',
 };
 
@@ -207,7 +211,7 @@ export interface SecureWriteDeps {
  * nothing. Full-access writes outside the active project are written but not
  * attested (a project-relative path cannot truthfully represent them).
  */
-export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string, content: string, operation: 'write' | 'edit') => Promise<void> {
+export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string, content: string | Uint8Array, operation: 'write' | 'edit') => Promise<void> {
   const { policy, access, canonicalCwd } = deps;
   const attestations = deps.attestations;
   const maxPreHashBytes = deps.maxPreHashBytes ?? MAX_PRE_HASH_BYTES;
@@ -215,7 +219,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
   // Emits an attestation only for project-confined paths. Full-access writes
   // outside the active project are skipped: a project-relative path cannot
   // truthfully represent them.
-  const attest = (operation: 'write' | 'edit', target: string, content: string, preHash: string | null, preState: 'missing' | 'hashed' | 'oversize', priorContent?: Buffer): void => {
+  const attest = (operation: 'write' | 'edit', target: string, content: string | Uint8Array, preHash: string | null, preState: 'missing' | 'hashed' | 'oversize', priorContent?: Buffer): void => {
     if (!attestations) return;
     const context: AttestationContext | null = attestations.resolveContext();
     if (!context) return;
@@ -263,7 +267,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
 
   // Original controlled write with no attestation: O_WRONLY, no prior-state read.
   // Preserved exactly so write-only project files do not regress when no sink is wired.
-  const writeWithoutAttestation = async (target: string, content: string, assertAuthority: () => void, admitWrite: () => void): Promise<void> => {
+  const writeWithoutAttestation = async (target: string, content: string | Uint8Array, assertAuthority: () => void, admitWrite: () => void): Promise<void> => {
     let create = false;
     try {
       await fs.lstat(target);
@@ -305,7 +309,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
   // file the old flow wrote plainly. Project-confined mode keeps refusing those.
   const writeWithAttestation = async (args: {
     target: string;
-    content: string;
+    content: string | Uint8Array;
     operation: 'write' | 'edit';
     attestTarget: string;
     enforceContainment: boolean;
@@ -374,7 +378,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
         await handle.truncate(0);
         // Seek-safe positioned write loop: do not assume one handle.write writes
         // all bytes, and do not depend on the cursor advanced by readFile.
-        await writeAllPositioned(handle, Buffer.from(content, 'utf8'), assertAuthority);
+        await writeAllPositioned(handle, typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content.buffer, content.byteOffset, content.byteLength), assertAuthority);
         // Confirm the path still resolves to the inode we wrote; otherwise skip the row.
         const afterStat = await fs.stat(target).catch(() => null);
         if (afterStat && afterStat.dev === stat.dev && afterStat.ino === stat.ino) {
@@ -387,7 +391,7 @@ export function createSecureWriteFile(deps: SecureWriteDeps): (filePath: string,
     if (fallbackInstead) await fallback();
   };
 
-  return async (filePath: string, content: string, operation: 'write' | 'edit'): Promise<void> => {
+  return async (filePath: string, content: string | Uint8Array, operation: 'write' | 'edit'): Promise<void> => {
     const startingPermission = access.permissionLevel;
     let admitted = false;
     const assertAuthority = () => {
@@ -442,17 +446,17 @@ export async function createProjectConfinedTools(
   const canonicalCwd = path.normalize(await fs.realpath(cwd));
   const { attestations, maxPreHashBytes = MAX_PRE_HASH_BYTES } = options;
   const policy = await ProjectPathPolicy.create(canonicalCwd, access, readableRoots);
-  const withReadable = async (filePath: string, read: boolean, maxBytes?: number): Promise<Buffer | undefined> => {
+  const withReadable = async (filePath: string, read: boolean, maxBytes?: number, maxFileBytes = MAX_PI_READ_BYTES): Promise<Buffer | undefined> => {
     access.assertExecutionAdmission?.();
     const target = await policy.readable(filePath);
     access.assertExecutionAdmission?.();
     const handle = await fs.open(target, 'r');
     try {
       const stat = await handle.stat();
-      if (!stat.isFile() || stat.size > MAX_PI_READ_BYTES) {
+      if (!stat.isFile() || stat.size > maxFileBytes) {
         throw new PiDesktopError({
           code: 'INVALID_PROJECT',
-          message: `Pi reads are limited to regular project files smaller than ${MAX_PI_READ_BYTES / 1024 / 1024} MiB.`,
+          message: `Pi reads are limited to regular project files smaller than ${maxFileBytes / 1024 / 1024} MiB.`,
           retryable: false,
         });
       }
@@ -468,7 +472,13 @@ export async function createProjectConfinedTools(
     }
   };
   const readOperations = {
-    readFile: async (filePath: string) => (await withReadable(filePath, true))!,
+    readFile: async (filePath: string) => {
+      const content = (await withReadable(filePath, true))!;
+      if (content.toString('latin1', 0, 5) === '%PDF-') {
+        throw new PiDesktopError({ code: 'INVALID_REQUEST', message: `${filePath} is a PDF. Use pdf_read for its text, pages and form fields.`, retryable: false });
+      }
+      return content;
+    },
     access: async (filePath: string) => { await withReadable(filePath, false); },
     detectImageMimeType: async (filePath: string) => rasterImageMimeType((await withReadable(filePath, true, 4_100))!),
   };
@@ -561,6 +571,17 @@ export async function createProjectConfinedTools(
     createWriteToolDefinition(canonicalCwd, { operations: writeOperations }),
     createEditToolDefinition(canonicalCwd, { operations: { ...readOperations, writeFile: (filePath: string, content: string) => secureWriteFile(filePath, content, 'edit') } }),
     createGenerateImageTool(createConfiguredImageGenerator(options.getImageGenerationSettings, guardedImageFetch), options.imageAgentDir ? createGeneratedImageStore(options.imageAgentDir) : undefined),
+    ...createPdfTools({
+      read: async (filePath) => (await withReadable(filePath, true, undefined, MAX_PDF_BYTES))!,
+      sameFile: async (source, output) => {
+        const canonicalSource = await policy.readable(source);
+        return policy.readable(output).then((canonicalOutput) => canonicalOutput === canonicalSource, () => false);
+      },
+      write: async (filePath, content) => {
+        await writeOperations.mkdir(path.dirname(path.resolve(canonicalCwd, filePath)));
+        await secureWriteFile(filePath, content, 'write');
+      },
+    }),
     ...searchTools,
   ];
   for (const tool of tools) {

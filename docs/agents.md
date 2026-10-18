@@ -14,6 +14,7 @@ The dot next to an Agent shows a run in progress, a new result, or a failed run.
 
 - **Its own folder.** Each Agent's conversation runs in a folder Fate UI owns, under the data directory at `agents/v1/homes/<agent id>`. Files, terminal and Memory Learning follow it like a project. Memory Learning's **PROJECT** store for that folder is the Agent's own memory; the **GLOBAL** profile applies as usual.
 - **Your projects, through runs.** A run is an ordinary conversation in a trusted project, started with the Agent's instructions. It can use Agent Teams, GoalMax (the Agent picks `goal` mode for multi-step outcomes) and that project's Memory Learning. You can open it, read it and steer it like any session. A project switch or a session switch does not stop it.
+- **PDFs.** In its folder and in runs, an Agent reads PDF text and form fields with `pdf_read` at any permission. With Edit files or Full access it fills forms into a new copy with `pdf_fill` and renders Markdown to PDF with `pdf_create`. See [PDFs](features.md#pdfs).
 - **Routines** send a message into the Agent's conversation on an interval, for example “every morning, check the open pull requests”. Add them on the Agent's card in Settings. They run only while Fate UI is open; missed intervals are skipped, not replayed.
 
 ## Permissions and limits

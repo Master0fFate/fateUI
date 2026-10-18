@@ -18,8 +18,8 @@ export function projectPathHash(projectPath: string): string {
   return createHash('sha256').update(platformProject).digest('hex');
 }
 
-export function sha256Hex(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex');
+export function sha256Hex(content: string | Uint8Array): string {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 /**
@@ -53,7 +53,7 @@ export interface DirectWriteFacts {
   projectRoot: string;
   targetPath: string;
   /** Content actually written; hashed for postHash and never persisted. */
-  content: string;
+  content: string | Uint8Array;
   preHash: string | null;
   preState: 'missing' | 'hashed' | 'oversize';
   /** Prior bytes when hashed; stored as a checkpoint blob, never in the ledger. */

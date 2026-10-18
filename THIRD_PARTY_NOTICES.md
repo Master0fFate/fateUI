@@ -65,3 +65,37 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## PDF tools
+
+The `pdf_read`, `pdf_fill` and `pdf_create` tools bundle these packages into the main-process and server builds, so their license files do not ship separately. Exact versions are pinned in `package.json` and `pnpm-lock.yaml`.
+
+- `pdf-lib` 1.17.1, MIT. Copyright (c) 2019 Andrew Dillon.
+- `@pdf-lib/standard-fonts` 1.0.0, MIT. Copyright (c) 2018 Andrew Dillon.
+- `@pdf-lib/upng` 1.0.1, MIT. Copyright (c) 2017 Photopea.
+- `pako` 1.0.11, MIT AND Zlib. Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn.
+- `tslib` 1.14.1, 0BSD. Copyright (c) Microsoft Corporation.
+- `unpdf` 1.8.1, MIT. Copyright (c) 2023-PRESENT Johann Schopplich.
+- PDF.js 6.1.200, Apache-2.0. Copyright 2012 Mozilla Foundation. It is the unmodified serverless build published inside `unpdf` 1.8.1. The complete Apache License 2.0 text is in [LICENSE](LICENSE).
+
+Each MIT package above is distributed with its copyright line above and these terms:
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
