@@ -927,6 +927,7 @@ body.is-resizing-composer { cursor: ns-resize; user-select: none; }
 .permission-options > button:hover:not(:disabled) { color: var(--theme-text); background: var(--theme-raised-hover); }
 .permission-options > button[data-active="true"] { color: var(--theme-text); background: var(--theme-border); }
 .permission-options > button:disabled { opacity: .45; cursor: wait; }
+.permission-options > button[data-locked="true"] { cursor: not-allowed; }
 .permission-options > button > svg { color: var(--theme-subtle); }
 .permission-options strong { color: inherit; font-size: 9.5px; font-weight: 600; }
 .permission-options .permission-option--danger > svg, .permission-options .permission-option--danger strong { color: var(--theme-warning); }

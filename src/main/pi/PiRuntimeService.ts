@@ -507,12 +507,15 @@ const DEFERRED_TOOLS = new Set<string>([
   'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp', 'remember',
 ]);
 
-function agentHomePrompt(homePath: string, permission: PermissionLevel, webSearch: boolean): string {
+function agentHomePrompt(homePath: string, permission: PermissionLevel, webSearch: boolean, google: boolean): string {
   return [
     `This chat runs in your own folder, ${homePath}, which holds your notes and scratch files.${permission === 'full-access' ? '' : ' Your file tools reach only that folder.'}`,
     'For anything in the user\'s projects, call run_in_project with the project folder name or absolute path and a self-contained request, then tell the user the run started.',
     'The run\'s result arrives in this chat as a message. Report it to the user in your own words.',
     `For quick lookups, ${webSearch ? 'use web_search to find pages and web_fetch to read one' : 'use web_fetch to read a public URL'} instead of the browser. Open the browser only for pages that need clicks or sign-in.`,
+    ...(permission === 'full-access'
+      ? ['Gmail and Google Calendar stay off while you have Full access, because mail from other people could steer a shell. If the user wants them, they set your permission to Edit files and turn on Google on your card in Settings → Agent → Saved agents.']
+      : google ? [] : ['Gmail and Google Calendar are built into Fate UI but off for you. If the user asks for mail or calendar, walk them through it: in Google Cloud Console they create a project, enable the Gmail API and the Google Calendar API, set the OAuth consent screen to External with their address as a test user and publish it to In production, and create an OAuth client of type Desktop app. In Settings → Agent → Google they paste the client ID and secret, select Save client, then Connect, and select Allow sending if you should send mail or change events. Last, they turn on Google on your card in Settings → Agent → Saved agents. Your chat restarts with the mail and calendar tools.']),
   ].join('\n');
 }
 
@@ -678,7 +681,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ...await boundedContextPrompts(effectiveCwd, 'Project'),
         ...(preset ? [`Saved Agent ${preset.name}, revision ${preset.revision}.\n${preset.instructions}`] : []),
         ...(preset?.tone ? [`Speak in this tone: ${preset.tone}`] : []),
-        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission, webTools.some((tool) => tool.name === 'web_search'))] : []),
+        ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission, webTools.some((tool) => tool.name === 'web_search'), preset.google === true)] : []),
       ];
       // Every root has a live tool-call ceiling, including retained tool handles
       // offered before a reduction. Slot binding grants authority after restore.
