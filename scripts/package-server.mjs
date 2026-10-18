@@ -22,7 +22,8 @@ export async function createRuntimeProjection(source = root, terminal = false) {
   const yaml = createRequire(path.join(sdkRoot, 'package.json'))('yaml');
   const lockBytes = await fs.readFile(path.join(source, 'pnpm-lock.yaml'));
   const workspaceBytes = await fs.readFile(path.join(source, 'pnpm-workspace.yaml'));
-  const lock = yaml.parse(lockBytes.toString('utf8'));
+  const [envLock, lock] = yaml.parseAllDocuments(lockBytes.toString('utf8')).map(document => document.toJS());
+  assert(lock, 'The lockfile has no pnpm environment document.');
   const workspace = yaml.parse(workspaceBytes.toString('utf8'));
   const selected = new Set();
   const resolveSnapshot = (name, reference) => {
@@ -60,7 +61,7 @@ export async function createRuntimeProjection(source = root, terminal = false) {
   const projectedWorkspace = { ...workspace,
     allowBuilds: Object.fromEntries(Object.entries(workspace.allowBuilds ?? {}).filter(([name]) => packageNames.has(name))),
     patchedDependencies: patchPaths };
-  return { yaml, lock: projectedLock, workspace: projectedWorkspace, patchPaths,
+  return { yaml, envLock, lock: projectedLock, workspace: projectedWorkspace, patchPaths,
     direct: Object.fromEntries(Object.entries(dependencies).map(([name, value]) => [name, value.specifier])),
     sourceHashes: { lock: hash(lockBytes), workspace: hash(workspaceBytes) } };
 }
@@ -266,7 +267,7 @@ export async function packageServer(args = process.argv.slice(2)) {
     description: 'Independent Fate server for plain Node; Pi remains the execution engine.', license: sourceManifest.license,
     engines: sourceManifest.engines, packageManager: declaredPnpm, bin: { 'fate-server': 'bin/fate-server' }, dependencies: projection.direct };
   await fs.writeFile(path.join(stage, 'package.json'), JSON.stringify(minimal, null, 2) + '\n');
-  await fs.writeFile(path.join(stage, 'pnpm-lock.yaml'), projection.yaml.stringify(projection.lock));
+  await fs.writeFile(path.join(stage, 'pnpm-lock.yaml'), [projection.envLock, projection.lock].map(value => '---\n' + projection.yaml.stringify(value)).join('\n'));
   await fs.writeFile(path.join(stage, 'pnpm-workspace.yaml'), projection.yaml.stringify(projection.workspace));
   const patches = [];
   for (const [name, relative] of Object.entries(projection.patchPaths)) {
