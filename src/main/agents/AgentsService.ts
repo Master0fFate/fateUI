@@ -229,7 +229,7 @@ export class AgentsService {
     const current = await this.repository.getAgent(preset.agentId).catch(() => null);
     if (!current) return preset;
     const { item } = current;
-    return { ...preset, revision: item.revision, name: item.name, instructions: item.instructions, skillRefs: item.skillRefs,
+    return { ...preset, revision: item.revision, name: item.name, instructions: item.instructions, tone: item.tone ?? '', skillRefs: item.skillRefs,
       defaults: { ...item.defaults, model: item.defaults.model ?? preset.defaults.model } };
   }
 

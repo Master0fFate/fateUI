@@ -7,7 +7,8 @@ import { useUiStore } from './uiStore';
 
 export const emptyAgentLibrary = (): AgentLibrary => ({ agents: [], routines: [], runs: [], states: [], diagnostics: [], revisions: {}, nextDue: {}, watches: [], watchStates: [] });
 export const emptyAgentInbox = (): AgentInboxOverview => ({ items: [], unread: {}, muted: [] });
-export const agentDraft = ({ name, description, instructions, skillRefs, defaults, enabled }: AgentDefinition): AgentDraft => ({ name, description, instructions, skillRefs, defaults, enabled });
+export const agentDraft = ({ name, description, instructions, skillRefs, defaults, enabled, tone, avatar }: AgentDefinition): AgentDraft => ({ name, description, instructions, skillRefs, defaults, enabled, tone: tone ?? '', avatar: avatar ?? '' });
+export const agentLabel = ({ name, avatar }: { name: string; avatar?: string | undefined }): string => avatar ? `${avatar} ${name}` : name;
 export const routineDraft = ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify }: RoutineDefinition): RoutineDraft => ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify });
 export const watchDraft = ({ name, agentId, url, condition, text, price, intervalMinutes, enabled }: WatchDefinition): WatchDraft => ({ name, agentId, url, condition, text, price, intervalMinutes, enabled });
 export function agentError(error: unknown): string {
@@ -88,6 +89,10 @@ export function useAgentInboxReads(): void {
     return () => window.removeEventListener('focus', read);
   }, [agentId, unread]);
 }
+export const useAgentLabel = (agentId: string | null | undefined): string | null => useAgentsStore((state) => {
+  const agent = agentId ? state.library.agents.find((item) => item.id === agentId) : undefined;
+  return agent ? agentLabel(agent) : null;
+});
 
 export async function openAgent(agentId: string): Promise<void> {
   try {

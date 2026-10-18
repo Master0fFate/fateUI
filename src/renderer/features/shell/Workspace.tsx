@@ -16,6 +16,7 @@ import { ConversationTimeline } from '../chat/ConversationTimeline';
 import { ExtensionStatusRail } from '../chat/ExtensionStatusRail';
 import { DetailExpansionToggle, detailSessionKey, type DetailExpansionCommand } from '../chat/detailExpansion';
 import { useRuntimeStore } from '../../stores/runtimeStore';
+import { useAgentLabel } from '../../stores/agentsStore';
 import { useBrowserStore } from '../../stores/browserStore';
 import { BROWSER_PANE_MAX, BROWSER_PANE_MIN, useUiStore } from '../../stores/uiStore';
 import { BrowserWorkspace } from '../browser/BrowserWorkspace';
@@ -185,12 +186,14 @@ function QueueControls() {
 }
 
 function DesktopWorkspace({ inspectorCollapsed, onToggleInspector }: WorkspaceProps) {
-  const { projectPath, projectName, projectTrusted, sessions } = useRuntimeStore(useShallow((state) => ({
+  const { projectPath, projectName, projectTrusted, agentId, sessions } = useRuntimeStore(useShallow((state) => ({
     projectPath: state.runtime.project?.path ?? null,
     projectName: selectSessionView(state).label,
     projectTrusted: state.runtime.project?.trusted === true,
+    agentId: state.runtime.project?.agentId ?? null,
     sessions: state.runtime.sessions,
   })));
+  const agentName = useAgentLabel(agentId);
   const setRuntime = useRuntimeStore((state) => state.setRuntime);
   const entryCount = useRuntimeStore((state) => state.timelineOrder.length);
   const sessionId = useRuntimeStore((state) => state.runtime.sessionId);
@@ -315,7 +318,7 @@ function DesktopWorkspace({ inspectorCollapsed, onToggleInspector }: WorkspacePr
       <header className="workspace-header">
         <div className="workspace-header-drag">
           <div className="workspace-header-identity">
-            <strong>{activeSessionTitle ?? projectName ?? 'Welcome'}</strong>
+            <strong>{agentName ?? activeSessionTitle ?? projectName ?? 'Welcome'}</strong>
             <WorkspaceActivityPulse />
           </div>
           <div className="session-controls">

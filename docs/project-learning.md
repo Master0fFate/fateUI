@@ -24,6 +24,17 @@ Changing the editing scope never copies, merges, or promotes knowledge. Each sto
 
 At most three complete items and 6 KiB of UTF-8 advisory context are supplied. Procedures are skipped whole, never cut midway through a step. Token counts are explicitly estimates (`ceil(UTF-8 bytes / 4)`); this adapter has no compatible exact tokenizer. Model permissions and current user instructions remain authoritative.
 
+## Saving from a chat
+
+The `remember` tool lets the model propose one fact you stated or confirmed. It never approves anything.
+
+- **Where it is.** Agent chats have it directly. Ordinary root chats find it through tool search, so it does not enlarge every coding prompt. Agent runs, Agent Team members and other child sessions cannot save memory.
+- **Where it goes.** `about: "user"` adds the fact to one section of the GLOBAL user profile (communication, workflow, coding or design preferences, decision-making, learning style, likes, dislikes). `about: "here"` adds it to the **decisions** of the PROJECT briefing. In an Agent chat, PROJECT is the Agent's own folder, so that briefing is the Agent's memory.
+- **Drafts.** The fact is merged into the current profile or briefing and saved as a pending replacement draft. Further facts join the same pending draft instead of creating competing copies; the review shows each one as “Added in chat”. Approving creates a new immutable revision as usual. A fact that is already there changes nothing.
+- **Switches.** The master switch, the GLOBAL/PROJECT layer toggles and a store set to **Off** all stop saving; the model gets a plain message saying nothing was saved. Untrusted projects cannot save.
+- **Limits.** One fact is at most 200 characters and passes the same secret-like redaction as evidence. The profile and briefing keep their 20 lines per section and 2 KiB body budget, and a store holds at most 100 drafts; when a fact does not fit, nothing is saved and the model is asked to have you tidy the memory.
+- **Review.** **Memory drafts · N** above the composer counts pending drafts in the open project's store and the GLOBAL profile. Select it to open Learning on the drafts. No draft is attached to a turn until you approve it.
+
 ## Evidence and provider data
 
 The message action opens a review form; it does not contact a model. Message-row text uses the **user-asserted** fallback because renderer row IDs are not durable SDK entry IDs. Exact capture uses the durable entries listed in the open session. Open a saved session first to capture its entries; selected branches are reconstructed read-only through Pi's parser and in-memory session manager.
@@ -70,4 +81,4 @@ Invalid JSON, unsupported versions, mismatched identity and unsafe file targets 
 
 See [implementation and verification](project-learning-implementation.md) and the [offline evaluation guide](../scripts/agent-evals/README.md). Deterministic tests establish engineering behavior, not model benefit. Live benefit and provider-specific smoke results are currently **unmeasured**; no provider was called during implementation checks.
 
-Managed procedures render readable Markdown, but are not native Pi skills. Export, native `SKILL.md` installation, cross-store migration, vector search, autonomous approvals, agent-owned learning tools, training, cloud sync, and automatic command execution are not included.
+Managed procedures render readable Markdown, but are not native Pi skills. Export, native `SKILL.md` installation, cross-store migration, vector search, autonomous approvals, training, cloud sync, and automatic command execution are not included. The `remember` tool only creates drafts.

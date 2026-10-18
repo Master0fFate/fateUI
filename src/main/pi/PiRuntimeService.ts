@@ -4,6 +4,7 @@ import type { LearningService } from '../learning/LearningService';
 import type { LearningOrigin } from '../learning/LearningEvidence';
 import type { LearningProvider } from '../learning/LearningGenerator';
 import { projectLearningKey } from '../learning/LearningRepository';
+import { createRememberTool } from '../learning/RememberTool';
 import { fateProviderStoragePaths } from './FateProviderStorage';
 import { ProviderFileSync } from './ProviderFileSync';
 import { piPromptDisposition, type PiPromptDisposition } from './PiSdkCompatibility';
@@ -501,7 +502,7 @@ const AGENT_ORCHESTRATION_TOOLS = ['spawn_agent', 'agent_workspace', 'get_agent_
 const ALL_ORCHESTRATION_TOOLS = new Set<string>([...LEGACY_ORCHESTRATION_TOOLS, ...AGENT_ORCHESTRATION_TOOLS]);
 const DEFERRED_TOOLS = new Set<string>([
   ...ALL_ORCHESTRATION_TOOLS, ...TASK_TOOL_NAMES, MONITOR_DASHBOARD_TOOL_NAME,
-  'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp',
+  'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp', 'remember',
 ]);
 
 function agentHomePrompt(homePath: string, permission: PermissionLevel, webSearch: boolean): string {
@@ -674,6 +675,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ...await boundedContextPrompts(agentDir, 'Global'),
         ...await boundedContextPrompts(effectiveCwd, 'Project'),
         ...(preset ? [`Saved Agent ${preset.name}, revision ${preset.revision}.\n${preset.instructions}`] : []),
+        ...(preset?.tone ? [`Speak in this tone: ${preset.tone}`] : []),
         ...(preset && !preset.runId ? [agentHomePrompt(effectiveCwd, preset.defaults.permission, webTools.some((tool) => tool.name === 'web_search'))] : []),
       ];
       // Every root has a live tool-call ceiling, including retained tool handles
@@ -1455,6 +1457,16 @@ export class PiRuntimeService {
       session,
       valid: () => this.project === project && project.trusted && (slot ? !slot.disposed && slot.runtime.session === session && slot.learningGeneration === generation : this.initialization === generation),
     };
+  }
+
+  private createRememberTool(): ToolDefinition {
+    return createRememberTool(async (sessionId, input) => {
+      const slot = this.findLiveSlot(sessionId);
+      if (!slot || slot.sessionInvalidated) throw new Error('Memory needs a live chat.');
+      if (getAgentSessionPreset(slot.runtime.session)?.runId) return 'Runs do not save memory. Put the fact in your result so the Agent chat can save it.';
+      if (!this.learningService || !this.project?.trusted) return 'Memory needs a trusted project, so nothing was saved.';
+      return this.learningService.remember(this.learningOrigin(slot, input.scope), input.fact, input.topic);
+    });
   }
 
   learningProvider(): LearningProvider | null {
@@ -5734,6 +5746,7 @@ export class PiRuntimeService {
       const model = slot.runtime.session.model;
       return this.agentRunStarter({ agentId: preset.agentId, permission: slot.permissionLevel, model: model ? { provider: model.provider, id: model.id } : null }, input);
     })];
+    tools.push(this.createRememberTool());
     for (const tool of tools) installToolExecutionAdmission(tool, () => {
       if (this.hostStopping) throw new Error('The core is shutting down; a live root session cannot admit retained tools.');
       this.executionAdmissionGuard();

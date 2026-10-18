@@ -8,14 +8,14 @@ import type { ModelInfo } from '../../../shared/contracts/ipc';
 import { SelectControl } from '../../components/SelectControl';
 import { formatRelativeTime } from '../../lib/relativeTime';
 import { getDesktopApi } from '../../platform/api';
-import { agentDraft, agentError, routineDraft, useAgentsStore, watchDraft } from '../../stores/agentsStore';
+import { agentDraft, agentError, agentLabel, routineDraft, useAgentsStore, watchDraft } from '../../stores/agentsStore';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 
 const permissionOptions: { value: AgentPermission; label: string }[] = [
   { value: 'read-only', label: 'Read only' }, { value: 'edit', label: 'Edit files' }, { value: 'full-access', label: 'Full access' },
 ];
 const thinkingOptions = agentDraftSchema.shape.defaults.shape.thinkingLevel.options.map((level) => ({ value: level, label: level }));
-const newAgent = (): AgentDraft => ({ name: '', description: '', instructions: '', skillRefs: [], enabled: true, defaults: { model: null, thinkingLevel: 'high', permission: 'edit', workspace: 'shared' } });
+const newAgent = (): AgentDraft => ({ name: '', description: '', instructions: '', skillRefs: [], enabled: true, tone: '', avatar: '', defaults: { model: null, thinkingLevel: 'high', permission: 'edit', workspace: 'shared' } });
 const newRoutine = (agentId: string, count: number): RoutineDraft => ({ name: `Routine ${count + 1}`, agentId, message: '', intervalMinutes: 60,
   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, enabled: false, notify: true, osNotify: false });
 const conditionOptions: { value: WatchCondition; label: string }[] = [
@@ -146,18 +146,20 @@ function AgentCard({ agent, models, compact }: { agent?: AgentDefinition; models
   };
   return <section className="settings-card" id={`saved-agent-${agent?.id ?? 'new'}`} aria-label={`Agent ${draft.name || 'new'}`}>
     <label className="settings-toggle settings-card-head">
-      <div><strong>{draft.name || 'New agent'}</strong><small>{permissionOptions.find((option) => option.value === draft.defaults.permission)?.label} · {model ? model.id : 'current model'}</small></div>
+      <div><strong>{agentLabel({ name: draft.name || 'New agent', avatar: draft.avatar })}</strong><small>{permissionOptions.find((option) => option.value === draft.defaults.permission)?.label} · {model ? model.id : 'current model'}</small></div>
       <input type="checkbox" aria-label={`${draft.name || 'New agent'} on`} checked={draft.enabled} disabled={busy} onChange={(event) => patch({ enabled: event.target.checked })} />
       <span aria-hidden="true" />
     </label>
     <div className="settings-card-grid">
       <label className="settings-input-row"><span>Name</span><input aria-label="Agent name" maxLength={80} value={draft.name} disabled={busy} autoFocus={!agent} onChange={(event) => patch({ name: event.target.value })} /></label>
+      <label className="settings-input-row"><span>Avatar</span><input aria-label="Agent avatar" placeholder="Emoji" maxLength={16} value={draft.avatar ?? ''} disabled={busy} onChange={(event) => patch({ avatar: event.target.value })} /></label>
       <div className="settings-input-row"><span>Model</span><SelectControl compact={compact} label="Agent model" value={model ? JSON.stringify(model) : 'current'} options={modelOptions} disabled={busy}
         onValueChange={(value) => patch({ defaults: { ...draft.defaults, model: value === 'current' ? null : JSON.parse(value) as AgentDraft['defaults']['model'] } })} /></div>
       <div className="settings-input-row"><span>Thinking</span><SelectControl compact={compact} label="Agent thinking" value={draft.defaults.thinkingLevel} options={thinkingOptions} disabled={busy}
         onValueChange={(value) => patch({ defaults: { ...draft.defaults, thinkingLevel: value as AgentDraft['defaults']['thinkingLevel'] } })} /></div>
       <div className="settings-input-row"><span>Permission</span><SelectControl compact={compact} label="Agent permission" value={draft.defaults.permission} options={permissionOptions} disabled={busy}
         onValueChange={(value) => patch({ defaults: { ...draft.defaults, permission: value as AgentPermission } })} /></div>
+      <label className="settings-input-row"><span>Tone</span><input aria-label="Agent tone" placeholder="Warm and brief" maxLength={500} value={draft.tone ?? ''} disabled={busy} onChange={(event) => patch({ tone: event.target.value })} /></label>
       <label className="settings-input-row settings-card-wide"><span>Skills</span><input aria-label="Agent skills" placeholder="Skill names, comma-separated" value={skills} disabled={busy}
         onChange={(event) => { setSkills(event.target.value); patch({ skillRefs: event.target.value.split(',').map((value) => value.trim()).filter(Boolean) }); }} /></label>
       <label className="settings-input-row settings-card-wide"><span>Instructions</span><textarea aria-label="Agent instructions" rows={compact ? 4 : 6} maxLength={65_536} value={draft.instructions} disabled={busy} onChange={(event) => patch({ instructions: event.target.value })} /></label>

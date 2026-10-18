@@ -1,27 +1,49 @@
 import { randomUUID } from 'node:crypto';
 import {
-  LEARNING_LIMITS, captureSchema, lessonContentSchema, type GenerateDraftInput, type LearningBinding, type LearningCapture, type LearningManifest,
-  type LearningMutation, type LearningRecoveryInput, type LearningSnapshot, type LearningState, type LearningTurn,
-  type MemoryLearningSettings, type PreviewEvidenceInput, type PreviewSelectionInput, type ReviewCaptureInput,
+  LEARNING_LIMITS, captureSchema, lessonContentSchema, type GenerateDraftInput, type LearningBinding, type LearningCapture, type LearningChange, type LearningManifest,
+  type LearningMutation, type LearningRecoveryInput, type LearningScope, type LearningSnapshot, type LearningState, type LearningTurn,
+  type LessonContent, type MemoryLearningSettings, type PreviewEvidenceInput, type PreviewSelectionInput, type ReviewCaptureInput,
 } from '../../shared/contracts/learning';
 import { boundedLearningText, captureLearningEvidence, learningCodeState, redactLearningText, visibleLearningText, type LearningOrigin } from './LearningEvidence';
 import { generateLearningDraft, type LearningProvider, type LearningUsage } from './LearningGenerator';
 import { emptyLearningSnapshot, learningDigest, learningError, learningIdentity, LearningRepository } from './LearningRepository';
 import { selectLearning } from './LearningSelection';
-import { isCoreMemory, memoryScopeError, mergeProfileAdditions } from '../../shared/learningMemory';
+import { isCoreMemory, memoryScopeError, mergeProfileAdditions, newCoreMemory } from '../../shared/learningMemory';
 
 interface CaptureOwner { origin: LearningOrigin; capture: LearningCapture }
 const storeVersions = (snapshot: LearningSnapshot, companions: readonly LearningSnapshot[]) => [snapshot, ...companions].map((store) => `${store.epoch}:${store.revision}`).join('|');
+export type ProfileTopic = keyof Extract<LessonContent, { kind: 'user-profile' }>['body'];
+const storeLabel = (scope: LearningScope) => scope === 'global' ? 'Profile' : 'Project';
+function withFact(content: LessonContent, fact: string, topic: ProfileTopic): LessonContent {
+  if (content.kind === 'user-profile') return { ...content, body: { ...content.body, [topic]: [...new Set([...content.body[topic], fact])] } };
+  if (content.kind === 'project-brief') return { ...content, body: { ...content.body, overview: content.body.overview || 'Facts the user confirmed in chat.', decisions: [...new Set([...content.body.decisions, fact])] } };
+  return content;
+}
+function rememberedDraft(state: LearningSnapshot, fact: string, topic: ProfileTopic) {
+  const kind = state.scope === 'global' ? 'user-profile' : 'project-brief';
+  const lesson = state.lessons.find((item) => state.revisions.some((revision) => revision.id === item.activeRevisionId && revision.content.kind === kind));
+  const active = lesson && state.revisions.find((revision) => revision.id === lesson.activeRevisionId);
+  const pending = state.drafts.find((draft) => draft.state === 'pending' && draft.lessonId === (lesson?.id ?? null) && draft.content.kind === kind);
+  const base = pending?.content ?? active?.content ?? newCoreMemory(state.scope);
+  const next = withFact(base, fact, topic);
+  if (JSON.stringify(next.body) === JSON.stringify(base.body)) return null;
+  const parsed = lessonContentSchema.safeParse(next);
+  if (!parsed.success) learningError('That fact does not fit this memory. Keep it short, or ask the user to tidy the memory in Learning.');
+  return { lessonId: lesson?.id ?? null, pending, content: parsed.data, evidenceIds: pending?.evidenceIds ?? active?.evidenceIds ?? [] };
+}
 export class LearningService {
   private readonly captures = new Map<string, CaptureOwner>();
   private readonly requests = new Map<string, { controller: AbortController; binding: LearningBinding }>();
-  private readonly listeners = new Set<(event: { projectKey: string; scope: LearningBinding['scope']; revision: number }) => void>();
+  private readonly listeners = new Set<(event: LearningChange) => void>();
   constructor(readonly repository: LearningRepository, private readonly settings: () => MemoryLearningSettings) {}
-  onChanged(listener: (event: { projectKey: string; scope: LearningBinding['scope']; revision: number }) => void): () => void {
+  onChanged(listener: (event: LearningChange) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
-  private emit(snapshot: LearningSnapshot): void { for (const listener of this.listeners) listener({ projectKey: snapshot.projectKey, scope: snapshot.scope, revision: snapshot.revision }); }
+  private emit(snapshot: LearningSnapshot): void {
+    const event = { projectKey: snapshot.projectKey, scope: snapshot.scope, revision: snapshot.revision, pending: snapshot.drafts.filter((draft) => draft.state === 'pending').length };
+    for (const listener of this.listeners) listener(event);
+  }
   layers(): { global: boolean; project: boolean } {
     const settings = this.settings();
     return { global: settings.enabled && settings.global, project: settings.enabled && settings.project };
@@ -184,6 +206,32 @@ export class LearningService {
     }
     if (capture) this.captures.delete(capture.id);
     this.emit(snapshot);
+  }
+
+  async remember(origin: LearningOrigin, text: string, topic: ProfileTopic): Promise<string> {
+    const scope = origin.binding.scope;
+    if (!this.settings().enabled) return 'Memory Learning is off, so nothing was saved. The user can turn it on in Settings → Memory Learning.';
+    if (!this.layers()[scope]) return `${scope.toUpperCase()} memory is off in Settings → Memory Learning, so nothing was saved.`;
+    if (!origin.valid()) learningError('This chat changed before the memory was saved.');
+    const fact = redactLearningText(text.trim());
+    const identity = learningIdentity(origin.root, scope);
+    const current = await this.repository.read(identity);
+    if (current.mode === 'off') return `${storeLabel(scope)} memory is set to Off in Learning, so nothing was saved.`;
+    if (!rememberedDraft(current, fact, topic)) return 'Already saved or waiting for review. Nothing changed.';
+    const snapshot = await this.repository.mutate(identity, null, (state) => {
+      if (!this.enabled(origin) || state.mode === 'off') learningError('Learning was disabled.');
+      const draft = rememberedDraft(state, fact, topic);
+      if (!draft) learningError('Already saved or waiting for review.');
+      const note = `Added in chat: ${fact}`;
+      const digest = learningDigest({ content: draft.content, evidenceIds: draft.evidenceIds });
+      if (draft.pending) Object.assign(draft.pending, { version: draft.pending.version + 1, content: draft.content, digest, uncertainty: [...draft.pending.uncertainty, note].slice(-20) });
+      else {
+        if (state.drafts.length >= LEARNING_LIMITS.drafts) learningError('Draft limit reached. Ask the user to review or delete drafts in Learning.');
+        state.drafts.push({ id: randomUUID(), lessonId: draft.lessonId, version: 1, state: 'pending', content: draft.content, evidenceIds: draft.evidenceIds, digest, createdAt: Date.now(), uncertainty: [note] });
+      }
+    });
+    this.emit(snapshot);
+    return `Saved for the user's review in Learning → ${storeLabel(scope)} → Drafts. It is not used until they approve it${snapshot.mode === 'automatic' ? '' : ' and pick it or set that memory to Automatic'}.`;
   }
 
   async generate(origin: LearningOrigin, input: GenerateDraftInput, provider: LearningProvider | null): Promise<{ outcome: 'draft' | 'no_lesson'; reason: string | null }> {
