@@ -54,7 +54,7 @@ To build an installer from source, install the platform prerequisites above, che
 The cross-platform GitHub Actions package matrix runs for pull requests, pushes to `main`, version tags, and non-promotion manual dispatches.
 
 - Native hosted runners build, install or mount, and smoke-test Windows x64, macOS Apple Silicon and Intel, and Linux x64 packages: Windows NSIS, macOS DMG and PKG, Linux AppImage and DEB.
-- Package/OS version and `PRODVER` use the numeric release version, currently **1.1.0 in the source tree**. The optional `package.json.releaseName` adds the display suffix **Axiom** for 1.1.0, so its title is **V1.1.0 - Axiom**. A source version is not proof that an installer has been published.
+- Package/OS version and `PRODVER` use the numeric release version, currently **2.2.0 in the source tree**. The optional `package.json.releaseName` adds a display suffix; 2.2.0 has none, so its title is **V2.2.0**. A source version is not proof that an installer has been published.
 - A release tag must be `v<package.json version>` (for example `v1.1.0`) and point to history contained in `main`. The human release title is derived separately by `node scripts/release-artifacts.mjs metadata --field display-version`.
 - After every native job passes, a version tag publishes seven installers and `SHA256SUMS` to its GitHub Release.
 - A manual dispatch with empty promotion inputs stages the same seven installers and `SHA256SUMS` as `verified-release-installers`, retained for 14 days. It does not create a tag or publish a release.
