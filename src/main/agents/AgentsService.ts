@@ -90,7 +90,7 @@ export class AgentsService {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.tick().catch(() => { this.nextWakeAt = Date.now() + ROUTINE_RETRY_MS; }).then(() => {
+      void (this.ticking ?? Promise.resolve()).catch(() => undefined).then(() => this.tick()).catch(() => { this.nextWakeAt = Date.now() + ROUTINE_RETRY_MS; }).then(() => {
         if (this.nextWakeAt !== Infinity) this.arm(this.nextWakeAt - Date.now());
       });
     }, Math.min(Math.max(0, delay), ROUTINE_MAX_SLEEP_MS));
