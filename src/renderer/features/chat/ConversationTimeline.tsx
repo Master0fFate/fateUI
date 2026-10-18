@@ -6,6 +6,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useShallow } from 'zustand/react/shallow';
 import { AppTooltip } from '../../components/AppTooltip';
 import { writeClipboardText } from '../../lib/clipboard';
+import { useAgentLabel } from '../../stores/agentsStore';
 import { type TimelineEntity, type ToolExecution, useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { MentionText } from './AgentMention';
@@ -67,16 +68,18 @@ export function forkEntryForMessage(messageId: string, messageOrder: readonly st
 
 export const MessageRow = memo(function MessageRow({ messageId }: { messageId: string }) {
   const { ActionContent, MessageHeading } = useSkinComponents();
-  const { message, streaming, streamingThisMessage, modelName, forkPoints, forkMessageOrder, forkCapable, sessionOperation } = useRuntimeStore(useShallow((state) => ({
+  const { message, streaming, streamingThisMessage, modelName, agentId, forkPoints, forkMessageOrder, forkCapable, sessionOperation } = useRuntimeStore(useShallow((state) => ({
     message: state.messagesById[messageId],
     streaming: state.runtime.streaming,
     streamingThisMessage: state.runtime.streaming && state.messageOrder.at(-1) === messageId,
     modelName: state.runtime.model?.name ?? 'Assistant',
+    agentId: state.runtime.project?.agentId ?? null,
     forkPoints: state.runtime.forkPoints,
     forkMessageOrder: state.runtime.forkPoints?.length ? state.messageOrder : EMPTY_MESSAGE_ORDER,
     forkCapable: Boolean(state.runtime.sessionCapabilities?.fork),
     sessionOperation: Boolean(state.runtime.sessionOperation),
   })));
+  const agentName = useAgentLabel(agentId);
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
   const [forking, setForking] = useState(false);
@@ -84,7 +87,7 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
   const richContent = message.role === 'assistant' || message.role === 'system' || Boolean(message.images?.length);
   const forkEntryId = forkEntryForMessage(messageId, forkMessageOrder, useRuntimeStore.getState().messagesById, forkPoints);
   const canFork = Boolean(forkEntryId && forkCapable && !streaming && !sessionOperation);
-  const label = message.role === 'user' ? 'You' : message.role === 'assistant' ? modelName : message.role === 'system' ? 'System' : 'Tool result';
+  const label = message.role === 'user' ? 'You' : message.role === 'assistant' ? agentName ?? modelName : message.role === 'system' ? 'System' : 'Tool result';
   const forkUnavailable = forking
     ? 'Creating the new session…'
     : streaming

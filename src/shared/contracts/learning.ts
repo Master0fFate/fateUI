@@ -120,7 +120,8 @@ export const modelDraftResultSchema = z.discriminatedUnion('outcome', [
   z.object({ outcome: z.literal('draft'), content: lessonContentSchema, evidenceIds: z.array(id).min(1).max(6), uncertainty: lines }).strict(),
 ]);
 export const generationResultSchema = z.object({ outcome: z.enum(['draft', 'no_lesson']), reason: short.nullable(), state: learningStateSchema }).strict();
-export const learningChangedSchema = z.object({ projectKey: z.string().max(64), scope: learningScopeSchema, revision: z.number().int().nonnegative() }).strict();
+export const learningChangedSchema = z.object({ projectKey: z.string().max(64), scope: learningScopeSchema, revision: z.number().int().nonnegative(), pending: z.number().int().nonnegative().optional() }).strict();
+export type LearningChange = z.infer<typeof learningChangedSchema>;
 export type LearningScope = z.infer<typeof learningScopeSchema>;
 export type MemoryLearningSettings = z.infer<typeof memoryLearningSettingsSchema>;
 export type LearningBinding = z.infer<typeof learningBindingSchema>;

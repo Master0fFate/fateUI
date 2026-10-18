@@ -21,11 +21,12 @@ export function LearningPanel() {
   const open = useLearningStore((state) => state.open);
   const correction = useLearningStore((state) => state.correction);
   const runtimeProject = useRuntimeStore((state) => state.runtime.project?.path);
+  const runtimeProjectName = useRuntimeStore((state) => state.runtime.project?.name);
   const sessionId = useRuntimeStore((state) => state.runtime.sessionId);
   const key = learningDraftKey(runtimeProject, sessionId);
   const [state, setState] = useState<LearningState | null>(null);
-  const [editScope, setEditScope] = useState<LearningScope>('project');
-  const [view, setView] = useState<'lessons' | 'drafts' | 'recent'>('lessons');
+  const [editScope, setEditScope] = useState<LearningScope>(() => useLearningStore.getState().focus ?? 'project');
+  const [view, setView] = useState<'lessons' | 'drafts' | 'recent'>(() => useLearningStore.getState().focus ? 'drafts' : 'lessons');
   const [editor, setEditor] = useState<Editor | null>(null);
   const [capture, setCapture] = useState<LearningCapture | null>(null);
   const [excerpts, setExcerpts] = useState<{ id: string; text: string }[]>([]);
@@ -47,6 +48,7 @@ export function LearningPanel() {
   const snapshot = state?.snapshot;
   const enabled = state?.enabled && snapshot?.mode !== 'off';
   const recentUse = state?.recentUse ?? snapshot?.manifests ?? [];
+  const pendingDrafts = snapshot?.drafts.filter((draft) => draft.state === 'pending').length ?? 0;
   stateRef.current = state;
   captureRef.current = capture;
   const refresh = useCallback(async () => {
@@ -140,7 +142,7 @@ export function LearningPanel() {
   });
   return <Dialog.Root open={open} onOpenChange={(value) => { if (!value) useLearningStore.getState().close(); }}>
     <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="learning-dialog" aria-describedby="learning-description">
-      <header><div><Dialog.Title><Brain size={18} /> Memory Learning</Dialog.Title><Dialog.Description id="learning-description">{state?.binding?.scope.toUpperCase() ?? 'PROJECT'} · {state?.projectName || 'No trusted project'} · reviewed knowledge, not model training.</Dialog.Description></div><Dialog.Close aria-label="Close Memory Learning"><X size={18} /></Dialog.Close></header>
+      <header><div><Dialog.Title><Brain size={18} /> Memory Learning</Dialog.Title><Dialog.Description id="learning-description">{state?.binding?.scope.toUpperCase() ?? 'PROJECT'} · {(state?.binding && runtimeProjectName) || state?.projectName || 'No trusted project'} · reviewed knowledge, not model training.</Dialog.Description></div><Dialog.Close aria-label="Close Memory Learning"><X size={18} /></Dialog.Close></header>
       <div className="learning-body">
         {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
         {busy && <div role="status">Working… <button type="button" onClick={() => { const binding = stateRef.current?.binding; if (binding && request.current) void getDesktopApi().cancelLearning({ binding, id: request.current }).catch(() => undefined); }}>Cancel capture or generation</button></div>}
@@ -150,7 +152,7 @@ export function LearningPanel() {
         {state?.diagnostic && <p role="status">{state.diagnostic}</p>}
         {snapshot && state?.binding && <>
           <div className="learning-actions"><button type="button" aria-pressed={editScope === 'global'} onClick={() => { setEditScope('global'); setEditor(null); }}>Profile</button><button type="button" aria-pressed={editScope === 'project'} onClick={() => { setEditScope('project'); setEditor(null); }}>Project</button><label>Selection mode <select aria-label="Learning selection mode" value={snapshot.mode} disabled={busy} onChange={(event) => void run(() => mutate({ action: 'set-mode', mode: event.target.value as 'off' | 'manual' | 'automatic' }))}><option value="off">Off</option><option value="manual">Manual</option><option value="automatic">Automatic (opt-in)</option></select></label>{state.binding.scope === 'project' && <button type="button" disabled={!enabled || busy} onClick={() => { setEditor({ content: newNote(), evidenceIds: [] }); setView('drafts'); }}>Add lesson</button>}<button type="button" disabled={!enabled || busy} onClick={openCore}>{state.binding.scope === 'global' ? 'User profile' : 'Project briefing'}</button><button type="button" onClick={() => void refresh()}>Refresh</button></div>
-          <nav className="learning-actions" aria-label="Learning views">{(['lessons', 'drafts', 'recent'] as const).map((tab) => <button type="button" aria-pressed={view === tab} key={tab} onClick={() => { setView(tab); setEditor(null); }}>{tab === 'recent' ? 'Recent use' : tab === 'drafts' ? 'Drafts' : 'Lessons'}</button>)}</nav>
+          <nav className="learning-actions" aria-label="Learning views">{(['lessons', 'drafts', 'recent'] as const).map((tab) => <button type="button" aria-pressed={view === tab} key={tab} onClick={() => { setView(tab); setEditor(null); }}>{tab === 'recent' ? 'Recent use' : tab === 'drafts' ? `Drafts${pendingDrafts ? ` · ${pendingDrafts}` : ''}` : 'Lessons'}</button>)}</nav>
           {view === 'lessons' && !editor && <>
             {!snapshot.lessons.length && <p>{state.binding.scope === 'global' ? 'No approved user profile yet. Open User profile to record explicit coding preferences.' : 'No approved project memory yet. Add a briefing, note, or managed project skill.'}</p>}
             {snapshot.lessons.map((lesson) => {

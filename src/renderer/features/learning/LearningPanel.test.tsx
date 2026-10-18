@@ -43,7 +43,7 @@ describe('Learning review UI', () => {
   });
   it('pins the approval token shown in review even after a second-window state update', async () => {
     const { api, emit } = bridge(); const user = userEvent.setup(); render(<LearningPanel />);
-    await user.click(await screen.findByRole('button', { name: 'Drafts' }));
+    await user.click(await screen.findByRole('button', { name: /^Drafts/ }));
     await user.click(screen.getByRole('button', { name: 'Review draft' }));
     const changed = structuredClone(state); changed.snapshot!.revision = 2; changed.snapshot!.drafts[0]!.digest = 'c'.repeat(64);
     api.getLearningState.mockResolvedValue(changed); emit();
@@ -53,7 +53,7 @@ describe('Learning review UI', () => {
   });
   it('editing invalidates approval and off state blocks new captures, not management', async () => {
     bridge(); const user = userEvent.setup(); render(<LearningPanel />);
-    await user.click(await screen.findByRole('button', { name: 'Drafts' }));
+    await user.click(await screen.findByRole('button', { name: /^Drafts/ }));
     await user.click(screen.getByRole('button', { name: 'Review draft' }));
     fireEvent.change(screen.getByLabelText('guidance'), { target: { value: 'Edited guidance' } });
     expect(screen.getByRole('button', { name: 'Approve exact revision' })).toBeDisabled();

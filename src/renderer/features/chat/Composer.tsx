@@ -4,6 +4,7 @@ import type { WebWorkspace } from '../../../client/WebFateApi';
 import { useWebWorkspaceStore } from '../../stores/webWorkspaceStore';
 import { unavailableExplanation } from '../../platform/capabilityPolicy';
 import * as Dialog from '@radix-ui/react-dialog';
+import { LearningDraftsRail } from '../learning/LearningDraftsRail';
 import { LearningIndicator } from '../learning/LearningIndicator';
 import { RecoveryReviewNotice } from './RecoveryReviewNotice';
 import { learningDraftKey, useLearningStore } from '../learning/learningStore';
@@ -2605,6 +2606,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         </div>
       )}
       <div className="composer-rails">
+      <LearningDraftsRail />
       {runtime.questionnaire && runtime.questionnaire.sessionId === runtime.sessionId && (
         <QuestionCard questionnaire={runtime.questionnaire} onAnswer={async (input) => {
           if (typeof getDesktopApiOptional()?.answerQuestion !== 'function') throw new Error('Restart Fate UI to answer questions.');

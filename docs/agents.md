@@ -4,7 +4,7 @@ An **Agent** is a saved persona with exactly one ongoing conversation of its own
 
 ## Use an Agent
 
-1. Select **Agents** in the sidebar and **+** to create one. The editor opens in **Settings → Agent → Saved agents**: name, model, thinking level, permission, Skills and instructions. Select **Save agent**.
+1. Select **Agents** in the sidebar and **+** to create one. The editor opens in **Settings → Agent → Saved agents**: name, avatar, model, thinking level, permission, tone, Skills and instructions. Select **Save agent**.
 2. Click the Agent in the sidebar. Its conversation opens in the main pane and the sidebar stays on **Agents**. There is one conversation per Agent; it is not listed under any project.
 3. Ask for work in a project, for example “check why the build fails in fateUI”. The Agent starts a **run** with the `run_in_project` tool and answers right away. When the run finishes, its result is posted into the Agent's conversation and the Agent continues from there.
 
@@ -14,6 +14,8 @@ The dot next to an Agent shows a run in progress, a new result, or a failed run.
 
 - **Its own folder.** Each Agent's conversation runs in a folder Fate UI owns, under the data directory at `agents/v1/homes/<agent id>`. Files, terminal and Memory Learning follow it like a project. Memory Learning's **PROJECT** store for that folder is the Agent's own memory; the **GLOBAL** profile applies as usual.
 - **Your projects, through runs.** A run is an ordinary conversation in a trusted project, started with the Agent's instructions. It can use Agent Teams, GoalMax (the Agent picks `goal` mode for multi-step outcomes) and that project's Memory Learning. You can open it, read it and steer it like any session. A project switch or a session switch does not stop it.
+- **Persona.** The **avatar** is one emoji shown before the Agent's name in the sidebar, in the chat header and on its replies. Nothing is downloaded. The **tone** (up to 500 characters, for example “warm and brief”) is added to the Agent's system prompt after its instructions. Runs keep the plain instructions; the Agent reports their results in its own tone.
+- **Memory.** When you state or confirm something worth keeping, the Agent saves it with the `remember` tool. A preference about how you work goes to your **GLOBAL** profile, shared with every chat. Anything about the Agent itself goes to its **PROJECT** store. Each save is a pending draft: nothing is used until you approve it in **Learning**, and **Memory drafts** above the composer shows how many wait. Memory Learning must be on in **Settings → Memory Learning**; when it or the layer is off, the Agent is told that nothing was saved. Approved memory reaches the chat when that store is set to **Automatic**, or when you pick it for a turn. Runs do not save memory. See [Memory Learning](project-learning.md#saving-from-a-chat).
 - **Routines** send a message into the Agent's conversation on an interval, for example “every morning, check the open pull requests”. Add them on the Agent's card in Settings. They run only while Fate UI is open; missed intervals are skipped, not replayed.
 
 ## Permissions and limits

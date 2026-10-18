@@ -6,7 +6,7 @@ import { AppTooltip } from '../../components/AppTooltip';
 import { formatRelativeTime } from '../../lib/relativeTime';
 import { getDesktopApi } from '../../platform/api';
 import { useSkinComponents } from '../../skins/SkinProvider';
-import { agentDraft, agentError, openAgent, useAgentsStore } from '../../stores/agentsStore';
+import { agentDraft, agentError, agentLabel, openAgent, useAgentsStore } from '../../stores/agentsStore';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 
@@ -91,7 +91,7 @@ export function SidebarAgents() {
       return (
         <div key={agent.id} className={`session-row session-row--compact${current ? ' session-row--current' : ''}`} aria-current={current ? 'page' : undefined}>
           <AppTooltip content={`${agent.name}\n${detail}`} side="right" sideOffset={8} wrapTrigger triggerClassName="session-open-tooltip">
-            <button className="session-open session-open--compact" {...open}><span className="session-title-label">{agent.name}</span></button>
+            <button className="session-open session-open--compact" {...open}><span className="session-title-label">{agentLabel(agent)}</span></button>
           </AppTooltip>
           {dot}
           <Popover.Root>
@@ -113,7 +113,7 @@ export function SidebarAgents() {
       <div key={agent.id} className={`session-row${current ? ' session-row--current' : ''}`} aria-current={current ? 'page' : undefined}>
         <AppTooltip content={agent.description || agent.name} side="right" sideOffset={8} wrapTrigger triggerClassName="session-open-tooltip">
           <button className="session-open" {...open}>
-            <span>{agent.name}</span>
+            <span>{agentLabel(agent)}</span>
             <small>{detail}</small>
           </button>
         </AppTooltip>

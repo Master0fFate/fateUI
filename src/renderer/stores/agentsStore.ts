@@ -5,7 +5,8 @@ import { useRuntimeStore } from './runtimeStore';
 import { useUiStore } from './uiStore';
 
 export const emptyAgentLibrary = (): AgentLibrary => ({ agents: [], routines: [], runs: [], states: [], diagnostics: [], revisions: {}, nextDue: {} });
-export const agentDraft = ({ name, description, instructions, skillRefs, defaults, enabled }: AgentDefinition): AgentDraft => ({ name, description, instructions, skillRefs, defaults, enabled });
+export const agentDraft = ({ name, description, instructions, skillRefs, defaults, enabled, tone, avatar }: AgentDefinition): AgentDraft => ({ name, description, instructions, skillRefs, defaults, enabled, tone: tone ?? '', avatar: avatar ?? '' });
+export const agentLabel = ({ name, avatar }: { name: string; avatar?: string | undefined }): string => avatar ? `${avatar} ${name}` : name;
 export const routineDraft = ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify }: RoutineDefinition): RoutineDraft => ({ name, agentId, message, intervalMinutes, timeZone, enabled, notify, osNotify });
 export function agentError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
@@ -57,6 +58,11 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     useUiStore.getState().openSettingsSection('agent');
   },
 }));
+
+export const useAgentLabel = (agentId: string | null | undefined): string | null => useAgentsStore((state) => {
+  const agent = agentId ? state.library.agents.find((item) => item.id === agentId) : undefined;
+  return agent ? agentLabel(agent) : null;
+});
 
 export async function openAgent(agentId: string): Promise<void> {
   try {

@@ -13,9 +13,12 @@ export const agentDefaultsSchema = z.object({
   permission: agentPermissionSchema,
   workspace: z.enum(['shared', 'worktree']),
 }).strict();
+const tone = z.string().trim().max(500);
+const avatar = z.string().trim().max(16).refine((value) => !/[\s\p{Cc}]/u.test(value) && [...new Intl.Segmenter().segment(value)].length <= 2, 'Use one emoji as the avatar.');
 export const agentDraftSchema = z.object({
   name, description: z.string().max(1000), instructions: z.string().max(65_536),
   skillRefs: z.array(z.string().min(1).max(200)).max(50), defaults: agentDefaultsSchema, enabled: z.boolean(),
+  tone: tone.optional(), avatar: avatar.optional(),
 }).strict();
 export const agentDefinitionSchema = agentDraftSchema.extend({
   schemaVersion: z.literal(1), id, scope: z.enum(['user', 'project']), projectPath: z.string().nullable(),
@@ -41,7 +44,7 @@ export const agentRunSchema = z.object({
   sessionId: z.string().nullable(), resultSummary: z.string().max(4000), error: z.string().max(8000).nullable(), permission: agentPermissionSchema,
 }).strict();
 export const savedAgentSessionSchema = z.object({
-  schemaVersion: z.literal(1), agentId: id, revision, name, instructions: z.string().max(65_536),
+  schemaVersion: z.literal(1), agentId: id, revision, name, instructions: z.string().max(65_536), tone: tone.optional(),
   skillRefs: z.array(z.string().min(1).max(200)).max(50), defaults: agentDefaultsSchema,
   background: z.boolean(), runId: z.string().nullable(), projectPath: z.string().min(1),
 }).strict();
