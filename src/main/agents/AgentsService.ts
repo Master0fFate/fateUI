@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import {
   agentRunSchema,
   type AgentChange, type AgentDefinition, type AgentLibrary, type AgentRun, type AgentSave, type LegacyImportItem, type RoutineDefinition, type RoutineSave, type SavedAgentSession,
+  type WatchDefinition, type WatchSave,
 } from '../../shared/contracts/agents';
 import type { LegacyAutomations } from '../automations/LegacyAutomations';
 import type { PiRuntimeService } from '../pi/PiRuntimeService';
@@ -13,6 +14,7 @@ import { AgentRepository } from './AgentRepository';
 import type { AgentHomeContext, AgentMessage, AgentRunHandle, ProjectRunRequest } from './AgentRunTool';
 import { previewAutomationCopy } from './AutomationCopy';
 import { HomeOwnership } from './HomeOwnership';
+import { PageWatches } from './PageWatches';
 import { RoutineLedger } from './RoutineLedger';
 import { effectivePermission } from './RoutinePolicy';
 
@@ -35,6 +37,7 @@ interface ActiveRun {
 }
 const failure = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 8000);
 const RUNS = 'runs';
+const WATCHES = 'watches';
 const RUN_LIMIT_MS = 30 * 60_000;
 const ROUTINE_RETRY_MS = 60_000;
 const ROUTINE_MAX_SLEEP_MS = 24 * 60 * 60_000;
@@ -53,12 +56,18 @@ export class AgentsService {
   private monitorCache: { loadedAt: number; library: Promise<AgentLibrary> } | null = null;
   private changed: (change: AgentChange) => void = () => { this.monitorCache = null; };
   private readonly processId = randomUUID();
+  private readonly watches: PageWatches;
 
   constructor(
     private readonly host: AgentsHost,
     readonly repository = new AgentRepository(),
     private readonly legacy?: Pick<LegacyAutomations, 'list'>,
-  ) {}
+  ) {
+    this.watches = new PageWatches(repository, { hit: (agent, watch, text) => this.deliverWatchHit(agent, watch, text), changed: (agentId, notice) => {
+      this.changed({ agentId });
+      if (notice) this.host.notify?.({ agentId, message: notice }, true);
+    } });
+  }
   setChangeSink(sink: (change: AgentChange) => void): void {
     this.changed = (change) => { this.monitorCache = null; sink(change); };
   }
@@ -72,6 +81,7 @@ export class AgentsService {
   }
   beginShutdown(): void {
     this.stopping = true;
+    this.watches.stop();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -125,13 +135,14 @@ export class AgentsService {
       try {
         for (const id of await this.repository.ledgerJournal(agent.id).ids(501)) {
           const { state } = await this.ledger(agent.id).read(id);
-          if (id !== RUNS) library.nextDue[id] = state.nextDue;
+          if (id !== RUNS && id !== WATCHES) library.nextDue[id] = state.nextDue;
           library.runs.push(...state.runs.flatMap((run) => run.payload ? [run.payload] : []));
         }
       } catch (error) { library.diagnostics.push(`Run history ${agent.name}: ${failure(error)}`); }
     }
     library.runs.sort((a, b) => b.scheduledFor - a.scheduledFor);
     library.runs = library.runs.slice(0, 1000);
+    library.watchStates = await this.watches.states(library.watches);
     return library;
   }
 
@@ -146,7 +157,7 @@ export class AgentsService {
     if (library.diagnostics.length) throw new Error('Run records could not be read completely.');
     const homeAgent = this.homeAgent(projectPath);
     const agents = new Map(library.agents.map((agent) => [agent.id, agent.name]));
-    const routines = new Map(library.routines.map((routine) => [routine.id, routine.name]));
+    const routines = new Map([...library.routines, ...library.watches].map((item) => [item.id, item.name]));
     const runs = library.runs.filter((run) => homeAgent ? run.agentId === homeAgent : run.routineId === null && same(run.projectPath, projectPath));
     return { runs, checkedAt: Date.now(), partial: false,
       names: Object.fromEntries(runs.map((run) => [run.id, `${agents.get(run.agentId) ?? 'Deleted agent'} · ${run.routineId ? routines.get(run.routineId) ?? 'Routine' : path.basename(run.projectPath)}`])) };
@@ -171,7 +182,14 @@ export class AgentsService {
     this.wake();
     return routine;
   }
-  async remove(input: { kind: 'agent' | 'routine'; id: string; expected: { revision: number; digest: string } }): Promise<void> {
+  async saveWatch(input: WatchSave): Promise<WatchDefinition> {
+    this.admitWork();
+    const watch = await this.repository.saveWatch(input);
+    this.changed({ agentId: watch.agentId });
+    this.wake();
+    return watch;
+  }
+  async remove(input: { kind: 'agent' | 'routine' | 'watch'; id: string; expected: { revision: number; digest: string } }): Promise<void> {
     this.admitWork();
     if (input.kind === 'agent') {
       const library = await this.repository.list();
@@ -220,7 +238,7 @@ export class AgentsService {
     return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative.split(path.sep)[0]! : null;
   }
   private homeFor(agent: AgentDefinition): Promise<AgentHome> {
-    return this.repository.withHomeLock(agent.id, () => this.home(agent));
+    return this.serialize(`home:${agent.id}`, () => this.repository.withHomeLock(agent.id, () => this.home(agent)));
   }
   private async home(agent: AgentDefinition): Promise<AgentHome> {
     await fs.mkdir(this.repository.homePath(agent.id), { recursive: true, mode: 0o700 });
@@ -263,14 +281,18 @@ export class AgentsService {
     const run = agentRunSchema.parse({ schemaVersion: 2, id: `${RUNS}:${randomUUID()}`, agentId: agent.id, agentRevision: agent.revision, routineId: null, projectPath,
       request: input.request, mode: input.mode, scheduledFor: Date.now(), startedAt: null, finishedAt: null, status: 'queued', sessionId: null, resultSummary: '', error: null,
       permission: effectivePermission(home.permission, agent.defaults.permission) });
-    await this.serialize(agent.id, async () => {
-      const ledger = this.ledger(agent.id);
-      if (!await this.repository.ledgerJournal(agent.id).read(RUNS)) await ledger.create(RUNS, { anchor: Date.now(), intervalMs: 60_000, timeZone: 'UTC' });
-      await ledger.admit(RUNS, run);
-    });
+    await this.admit(agent.id, RUNS, run);
     await this.launch(agent, run, model);
     this.changed({ agentId: agent.id, runId: run.id, status: 'running' });
     return `Started a ${input.mode === 'goal' ? 'goal' : 'run'} in ${path.basename(projectPath)} (${run.id}). Its result will be posted in this chat when it finishes.`;
+  }
+
+  private admit(agentId: string, ledgerId: string, run: AgentRun): Promise<void> {
+    return this.serialize(agentId, async () => {
+      const ledger = this.ledger(agentId);
+      if (!await this.repository.ledgerJournal(agentId).read(ledgerId)) await ledger.create(ledgerId, { anchor: Date.now(), intervalMs: 60_000, timeZone: 'UTC' });
+      await ledger.admit(ledgerId, run);
+    });
   }
 
   private async launch(agent: AgentDefinition, run: AgentRun, model: { provider: string; id: string }): Promise<void> {
@@ -332,7 +354,7 @@ export class AgentsService {
       this.announce(agent.id, run.id, stopped || failed ? 'failed' : 'succeeded', stopped || failed ? `${agent.name}: run in ${project} failed.` : `${agent.name}: run in ${project} finished.`);
     } finally { this.active.delete(run.id); }
   }
-  private announce(agentId: string, runId: string, status: AgentRun['status'], message: string, routine?: RoutineDefinition): void {
+  private announce(agentId: string, runId: string, status: AgentRun['status'], message: string, routine?: Pick<RoutineDefinition, 'notify' | 'osNotify'>): void {
     const change = { agentId, runId, status, message };
     this.changed(routine?.notify === false ? { agentId, runId, status } : change);
     this.host.notify?.(change, routine?.osNotify ?? false);
@@ -369,6 +391,7 @@ export class AgentsService {
       else if (admitted?.payload) this.changed({ agentId: agent.id, runId: admitted.id, status: 'skipped' });
       wake = Math.min(wake, (await ledger.read(routine.id)).state.nextDue);
     }
+    wake = Math.min(wake, await this.watches.scan(library, now));
     this.nextWakeAt = wake === Infinity ? Infinity : Math.max(wake, Date.now() + 1_000);
   }
   private async deliverRoutine(agent: AgentDefinition, routine: RoutineDefinition, run: AgentRun): Promise<void> {
@@ -381,6 +404,18 @@ export class AgentsService {
       await this.changeRun(agent.id, routine.id, run.id, (current) => ({ ...current, status: 'failed', finishedAt: Date.now(), error: failure(error) })).catch(() => undefined);
       this.announce(agent.id, run.id, 'failed', `${agent.name}: ${routine.name} could not start. ${failure(error)}`, routine);
     }
+  }
+
+  private async deliverWatchHit(agent: AgentDefinition, watch: WatchDefinition, text: string): Promise<void> {
+    const id = `${WATCHES}:${randomUUID()}`;
+    const startedAt = Date.now();
+    let sessionId: string | null = null;
+    let error: string | null = null;
+    try { sessionId = await this.deliver(agent, { customType: 'fate-agent-watch', text, details: { watchId: watch.id, runId: id } }); }
+    catch (cause) { error = failure(cause); }
+    await this.admit(agent.id, WATCHES, agentRunSchema.parse({ schemaVersion: 2, id, agentId: agent.id, agentRevision: agent.revision, routineId: watch.id, projectPath: this.repository.homePath(agent.id),
+      request: text, mode: 'turn', scheduledFor: startedAt, startedAt, finishedAt: Date.now(), status: error ? 'failed' : 'succeeded', sessionId, resultSummary: '', error, permission: agent.defaults.permission }));
+    this.announce(agent.id, id, error ? 'failed' : 'succeeded', error ? `${agent.name}: ${watch.name} hit, but the chat could not be reached. ${error}` : `${agent.name}: ${watch.name} hit.`, { notify: true, osNotify: true });
   }
 
   private async findRun(runId: string): Promise<{ run: AgentRun; ledgerId: string }> {

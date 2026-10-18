@@ -20,11 +20,13 @@ function agentStatus(agent: AgentDefinition, library: AgentLibrary, now: number)
   const active = runs.find((run) => run.status === 'running' || run.status === 'queued');
   if (active) return { attention: 'running', detail: `Working in ${folderName(active.projectPath)}` };
   if (!agent.enabled) return { attention: null, detail: 'Off' };
+  const paused = library.watches.some((watch) => watch.agentId === agent.id && watch.enabled
+    && library.watchStates.some((state) => state.watchId === watch.id && state.revision === watch.revision && state.pausedAt !== null));
   const last = runs.find((run) => run.finishedAt !== null);
-  if (!last?.finishedAt) return { attention: null, detail: permissionLabels[agent.defaults.permission] };
+  if (!last?.finishedAt) return { attention: null, detail: paused ? 'Watch paused' : permissionLabels[agent.defaults.permission] };
   const seen = library.states.find((state) => state.agentId === agent.id)?.lastOpenedAt ?? 0;
   const failed = last.status === 'failed' || last.status === 'needs-attention';
-  return { attention: last.finishedAt > seen ? failed ? 'error' : 'completed' : null, detail: `${failed ? 'Run failed' : 'Run done'} · ${formatRelativeTime(last.finishedAt, now)}` };
+  return { attention: last.finishedAt > seen ? failed ? 'error' : 'completed' : null, detail: paused ? 'Watch paused' : `${failed ? 'Run failed' : 'Run done'} · ${formatRelativeTime(last.finishedAt, now)}` };
 }
 
 export function SidebarAgents() {

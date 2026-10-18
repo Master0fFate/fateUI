@@ -29,6 +29,24 @@ export const routineDraftSchema = z.object({
 export const routineDefinitionSchema = routineDraftSchema.extend({
   schemaVersion: z.literal(2), id, revision, createdAt: time, updatedAt: time, deleted: z.boolean(), automationSourceId: id.nullable(),
 }).passthrough();
+export const watchConditionSchema = z.enum(['change', 'appears', 'disappears', 'below', 'above']);
+const watchFields = z.object({
+  name, agentId: id,
+  url: z.string().trim().max(2048).refine((value) => { try { return ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; } }, 'Enter an http or https address.'),
+  condition: watchConditionSchema, text: z.string().trim().max(500), price: z.number().positive().max(1_000_000_000).nullable(),
+  intervalMinutes: z.number().int().min(1).max(10_080), enabled: z.boolean(),
+}).strict();
+const watchTarget = (watch: z.infer<typeof watchFields>) => watch.condition === 'change' || (watch.condition === 'appears' || watch.condition === 'disappears' ? watch.text.length > 0 : watch.price !== null);
+export const watchDraftSchema = watchFields.refine(watchTarget, 'Add the text or price to watch for.');
+export const watchDefinitionSchema = watchFields.extend({
+  schemaVersion: z.literal(1), id, revision, createdAt: time, updatedAt: time, deleted: z.boolean(),
+}).passthrough().refine(watchTarget, 'Add the text or price to watch for.');
+export const watchStateSchema = z.object({
+  schemaVersion: z.literal(1), watchId: id, revision, basis: z.string().regex(/^[a-f0-9]{64}$/u),
+  nextCheckAt: time, lastCheckedAt: time.nullable(), lastHitAt: time.nullable(),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/u).nullable(), matched: z.boolean().nullable(), price: z.number().nonnegative().nullable(),
+  failures: z.number().int().min(0).max(5), pausedAt: time.nullable(), error: z.string().max(1000).nullable(),
+}).strict();
 export const agentStateSchema = z.object({
   schemaVersion: z.literal(1), agentId: id, revision, homeSessionId: z.string().nullable(), homeProjectPath: z.string().nullable(),
   appliedRevision: z.number().int().nonnegative(), lastOpenedAt: time.nullable(), lastRunAt: time.nullable(),
@@ -49,11 +67,13 @@ export const agentLibrarySchema = z.object({
   agents: z.array(agentDefinitionSchema).max(500), routines: z.array(routineDefinitionSchema).max(500),
   runs: z.array(agentRunSchema).max(1000), states: z.array(agentStateSchema).max(500), diagnostics: z.array(z.string()).max(500),
   nextDue: z.record(z.number().nullable()),
+  watches: z.array(watchDefinitionSchema).max(500), watchStates: z.array(watchStateSchema).max(500),
 }).strict();
 const expected = z.object({ revision, digest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
 export const agentSaveSchema = z.object({ id: id.optional(), expected: expected.nullable(), value: agentDraftSchema }).strict();
 export const routineSaveSchema = z.object({ id: id.optional(), expected: expected.nullable(), value: routineDraftSchema }).strict();
-export const libraryItemSchema = z.object({ kind: z.enum(['agent', 'routine']), id, expected }).strict();
+export const watchSaveSchema = z.object({ id: id.optional(), expected: expected.nullable(), value: watchDraftSchema }).strict();
+export const libraryItemSchema = z.object({ kind: z.enum(['agent', 'routine', 'watch']), id, expected }).strict();
 export const agentOpenSchema = z.object({ agentId: id }).strict();
 export const automationCopyInputSchema = z.object({ automationId: id, sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u), agentId: id }).strict();
 export const legacyImportItemSchema = z.object({
@@ -76,11 +96,17 @@ export type SavedAgentSession = z.infer<typeof savedAgentSessionSchema>;
 export type AgentLibrary = z.infer<typeof agentLibraryResultSchema>;
 export type AgentSave = z.infer<typeof agentSaveSchema>;
 export type RoutineSave = z.infer<typeof routineSaveSchema>;
+export type WatchCondition = z.infer<typeof watchConditionSchema>;
+export type WatchDefinition = z.infer<typeof watchDefinitionSchema>;
+export type WatchDraft = z.infer<typeof watchDraftSchema>;
+export type WatchState = z.infer<typeof watchStateSchema>;
+export type WatchSave = z.infer<typeof watchSaveSchema>;
 
 export const agentChannels = {
   agentsList: 'agents:list', agentsSave: 'agents:save', agentsSaveRoutine: 'agents:save-routine', agentsDelete: 'agents:delete',
   agentsOpen: 'agents:open', agentsCancel: 'agents:cancel', agentsOpenRun: 'agents:open-run',
   agentsLegacyList: 'agents:legacy-list', agentsCopy: 'agents:copy', agentsChanged: 'agents:changed',
+  agentsSaveWatch: 'agents:save-watch',
 } as const;
 export const agentRunIdSchema = z.object({ runId: z.string().min(1).max(200) }).strict();
 export const agentChangedSchema = z.object({ agentId: id.optional(), runId: z.string().optional(), status: agentRunSchema.shape.status.optional(), message: z.string().max(8000).optional(), focus: z.boolean().optional() }).strict();
@@ -89,6 +115,7 @@ export interface AgentsApi {
   getAgentLibrary(): Promise<AgentLibrary>;
   saveAgentDefinition(input: AgentSave): Promise<AgentDefinition>;
   saveRoutineDefinition(input: RoutineSave): Promise<RoutineDefinition>;
+  saveWatchDefinition(input: WatchSave): Promise<WatchDefinition>;
   deleteAgentLibraryItem(input: z.infer<typeof libraryItemSchema>): Promise<void>;
   openAgentConversation(input: z.infer<typeof agentOpenSchema>): Promise<RuntimeState>;
   cancelAgentRun(input: z.infer<typeof agentRunIdSchema>): Promise<void>;
