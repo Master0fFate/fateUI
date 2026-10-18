@@ -108,6 +108,17 @@ export const agentChannels = {
   agentsLegacyList: 'agents:legacy-list', agentsCopy: 'agents:copy', agentsChanged: 'agents:changed',
   agentsSaveWatch: 'agents:save-watch',
 } as const;
+export const agentInboxChannels = { agentsInbox: 'agents:inbox', agentsInboxRead: 'agents:inbox-read', agentsNotifications: 'agents:notifications' } as const;
+export const agentInboxItemSchema = z.object({
+  id, agentId: id, kind: z.enum(['run', 'routine', 'watch']), status: z.enum(['succeeded', 'failed', 'interrupted', 'notice']),
+  title: z.string().trim().min(1).max(200), summary: z.string().max(2000), runId: z.string().min(1).max(200).nullable(), source: z.enum(['chat', 'run']),
+  at: time, readAt: time.nullable(),
+}).strict();
+export const agentInboxSchema = z.object({ items: z.array(agentInboxItemSchema).max(500), unread: z.record(z.number().int().nonnegative()), muted: z.array(id).max(1000) }).strict();
+export const agentInboxReadSchema = z.object({ agentId: id.optional(), itemIds: z.array(id).max(500).optional() }).strict();
+export const agentNotificationsSchema = z.object({ agentId: id, notify: z.boolean() }).strict();
+export type AgentInboxItem = z.infer<typeof agentInboxItemSchema>;
+export type AgentInboxOverview = z.infer<typeof agentInboxSchema>;
 export const agentRunIdSchema = z.object({ runId: z.string().min(1).max(200) }).strict();
 export const agentChangedSchema = z.object({ agentId: id.optional(), runId: z.string().optional(), status: agentRunSchema.shape.status.optional(), message: z.string().max(8000).optional(), focus: z.boolean().optional() }).strict();
 export type AgentChange = z.infer<typeof agentChangedSchema>;
@@ -123,4 +134,7 @@ export interface AgentsApi {
   listLegacyAutomations(): Promise<LegacyImportItem[]>;
   copyAutomationToRoutine(input: z.infer<typeof automationCopyInputSchema>): Promise<RoutineDefinition>;
   onAgentLibraryChanged(listener: (event: AgentChange) => void): () => void;
+  getAgentInbox(): Promise<AgentInboxOverview>;
+  markAgentInboxRead(input: z.infer<typeof agentInboxReadSchema>): Promise<void>;
+  setAgentNotifications(input: z.infer<typeof agentNotificationsSchema>): Promise<void>;
 }

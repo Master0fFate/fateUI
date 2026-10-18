@@ -393,7 +393,7 @@ app.whenReady().then(async () => {
       }
     } },
     savedAgents: { scheduleRoutines: false, legacy: legacyAutomations,
-      notify: (change, osNotification) => { notifyAgentRun(change, osNotification); } },
+      notify: (change, osNotification) => { notifyAgentRun(change, osNotification && !BrowserWindow.getFocusedWindow()); } },
   });
   core = await coreStartup;
   if (hostStopping) { core.shutdownCore(); return; }

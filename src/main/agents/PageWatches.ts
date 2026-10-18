@@ -53,7 +53,7 @@ function restart(watch: WatchDefinition, previous: WatchState | null, now: numbe
 
 export interface WatchEvents {
   hit(agent: AgentDefinition, watch: WatchDefinition, text: string): Promise<void>;
-  changed(agentId: string, notice?: string): void;
+  changed(agentId: string, paused?: { title: string; summary: string }): void;
 }
 
 export class PageWatches {
@@ -93,7 +93,7 @@ export class PageWatches {
       : await this.check(watch, state, previousText, now);
     await this.repository.watchStateJournal().save(watch.id, snapshot, { metadata: next.state, body: next.text });
     if (next.hit) await this.events.hit(agent, watch, `Watch "${watch.name}" at ${watch.url}: ${next.hit}`).catch(() => undefined);
-    else this.events.changed(agent.id, next.state.pausedAt === null ? undefined : `${agent.name}: ${watch.name} paused after ${PAUSE_AFTER} failed checks. ${next.state.error}`);
+    else this.events.changed(agent.id, next.state.pausedAt === null ? undefined : { title: `${watch.name} paused after ${PAUSE_AFTER} failed checks`, summary: next.state.error ?? '' });
     return next.state.pausedAt === null ? next.state.nextCheckAt : Infinity;
   }
 

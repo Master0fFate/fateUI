@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { DesktopConnectionApi } from './connections';
 import { memoryLearningSettingsSchema, learningTurnSchema, type LearningApi } from './learning';
-import { agentChannels, type AgentsApi } from './agents';
+import { agentChannels, agentInboxChannels, type AgentsApi } from './agents';
 import type { MonitorDashboard, MonitorReadInput } from './monitorDashboard';
 import { MAX_SPEECH_STREAM_FEED_SAMPLES, SPEECH_PCM_BYTES_PER_SAMPLE } from '../speech';
 import {
@@ -60,6 +60,7 @@ import {
 
 export const ipcChannels = {
   ...agentChannels,
+  ...agentInboxChannels,
   connectionProfiles: 'connections:list-profiles',
   connectionCredentialPick: 'connections:pick-private-credential',
   connectionProfileSave: 'connections:save-ssh-profile',

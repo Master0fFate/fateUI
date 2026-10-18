@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron';
 import {
   agentChannels, agentsEmptyInputSchema, agentLibraryResultSchema, agentSaveSchema, agentDefinitionSchema, routineSaveSchema, routineDefinitionSchema, watchSaveSchema, watchDefinitionSchema,
   libraryItemSchema, agentOpenSchema, agentRunIdSchema, automationCopyInputSchema, agentChangedSchema, legacyImportListSchema,
+  agentInboxChannels, agentInboxSchema, agentInboxReadSchema, agentNotificationsSchema,
 } from '../../shared/contracts/agents';
 import { runtimeStateSchema, type RuntimeState } from '../../shared/contracts/ipc';
 import type { AgentHome, AgentsService } from './AgentsService';
@@ -31,6 +32,9 @@ export function registerAgentsIpc(handle: Register, agents: AgentsService | unde
       ? await activate.home(await service().open(target.agentId), owner(event))
       : await activate.session(target.projectPath, target.sessionId, owner(event)));
   });
+  handle(agentInboxChannels.agentsInbox, async (_event, input) => { agentsEmptyInputSchema.parse(input); return agentInboxSchema.parse(await service().inbox.overview()); });
+  handle(agentInboxChannels.agentsInboxRead, async (_event, input) => { const { agentId, itemIds } = agentInboxReadSchema.parse(input); await service().inbox.markRead(agentId, itemIds); });
+  handle(agentInboxChannels.agentsNotifications, async (_event, input) => { const { agentId, notify } = agentNotificationsSchema.parse(input); await service().setNotifications(agentId, notify); });
   handle(agentChannels.agentsLegacyList, async (_event, input) => { agentsEmptyInputSchema.parse(input); return legacyImportListSchema.parse(await service().listLegacy()); });
   handle(agentChannels.agentsCopy, async (_event, input) => {
     const parsed = automationCopyInputSchema.parse(input);

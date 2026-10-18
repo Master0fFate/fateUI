@@ -12,6 +12,7 @@ import type { MonitorRunsSource } from '../pi/monitor/MonitorDashboard';
 import { projectSessionDirectory } from '../pi/PiSessionRepository';
 import { AgentRepository } from './AgentRepository';
 import type { AgentHomeContext, AgentMessage, AgentRunHandle, ProjectRunRequest } from './AgentRunTool';
+import { AgentInbox, runNotice, type AgentNotice, type RunOutcome } from './AgentInbox';
 import { previewAutomationCopy } from './AutomationCopy';
 import { HomeOwnership } from './HomeOwnership';
 import { PageWatches } from './PageWatches';
@@ -57,15 +58,17 @@ export class AgentsService {
   private changed: (change: AgentChange) => void = () => { this.monitorCache = null; };
   private readonly processId = randomUUID();
   private readonly watches: PageWatches;
+  readonly inbox: AgentInbox;
 
   constructor(
     private readonly host: AgentsHost,
     readonly repository = new AgentRepository(),
     private readonly legacy?: Pick<LegacyAutomations, 'list'>,
   ) {
-    this.watches = new PageWatches(repository, { hit: (agent, watch, text) => this.deliverWatchHit(agent, watch, text), changed: (agentId, notice) => {
-      this.changed({ agentId });
-      if (notice) this.host.notify?.({ agentId, message: notice }, true);
+    this.inbox = new AgentInbox(repository.root);
+    this.watches = new PageWatches(repository, { hit: (agent, watch, text) => this.deliverWatchHit(agent, watch, text), changed: (agentId, paused) => {
+      if (!paused) this.changed({ agentId });
+      else void this.announce(agentId, { kind: 'watch', status: 'failed', ...paused, runId: null, source: 'chat' }).catch(() => undefined);
     } });
   }
   setChangeSink(sink: (change: AgentChange) => void): void {
@@ -121,10 +124,22 @@ export class AgentsService {
       await this.repository.migrateLegacyRoutines();
       for (const agent of (await this.repository.list()).agents) {
         const journal = this.repository.ledgerJournal(agent.id);
-        for (const id of await journal.ids(501)) await this.serialize(agent.id, () => this.ledger(agent.id).recover(id, Date.now(), true, this.processId));
+        const ids = await journal.ids(501);
+        for (const id of ids) await this.serialize(agent.id, () => this.ledger(agent.id).recover(id, Date.now(), true, this.processId));
+        if (ids.includes(RUNS)) await this.reconcile(agent.id, true).catch(() => undefined);
       }
     })().catch((error: unknown) => { this.initialized = null; throw error; });
     return this.initialized;
+  }
+  private async reconcile(agentId: string, recheck: boolean): Promise<void> {
+    const { state } = await this.ledger(agentId).read(RUNS);
+    if (await this.inbox.reconcile(agentId, state.runs.flatMap((run) => run.payload ? [run.payload] : []))) this.changed({ agentId });
+    const leased = Math.max(0, ...state.runs.filter((run) => run.status === 'running' && run.owner !== this.processId).map((run) => run.expiresAt ?? 0));
+    if (!recheck || leased <= Date.now()) return;
+    setTimeout(() => {
+      if (this.stopping) return;
+      void this.serialize(agentId, () => this.ledger(agentId).recover(RUNS, Date.now(), true, this.processId)).then(() => this.reconcile(agentId, false)).catch(() => undefined);
+    }, leased - Date.now() + 1_000).unref?.();
   }
 
   async list(): Promise<AgentLibrary> {
@@ -328,7 +343,8 @@ export class AgentsService {
     } catch (error) {
       this.stopTimers(active);
       this.active.delete(run.id);
-      await this.changeRun(agent.id, RUNS, run.id, (current) => ({ ...current, status: 'failed', finishedAt: Date.now(), error: failure(error) })).catch(() => undefined);
+      const failed = await this.changeRun(agent.id, RUNS, run.id, (current) => ({ ...current, status: 'failed', finishedAt: Date.now(), error: failure(error) })).catch(() => null);
+      if (failed) await this.announce(agent.id, runNotice(failed, 'failed')).catch(() => undefined);
       throw error;
     }
   }
@@ -345,19 +361,32 @@ export class AgentsService {
     const stopped = active.cancelled;
     const reason = stopped ? 'The run was stopped.' : error ?? 'The run did not finish. Open its conversation to see why.';
     try {
-      await this.changeRun(agent.id, RUNS, run.id, (current) => ({ ...current, status: stopped || failed ? 'failed' : 'succeeded', resultSummary: summary, error: stopped || failed ? reason : null, finishedAt: Date.now() }));
+      const saved = await this.changeRun(agent.id, RUNS, run.id, (current) => ({ ...current, status: stopped || failed ? 'failed' : 'succeeded', resultSummary: summary, error: stopped || failed ? reason : null, finishedAt: Date.now() }));
       const project = path.basename(run.projectPath);
       const text = stopped || failed
         ? `The run in ${project} failed: ${reason}\nRequest: ${run.request.slice(0, 1000)}${summary ? `\n\nLast reply:\n${summary}` : ''}`
         : `The run in ${project} finished.\nRequest: ${run.request.slice(0, 1000)}\n\nResult:\n${summary || 'No final reply.'}`;
       if (!this.stopping) await this.deliver(agent, { customType: 'fate-agent-run-result', text, details: { runId: run.id, projectPath: run.projectPath, sessionId: active.handle?.sessionId ?? null, failed: stopped || failed } }).catch(() => undefined);
-      this.announce(agent.id, run.id, stopped || failed ? 'failed' : 'succeeded', stopped || failed ? `${agent.name}: run in ${project} failed.` : `${agent.name}: run in ${project} finished.`);
+      const outcome: RunOutcome = this.stopping ? 'interrupted' : stopped || failed ? 'failed' : 'succeeded';
+      await this.announce(agent.id, runNotice(saved, outcome)).catch(() => undefined);
     } finally { this.active.delete(run.id); }
   }
-  private announce(agentId: string, runId: string, status: AgentRun['status'], message: string, routine?: Pick<RoutineDefinition, 'notify' | 'osNotify'>): void {
-    const change = { agentId, runId, status, message };
-    this.changed(routine?.notify === false ? { agentId, runId, status } : change);
-    this.host.notify?.(change, routine?.osNotify ?? false);
+  async announce(agentId: string, notice: AgentNotice, delivery: { inApp?: boolean; os?: boolean } = {}): Promise<void> {
+    const { inApp = true, os = true } = delivery;
+    await this.initialize().catch(() => undefined);
+    const name = (await this.repository.getAgent(agentId).catch(() => null))?.item.name ?? 'Agent';
+    const status = ({ succeeded: 'succeeded', failed: 'failed', interrupted: 'needs-attention', notice: null } as const)[notice.status];
+    const target = notice.runId && (notice.source === 'run' || notice.kind === 'routine') ? { runId: notice.runId } : {};
+    const change = { agentId, ...target, ...(status ? { status } : {}), message: `${name}: ${notice.title}.` };
+    try { if (inApp) await this.inbox.add(agentId, notice); }
+    finally {
+      this.changed(inApp ? change : { agentId, ...target, ...(status ? { status } : {}) });
+      if (os && !this.stopping) this.host.notify?.(change, await this.inbox.notifies(agentId).catch(() => true));
+    }
+  }
+  async setNotifications(agentId: string, notify: boolean): Promise<void> {
+    await this.repository.getAgent(agentId);
+    await this.inbox.setNotify(agentId, notify);
   }
   private changeRun(agentId: string, ledgerId: string, runId: string, change: (run: AgentRun) => AgentRun): Promise<AgentRun> {
     return this.serialize(agentId, () => this.ledger(agentId).update(ledgerId, runId, change));
@@ -399,10 +428,12 @@ export class AgentsService {
       const sessionId = await this.deliver(agent, { customType: 'fate-agent-routine', text: `Routine "${routine.name}":\n${routine.message}`, details: { routineId: routine.id, runId: run.id } });
       const now = Date.now();
       await this.changeRun(agent.id, routine.id, run.id, (current) => ({ ...current, status: 'succeeded', startedAt: now, finishedAt: now, sessionId }));
-      this.announce(agent.id, run.id, 'succeeded', `${agent.name}: ${routine.name} started.`, routine);
+      await this.announce(agent.id, { kind: 'routine', status: 'succeeded', title: `${routine.name} started`, summary: routine.message, runId: run.id, source: 'chat' },
+        { inApp: routine.notify, os: routine.osNotify }).catch(() => undefined);
     } catch (error) {
       await this.changeRun(agent.id, routine.id, run.id, (current) => ({ ...current, status: 'failed', finishedAt: Date.now(), error: failure(error) })).catch(() => undefined);
-      this.announce(agent.id, run.id, 'failed', `${agent.name}: ${routine.name} could not start. ${failure(error)}`, routine);
+      await this.announce(agent.id, { kind: 'routine', status: 'failed', title: `${routine.name} could not start`, summary: failure(error), runId: run.id, source: 'chat' },
+        { inApp: routine.notify }).catch(() => undefined);
     }
   }
 
@@ -415,7 +446,7 @@ export class AgentsService {
     catch (cause) { error = failure(cause); }
     await this.admit(agent.id, WATCHES, agentRunSchema.parse({ schemaVersion: 2, id, agentId: agent.id, agentRevision: agent.revision, routineId: watch.id, projectPath: this.repository.homePath(agent.id),
       request: text, mode: 'turn', scheduledFor: startedAt, startedAt, finishedAt: Date.now(), status: error ? 'failed' : 'succeeded', sessionId, resultSummary: '', error, permission: agent.defaults.permission }));
-    this.announce(agent.id, id, error ? 'failed' : 'succeeded', error ? `${agent.name}: ${watch.name} hit, but the chat could not be reached. ${error}` : `${agent.name}: ${watch.name} hit.`, { notify: true, osNotify: true });
+    await this.announce(agent.id, { kind: 'watch', status: error ? 'failed' : 'succeeded', title: error ? `${watch.name} hit, but the chat could not be reached` : `${watch.name} hit`, summary: error ?? text, runId: id, source: 'chat' }).catch(() => undefined);
   }
 
   private async findRun(runId: string): Promise<{ run: AgentRun; ledgerId: string }> {
