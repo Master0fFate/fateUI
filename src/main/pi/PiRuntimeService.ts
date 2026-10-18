@@ -1476,7 +1476,6 @@ export class PiRuntimeService {
     ]);
     return {
       permission: slot.permissionLevel,
-      agentPermission: preset.defaults.permission,
       tools: new Set(slot.runtime.session.getActiveToolNames()),
       google: { enabled: preset.google === true, status },
       memory: this.learningService?.layers() ?? null,
@@ -4380,7 +4379,10 @@ export class PiRuntimeService {
     }
     let permission: PermissionLevel;
     try {
-      permission = agentSessionPermission(session, await this.permissionForSession(session, ownsSession));
+      const home = getAgentSessionPreset(session);
+      permission = home && !home.runId
+        ? this.resolveHealthyPermission(home.defaults.permission)
+        : agentSessionPermission(session, await this.permissionForSession(session, ownsSession));
     } catch (error) {
       if (!ownsSession()) return;
       slot.permissionError = normalizeError(error);

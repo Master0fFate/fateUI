@@ -7,7 +7,6 @@ export const CAPABILITIES_TOOL_NAME = 'fate_capabilities';
 
 export interface CapabilityState {
   permission: PermissionLevel;
-  agentPermission: PermissionLevel;
   tools: ReadonlySet<string>;
   google: { enabled: boolean; status: GoogleStatus | null };
   memory: { global: boolean; project: boolean } | null;
@@ -17,10 +16,8 @@ export interface CapabilityState {
 const AGENT_CARD = 'Settings → Agent → Saved agents';
 const levelNames: Record<PermissionLevel, string> = { 'read-only': 'Read only', edit: 'Edit files', 'full-access': 'Full access' };
 
-function raise(state: CapabilityState, level: PermissionLevel): string {
-  return state.agentPermission === level || state.agentPermission === 'full-access'
-    ? `pick ${levelNames[level]} in the permission menu next to the chat box`
-    : `set this Agent's permission to ${levelNames[level]} on its card in ${AGENT_CARD}, then pick it in the permission menu next to the chat box`;
+function raise(level: PermissionLevel): string {
+  return `the user picks ${levelNames[level]} in the permission menu next to the chat box, which changes this Agent's permission`;
 }
 
 function googleLine(state: CapabilityState): string {
@@ -45,10 +42,10 @@ export function describeCapabilities(state: CapabilityState): string {
   const has = (name: string) => tools.has(name);
   const memory = state.memory;
   return [
-    `Permission: ${levelNames[state.permission]} in this chat; this Agent's limit is ${levelNames[state.agentPermission]}.`,
+    `Permission: ${levelNames[state.permission]}. The permission menu next to the chat box and the one on this Agent's card in ${AGENT_CARD} are the same setting.`,
     'Projects: on. run_in_project starts background work in any project the user trusts (opened in Fate UI with Trust and open). Mode goal adds GoalMax with checked completion; runs can delegate to Agent Teams.',
-    `Your folder: read, grep, find and ls${has('write') ? ', write and edit' : `; writing needs Edit files: ${raise(state, 'edit')}`}.`,
-    has('bash') ? 'Shell: on.' : `Shell: off. It needs Full access: ${raise(state, 'full-access')}.`,
+    `Your folder: read, grep, find and ls${has('write') ? ', write and edit' : `; writing needs Edit files: ${raise('edit')}`}.`,
+    has('bash') ? 'Shell: on.' : `Shell: off. It needs Full access: ${raise('full-access')}.`,
     has('web_search') ? 'Web: web_search and web_fetch are on.' : `Web: web_fetch is on; web_search is off. The user turns it on in Settings → Agent → Web search (queries go to Parallel).`,
     [...tools].some((name) => name.startsWith('browser_')) ? 'Browser: on while this chat is the open one.' : 'Browser: available only while this chat is the open one in the window.',
     googleLine(state),
@@ -56,7 +53,7 @@ export function describeCapabilities(state: CapabilityState): string {
       : memory.global || memory.project ? `Memory: on (${[memory.global ? 'GLOBAL profile' : '', memory.project ? 'this Agent\'s PROJECT store' : ''].filter(Boolean).join(' and ')}). remember saves a draft the user approves in Learning.`
         : 'Memory: off. The user turns on Settings → Memory Learning and its GLOBAL and PROJECT layers; then remember saves drafts they approve in Learning.',
     state.mcpServers === 0 ? 'MCP servers: none. The user adds them in Settings → MCP; calling them needs Full access.'
-      : has('fate_mcp') && state.permission === 'full-access' ? `MCP servers: ${state.mcpServers} enabled, use fate_mcp.` : `MCP servers: ${state.mcpServers} enabled, but calling them needs Full access: ${raise(state, 'full-access')}.`,
+      : has('fate_mcp') && state.permission === 'full-access' ? `MCP servers: ${state.mcpServers} enabled, use fate_mcp.` : `MCP servers: ${state.mcpServers} enabled, but calling them needs Full access: ${raise('full-access')}.`,
     `PDFs: pdf_read is on${has('pdf_fill') ? '; pdf_fill and pdf_create are on' : '; filling and creating PDFs needs Edit files'}.`,
     has('generate_image') ? 'Images: generate_image is on.' : 'Images: off.',
     `Schedules: the user adds them on this Agent's card in ${AGENT_CARD}. A Routine posts a message into this chat on an interval; a Watch checks a public page for a change, text or a price and messages you only on a hit. Both run while Fate UI is open.`,

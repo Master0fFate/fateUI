@@ -68,7 +68,7 @@ An Agent can read your Gmail and your primary Google Calendar, and send mail or 
 
 ## Permissions and limits
 
-- An Agent's **permission** (Read only, Edit files or Full access) caps its conversation and every run it starts. The permission you set in the Agent's conversation lowers it further. Project trust still applies; a run can only target a trusted project.
+- An Agent's **permission** (Read only, Edit files or Full access) applies to its conversation and caps every run it starts. The permission menu in its conversation and the one on its card are the same setting: changing either saves the Agent and restarts its idle conversation at the new level. Project trust still applies; a run can only target a trusted project.
 - **Edit files** writes without asking per file, like a normal conversation. Every change is in the run's conversation.
 - **Full access** adds shell commands and MCP servers, for that Agent only. Choose it per Agent; existing Agents keep their permission.
 - Agent Teams children in a run are capped at the run's permission.

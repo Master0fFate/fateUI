@@ -9,10 +9,10 @@ import { LearningIndicator } from '../learning/LearningIndicator';
 import { RecoveryReviewNotice } from './RecoveryReviewNotice';
 import { learningDraftKey, useLearningStore } from '../learning/learningStore';
 import * as Popover from '@radix-ui/react-popover';
-import { ArrowRight, ArrowUp, AtSign, Bot, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, FileText, FolderOpen, GitFork, Globe2, Hash, History, ImagePlus, LoaderCircle, MessageSquarePlus, Mic, Paperclip, Pencil, Plug, Shield, ShieldCheck, Sparkles, Square, Target, Trash2, TriangleAlert, X, Zap } from 'lucide-react';
+import { ArrowRight, ArrowUp, AtSign, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, FileText, FolderOpen, GitFork, Globe2, Hash, History, ImagePlus, LoaderCircle, MessageSquarePlus, Mic, Paperclip, Pencil, Plug, Shield, ShieldCheck, Sparkles, Square, Target, Trash2, TriangleAlert, X, Zap } from 'lucide-react';
 import { type ChangeEvent, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { BrowserAnnotation, FileEntry, PermissionLevel, PromptInput, QueueMutationInput, SpeechStreamUpdate } from '../../../shared/contracts/ipc';
+import type { BrowserAnnotation, FileEntry, PromptInput, QueueMutationInput, SpeechStreamUpdate } from '../../../shared/contracts/ipc';
 import { readSessionReference, type SessionReferenceAttachment } from '../../../shared/sessionReferences';
 import { subagentDisplayName, subagentHandle } from '../../../shared/subagentIdentity';
 import { AppTooltip } from '../../components/AppTooltip';
@@ -20,7 +20,7 @@ import { useSkinComponents } from '../../skins/SkinProvider';
 import { SelectControl } from '../../components/SelectControl';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
-import { useAgentsStore } from '../../stores/agentsStore';
+import { saveAgentPermission } from '../../stores/agentsStore';
 import { useGoalMaxStore } from '../../stores/goalMaxStore';
 import { useBrowserStore } from '../../stores/browserStore';
 import { GoalMaxRail } from '../goalmaxxing/GoalMaxRail';
@@ -73,7 +73,6 @@ const emptySessionDraft = (): SessionDraft => ({
 type DraftHistorySnapshot = Pick<SessionDraft, 'text' | 'selectionStart' | 'selectionEnd' | 'scrollTop'>;
 type DraftHistory = { key: string | null; undo: DraftHistorySnapshot[]; redo: DraftHistorySnapshot[] };
 const MAX_DRAFT_HISTORY = 100;
-const permissionRanks: Record<PermissionLevel, number> = { 'read-only': 0, edit: 1, 'full-access': 2 };
 
 // Keep unfinished identity-keyed drafts when the composer remounts within the renderer.
 const MAX_CACHED_SESSION_DRAFTS = 50;
@@ -762,9 +761,6 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const permissionLevel = runtime.permissionLevel ?? 'edit';
   const permissionLabel = permissionLevel === 'read-only' ? 'Read only' : permissionLevel === 'full-access' ? 'Full access' : 'Edit files';
   const PermissionIcon = permissionLevel === 'read-only' ? Shield : permissionLevel === 'full-access' ? Zap : ShieldCheck;
-  const agentId = runtime.project?.agentId ?? null;
-  const agentPermission = useAgentsStore((state) => agentId ? state.library.agents.find((agent) => agent.id === agentId)?.defaults.permission ?? null : null);
-  const aboveAgent = (level: PermissionLevel) => agentPermission !== null && permissionRanks[level] > permissionRanks[agentPermission];
   const forkPoint = runtime.forkPoints?.at(-1);
   const activeSessionRunning = runtime.activeSessionRunning ?? runtime.streaming;
   const childWorkActive = hasStoppableChildWork(runtime);
@@ -2507,6 +2503,14 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     setPermissionBusy(true);
     setComposerError(null);
     try {
+      const agentId = origin.project?.agentId;
+      if (agentId) {
+        await saveAgentPermission(agentId, level);
+        if (!mounted.current) return;
+        setPermissionMenuOpen(false);
+        setConfirmFullAccess(false);
+        return;
+      }
       const state = await getFateApi().setPermissionLevel(level);
       if (!mounted.current) return;
       const current = useRuntimeStore.getState().runtime;
@@ -2908,7 +2912,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                   {confirmFullAccess ? (
                     <div className="permission-confirm">
                       <TriangleAlert size={17} aria-hidden="true" />
-                      <div><strong>Enable Full access?</strong><span>Saved for this session · no sandbox</span></div>
+                      <div><strong>Enable Full access?</strong><span>{runtime.project?.agentId ? 'Saved to this agent' : 'Saved for this session'} · no sandbox</span></div>
                       <p>Pi can read and modify host files outside this project and run shell commands with your user account.</p>
                       <div className="permission-confirm-actions">
                         <button type="button" onClick={() => setConfirmFullAccess(false)}>Cancel</button>
@@ -2921,17 +2925,12 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                         <button type="button" data-active={permissionLevel === 'read-only'} aria-label="Read only" disabled={permissionBusy} onClick={() => void changePermissionLevel('read-only')}>
                           <Shield size={15} aria-hidden="true" /><strong>Read only</strong>
                         </button>
-                        <button type="button" data-active={permissionLevel === 'edit'} data-locked={aboveAgent('edit')} aria-label={aboveAgent('edit') ? 'Edit files, above this agent\'s limit' : 'Edit files'} disabled={permissionBusy || aboveAgent('edit')} onClick={() => void changePermissionLevel('edit')}>
+                        <button type="button" data-active={permissionLevel === 'edit'} aria-label="Edit files" disabled={permissionBusy} onClick={() => void changePermissionLevel('edit')}>
                           <ShieldCheck size={15} aria-hidden="true" /><strong>Edit files</strong>
                         </button>
-                        <button type="button" className="permission-option--danger" data-active={permissionLevel === 'full-access'} data-locked={aboveAgent('full-access')} aria-label={aboveAgent('full-access') ? 'Full access, above this agent\'s limit' : 'Full access'} disabled={permissionBusy || aboveAgent('full-access')} onClick={() => permissionLevel === 'full-access' ? void changePermissionLevel('full-access') : setConfirmFullAccess(true)}>
+                        <button type="button" className="permission-option--danger" data-active={permissionLevel === 'full-access'} aria-label="Full access" disabled={permissionBusy} onClick={() => permissionLevel === 'full-access' ? void changePermissionLevel('full-access') : setConfirmFullAccess(true)}>
                           <Zap size={15} aria-hidden="true" /><strong>Full access</strong>
                         </button>
-                        {agentId && aboveAgent('full-access') && (
-                          <button type="button" aria-label="Change this agent's permission in Settings" onClick={() => { setPermissionMenuOpen(false); useAgentsStore.getState().edit(agentId); }}>
-                            <Bot size={15} aria-hidden="true" /><strong>Agent limit</strong>
-                          </button>
-                        )}
                       </div>
                     </>
                   )}

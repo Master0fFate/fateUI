@@ -1,7 +1,7 @@
 import { getDesktopApi, getDesktopApiOptional } from '../platform/api';
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import type { AgentDefinition, AgentDraft, AgentInboxItem, AgentInboxOverview, AgentLibrary, LegacyImportItem, RoutineDefinition, RoutineDraft, WatchDefinition, WatchDraft } from '../../shared/contracts/agents';
+import type { AgentDefinition, AgentDraft, AgentInboxItem, AgentInboxOverview, AgentLibrary, AgentPermission, LegacyImportItem, RoutineDefinition, RoutineDraft, WatchDefinition, WatchDraft } from '../../shared/contracts/agents';
 import { useRuntimeStore } from './runtimeStore';
 import { useUiStore } from './uiStore';
 
@@ -100,6 +100,15 @@ export async function openAgent(agentId: string): Promise<void> {
     useUiStore.getState().setSidebarTab('agents');
     void useAgentsStore.getState().load();
   } catch (error) { useUiStore.getState().showToast({ kind: 'error', title: 'Agent unavailable', message: agentError(error) }); }
+}
+
+export async function saveAgentPermission(agentId: string, permission: AgentPermission): Promise<void> {
+  if (!useAgentsStore.getState().library.agents.some((agent) => agent.id === agentId)) await useAgentsStore.getState().load();
+  const { library } = useAgentsStore.getState();
+  const agent = library.agents.find((item) => item.id === agentId);
+  if (!agent) throw new Error('This agent is no longer saved.');
+  await useAgentsStore.getState().mutate(() => getDesktopApi().saveAgentDefinition({ id: agent.id, expected: library.revisions[`agent:${agent.id}`]!,
+    value: { ...agentDraft(agent), defaults: { ...agent.defaults, permission } } }));
 }
 
 export async function openAgentNotice(runId: string): Promise<void> {
