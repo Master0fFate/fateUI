@@ -7,6 +7,17 @@ const MAX_BYTES = 1024 * 1024;
 const idPattern = /^[a-zA-Z0-9_-]{1,80}$/u;
 const digest = (source: string) => createHash('sha256').update(source).digest('hex');
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
+const busy = (error: unknown) => ['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '');
+
+async function retryWhileBusy<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await operation(); }
+    catch (error) {
+      if (process.platform !== 'win32' || attempt === 20 || !busy(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 10));
+    }
+  }
+}
 
 export interface DefinitionDraft {
   metadata: Record<string, unknown>;
@@ -141,7 +152,7 @@ export class DefinitionJournal {
     try { await handle.writeFile(owner); await handle.sync(); return await operation(); }
     finally {
       await handle.close();
-      if (await this.readFile(lock).catch(() => null) === owner) await fs.unlink(lock);
+      if (await this.readFile(lock).catch(() => null) === owner) await retryWhileBusy(() => fs.unlink(lock));
     }
   }
 
@@ -205,11 +216,11 @@ export class DefinitionJournal {
       const next = await fs.open(temp, 'wx', 0o600);
       try { await next.writeFile(JSON.stringify({ revision, digest: restoredDigest, file })); await next.sync(); } finally { await next.close(); }
       if (await this.readFile(headPath) !== oldHead || digest(await this.readFile(path.join(directory, candidate.file))) !== candidate.digest) throw new Error('Recovery source changed; all versions were preserved.');
-      await fs.rename(temp, headPath);
+      await retryWhileBusy(() => fs.rename(temp, headPath));
     } finally {
       await owner.close();
       await fs.unlink(temp).catch((error: unknown) => { if (!missing(error)) throw error; });
-      if (await this.readFile(lock).catch(() => null) === ownerRecord) await fs.unlink(lock);
+      if (await this.readFile(lock).catch(() => null) === ownerRecord) await retryWhileBusy(() => fs.unlink(lock));
     }
   }
 
@@ -235,11 +246,12 @@ export class DefinitionJournal {
       try { await version.writeFile(source); await version.sync(); } finally { await version.close(); }
       const checked = await this.snapshot(directory);
       if (checked?.revision !== current?.revision || checked?.digest !== current?.digest) throw new Error('Definition conflict. Both versions were preserved.');
-      temp = path.join(directory, `${token}.tmp`);
-      const handle = await fs.open(temp, 'wx', 0o600);
+      const pending = path.join(directory, `${token}.tmp`);
+      temp = pending;
+      const handle = await fs.open(pending, 'wx', 0o600);
       try { await handle.writeFile(JSON.stringify({ ...next, file })); await handle.sync(); } finally { await handle.close(); }
       // Only the managed head is replaced. An external editor's old Markdown bytes remain intact.
-      await fs.rename(temp, path.join(directory, 'head.json'));
+      await retryWhileBusy(() => fs.rename(pending, path.join(directory, 'head.json')));
       if (process.platform !== 'win32') {
         const parent = await fs.open(directory, 'r');
         try { await parent.sync(); } finally { await parent.close(); }
@@ -259,7 +271,7 @@ export class DefinitionJournal {
     } finally {
       await owner.close();
       if (temp) await fs.unlink(temp).catch((error: unknown) => { if (!missing(error)) throw error; });
-      if (await this.readFile(lock).catch(() => null) === ownerRecord) await fs.unlink(lock);
+      if (await this.readFile(lock).catch(() => null) === ownerRecord) await retryWhileBusy(() => fs.unlink(lock));
     }
   }
 }
