@@ -58,9 +58,10 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
   const ariaStatus = isSubagentTool && presentedStatus === 'succeeded' ? 'completed' : presentedStatus;
   const childIds = [...new Set(tool.subagentRunIds ?? [])];
   const hasChildLink = childIds.length > 0 || tool.name === 'agent_workflow';
+  const images = tool.images?.length && (expanded || tool.name === 'generate_image') ? tool.images : null;
 
   return (
-    <article ref={cardRef} tabIndex={-1} data-flight-focus={focused || undefined} className={`tool-card tool-card--${presentedStatus}${tool.images?.length ? ' tool-card--with-images' : ''}${compact ? ' tool-card--compact' : ''}`} aria-label={`${tool.name} tool ${ariaStatus}`}>
+    <article ref={cardRef} tabIndex={-1} data-flight-focus={focused || undefined} className={`tool-card tool-card--${presentedStatus}${images ? ' tool-card--with-images' : ''}${compact ? ' tool-card--compact' : ''}`} aria-label={`${tool.name} tool ${ariaStatus}`}>
       <button className="tool-card-header" type="button" aria-expanded={expanded} onClick={toggle}>
         <Symbol text={presentedStatus === 'running' ? '[run]' : presentedStatus === 'error' ? '[err]' : presentedStatus === 'stopped' ? '[stop]' : '[ok]'}><Icon size={13} className={`tool-status-icon${presentedStatus === 'running' ? ' tool-spinner' : ''}`} aria-hidden="true" /></Symbol>
         <span className="tool-heading icon-label"><strong>{tool.name}</strong><small>{summary}</small></span>
@@ -97,7 +98,7 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
           <span className="icon-label">{childIds.length === 1 ? 'View child session' : childIds.length > 1 ? `View ${childIds.length} child sessions` : 'View agent sessions'}</span>
         </button>
       ) : null}
-      {tool.images?.length ? <div className="tool-images"><MessageImages images={tool.images} /></div> : null}
+      {images ? <div className="tool-images"><MessageImages images={images} /></div> : null}
       {(expanded || (tool.status === 'running' && shouldAutoShowRunningOutput(tool.output))) && (
         <div className="tool-details">
           {expanded && <section><span>Input</span><pre>{tool.input || '—'}</pre></section>}
