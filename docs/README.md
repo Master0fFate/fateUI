@@ -9,7 +9,7 @@ This directory holds the focused guides referenced by the [project README](../RE
 - **Choose a skin or author a theme** — [Skins](skins.md) and [Themes](themes.md).
 - **Build a dense operate UI** — [Fate Compact](../design/COMPACT.md) (Settings density system; candidate for a full-app transition).
 - **Remember project and personal coding notes** — [Memory Learning](project-learning.md).
-- **Save Agents, tasks, and routines or copy old Automations** — [Agents library and upgrade](agents.md).
+- **Talk to an Agent that runs work in your projects** — [Agents](agents.md).
 - **Drive multi-agent work** — [Agent orchestration](agent-orchestration.md) (one executor for direct agents and dependency-based workflows).
 - **Manage longer objectives** — [GoalMax and durable work](goalmax.md).
 - **Connect external tools** — [MCP in Fate UI](mcp.md).
@@ -34,7 +34,7 @@ This directory holds the focused guides referenced by the [project README](../RE
 - **New users** — README → [Sessions and processes](sessions-and-processes.md) → [Features](features.md).
 - **Operators and reviewers** — [Features](features.md) → [Architecture and security](architecture.md) → [SECURITY.md](../SECURITY.md).
 - **Customizers** — [Skins](skins.md) → [Themes](themes.md).
-- **Power users** — [Agents library and upgrade](agents.md) → [Agent orchestration](agent-orchestration.md) → [Sessions and processes](sessions-and-processes.md).
+- **Power users** — [Agents](agents.md) → [Agent orchestration](agent-orchestration.md) → [Sessions and processes](sessions-and-processes.md).
 - **Contributors and maintainers** — [CONTRIBUTING.md](../CONTRIBUTING.md) → [Development and release](development.md).
 
 ## Conventions

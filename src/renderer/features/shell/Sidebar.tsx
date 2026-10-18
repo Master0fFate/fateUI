@@ -150,9 +150,9 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
   useEffect(() => {
     if (typeof getDesktopApiOptional()?.onAgentLibraryChanged !== 'function') return;
     return getDesktopApi().onAgentLibraryChanged((event) => {
-      if (event.projectPath === useAgentsStore.getState().projectPath) void useAgentsStore.getState().load(event.projectPath);
-      if (event.focus && event.runId) void openAgentNotice(event.projectPath, event.runId);
-      else if (event.message && event.runId) useUiStore.getState().showToast({ kind: event.status === 'failed' ? 'error' : event.status === 'needs-attention' ? 'warning' : 'info', title: 'Agents', message: event.message, agentRun: { projectPath: event.projectPath, runId: event.runId } });
+      void useAgentsStore.getState().load();
+      if (event.focus && event.runId) void openAgentNotice(event.runId);
+      else if (event.message && event.runId) useUiStore.getState().showToast({ kind: event.status === 'failed' ? 'error' : event.status === 'needs-attention' ? 'warning' : 'info', title: 'Agents', message: event.message, agentRun: { runId: event.runId } });
     });
   }, []);
   const gitBranch = useWorkspaceStore((state) => state.git?.repository && state.git.branch ? state.git.branch : null);
@@ -765,7 +765,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
 
   useEffect(() => {
     const project = runtime.project;
-    if (!project) return;
+    if (!project || project.agentId) return;
     const store = useProjectStore.getState();
     store.addProject({ path: project.path, name: project.name });
     const key = projectPathKey(project.path);
@@ -1404,7 +1404,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
               <input className="icon-label" type="search" aria-label="Search sessions" placeholder="Search sessions" value={query} onChange={(event) => setQuery(event.target.value)} disabled={!runtime.project} />
             </label>
             <AppTooltip content="New session" wrapTrigger triggerClassName="sidebar-toolbar-action sidebar-toolbar-action--primary session-toolbar-action--new">
-              <button type="button" aria-label="New session" disabled={!runtime.project || replacementBusy} onClick={createSession}><ActionContent text="new"><Plus size={15} /></ActionContent></button>
+              <button type="button" aria-label="New session" disabled={!runtime.project || Boolean(runtime.project.agentId) || replacementBusy} onClick={createSession}><ActionContent text="new"><Plus size={15} /></ActionContent></button>
             </AppTooltip>
             <AppTooltip content="Open project" wrapTrigger triggerClassName="sidebar-toolbar-action session-toolbar-action--open">
               <button type="button" aria-label="Open project" disabled={replacementBusy} onClick={selectProject}><ActionContent text="open"><FolderOpen size={15} /></ActionContent></button>

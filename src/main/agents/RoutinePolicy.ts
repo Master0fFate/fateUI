@@ -1,14 +1,8 @@
 export type Permission = 'read-only' | 'edit' | 'full-access';
-export type Workspace = 'shared' | 'worktree';
 const rank: Record<Permission, number> = { 'read-only': 0, edit: 1, 'full-access': 2 };
 
-export function effectivePermission(live: Permission, ...ceilings: Array<'read-only' | 'edit'>): 'read-only' | 'edit' {
-  return Math.min(rank[live], 1, ...ceilings.map((level) => rank[level])) === 0 ? 'read-only' : 'edit';
-}
-
-export function effectiveWorkspace(policy: { preferredMode: Workspace; strict: boolean }, requested?: Workspace): Workspace {
-  if (policy.strict && requested && requested !== policy.preferredMode) throw new Error('Workspace request conflicts with global strict policy.');
-  return requested ?? policy.preferredMode;
+export function effectivePermission(live: Permission, ...ceilings: Permission[]): Permission {
+  return ceilings.reduce((lowest, level) => rank[level] < rank[lowest] ? level : lowest, live);
 }
 
 export interface IntervalSchedule {
@@ -42,28 +36,6 @@ export function evaluateDue(schedule: IntervalSchedule, nextDue: number, now: nu
   // Waking after a missed occurrence never silently starts catch-up work.
   const status = skippedOccurrences > 0 || now - scheduledFor > 30_000 ? 'skipped' : 'queued';
   return { scheduledFor, nextDue: following, skippedOccurrences: skippedOccurrences + (status === 'skipped' ? 1 : 0), status };
-}
-
-export interface ApprovalBinding {
-  runId: string;
-  actionDigest: string;
-  definitionRevision: number;
-  taskRevision: number;
-  permissionRevision: number;
-  projectPath: string;
-}
-export interface Approval extends ApprovalBinding {
-  approvedAt: number;
-  expiresAt: number;
-  consumed: boolean;
-}
-
-export function consumeApproval(approval: Approval, action: ApprovalBinding, now: number, trusted: boolean, live: Permission): Approval {
-  const keys: Array<keyof ApprovalBinding> = ['runId', 'actionDigest', 'definitionRevision', 'taskRevision', 'permissionRevision', 'projectPath'];
-  if (!trusted || live === 'read-only' || approval.consumed || ![now, approval.approvedAt, approval.expiresAt].every(Number.isSafeInteger)
-    || now < approval.approvedAt || now >= approval.expiresAt || approval.expiresAt - approval.approvedAt > 5 * 60_000
-    || keys.some((key) => action[key] === undefined || action[key] !== approval[key])) throw new Error('Approval is stale, expired, consumed, or unauthorized.');
-  return { ...approval, consumed: true };
 }
 
 export type PrototypeRunStatus = 'queued' | 'running' | 'needs-attention' | 'succeeded' | 'failed' | 'skipped';

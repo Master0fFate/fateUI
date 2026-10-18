@@ -13,7 +13,7 @@ import type { DesktopConnectionRouter } from '../connections/DesktopConnectionRo
 import { registerConnectionIpc } from '../connections/registerConnectionIpc';
 import type { ConnectionProfileEditor } from '../connections/ConnectionProfileEditor';
 import { registerAgentsIpc } from '../agents/registerAgentsIpc';
-import type { AgentsService } from '../agents/AgentsService';
+import type { AgentHome, AgentsService } from '../agents/AgentsService';
 import { appReleaseDisplayVersion, releaseMetadata } from '../releaseMetadata';
 import type { LearningService } from '../learning/LearningService';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
@@ -661,7 +661,6 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     return adapter.forInvocation(invocation);
   };
   registerLearningIpc(handle, runtime, learning, () => settings.getStoragePath());
-  registerAgentsIpc(handle, agents);
   const activationServices = { runtime, files, settings, terminal, logs, browser, activationGate };
   const queueProjectActivation = createProjectActivationQueue();
   const localOpenProjectPath = createProjectPathOpener(projects, activationServices, queueProjectActivation);
@@ -670,6 +669,15 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     ? connections.local(() => localOpenProjectPath(projectPath, owner, target)) : localOpenProjectPath(projectPath, owner, target);
   const focusProjectPath = (projectPath: string, owner?: BrowserWindow) => connections
     ? connections.local(() => localFocusProjectPath(projectPath, owner)) : localFocusProjectPath(projectPath, owner);
+  const localOpenAgentHome = (home: AgentHome) => queueProjectActivation.run(async () => {
+    const state = await activatePreparedProject(await projects.prepareAgentHome(home), activationServices, 'changing projects');
+    if (state.status === 'error' || !state.project || state.sessionId === home.sessionId) return runtimeStateSchema.parse(state);
+    return runtimeStateSchema.parse(await runtime.switchSession(home.sessionId));
+  });
+  registerAgentsIpc(handle, agents, {
+    home: (home) => connections ? connections.local(() => localOpenAgentHome(home)) : localOpenAgentHome(home),
+    session: (projectPath, sessionId, owner) => openProjectPath(projectPath, owner, { sessionId }),
+  });
   const runRuntimeMutation = <T>(action: string, operation: () => T | Promise<T>) => queueProjectActivation.runRuntimeMutation(action, operation);
   const scoped = <T>(event: Electron.IpcMainInvokeEvent, legacy: () => T | Promise<T>,
     work: (captured: Parameters<Parameters<CoreIpcAdapter['scoped']>[0]>[0]) => T | Promise<T>) =>

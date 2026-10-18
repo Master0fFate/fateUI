@@ -32,7 +32,7 @@ import type { TerminalService } from '../../src/main/terminal/TerminalService';
 import { installWindowZoomShortcuts } from '../../src/main/windowZoom';
 import { MINIMUM_WINDOW_SIZE } from '../../src/main/windowState';
 import { FakePiRuntimeService } from './FakePiRuntimeService';
-import { agentExecutionFixture } from './AgentExecutionFixture';
+import { agentHostFixture } from './AgentExecutionFixture';
 import { AgentsService } from '../../src/main/agents/AgentsService';
 import { AgentRepository } from '../../src/main/agents/AgentRepository';
 
@@ -64,6 +64,7 @@ const projects = {
     return activation(selected);
   },
   prepareOpenPath: async (selectedPath: string) => activation({ path: selectedPath, name: path.basename(selectedPath), trusted: true }),
+  prepareAgentHome: async (home: { path: string; name: string; agentId: string }) => activation({ path: home.path, name: home.name, trusted: true, agentId: home.agentId }),
   prepareSessionListPath: async (selectedPath: string) => selectedPath,
   prepareDerivedWorktree: async (worktreePath: string, sourceProjectPath: string) => activation({ path: worktreePath, name: path.basename(sourceProjectPath), trusted: true }),
   selectFile: async () => 'src/example.ts',
@@ -110,8 +111,7 @@ const settings = {
 const logs = { list: () => [], write: () => undefined } as unknown as AppLogService;
 const legacyAutomations = new LegacyAutomations(logs, path.join(process.env.PI_DESKTOP_E2E_USER_DATA ?? app.getPath('userData'), 'automations'));
 const agentSessionsRoot = path.join(app.getPath('userData'), 'agent-sessions');
-const agentFixture = agentExecutionFixture(runtime, agentSessionsRoot);
-const agents = new AgentsService({ runtime: agentFixture.host, workspacePolicy: () => settingsValue.agentWorkspace, disabledModels: () => settingsValue.disabledModels, sessionsRoot: agentSessionsRoot }, new AgentRepository(path.join(app.getPath('userData'), 'agents')), legacyAutomations, agentFixture.execute);
+const agents = new AgentsService(agentHostFixture(runtime, project, agentSessionsRoot), new AgentRepository(path.join(app.getPath('userData'), 'agents')), legacyAutomations);
 const music = {
   getStatus: async () => ({ available: false, version: null, message: 'yt-dlp is unavailable in the E2E harness.' }),
   load: async () => { throw new Error('Music loading is disabled in the E2E harness.'); },

@@ -5,11 +5,6 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DefaultResourceLoader, ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { createSdkChildSession } from '../../src/main/pi/SubagentSessionFactory';
-import { createAgentExecution } from '../../src/main/agents/AgentExecutor';
-import { HomeOwnership } from '../../src/main/agents/HomeOwnership';
-import { AgentRepository } from '../../src/main/agents/AgentRepository';
-import { ApprovalGate } from '../../src/main/agents/ApprovalGate';
-import type { SavedAgentSession } from '../../src/shared/contracts/agents';
 import { createDesktopFatePaths } from '../../src/core/FatePaths';
 import { createServerProfile } from '../../src/core/storage/ServerProfile';
 import { createPiSdkAdapter } from '../../src/main/pi/PiRuntimeService';
@@ -135,7 +130,7 @@ describe('real Pi SDK global HOME resource policy', () => {
     }
   });
 
-  it('omits HOME sentinel in a real child session and a scheduled-session resource loader', async () => {
+  it('omits HOME sentinel in a real child session', async () => {
     expect(process.env.PI_OFFLINE).toBe('1');
     await mkdir(globalSkill, { recursive: true });
     await writeFile(path.join(globalSkill, 'SKILL.md'), `---\nname: ${name}\ndescription: Isolated sentinel.\n---\nDesktop only.\n`);
@@ -161,33 +156,6 @@ describe('real Pi SDK global HOME resource policy', () => {
         expect(names).not.toContain('physical-ancestor');
         expect(accesses).toEqual([]);
       } finally { child.dispose(); }
-    });
-
-    await modelRuntime.setRuntimeApiKey('anthropic', 'local-test-not-a-provider-key');
-    const preset: SavedAgentSession = {
-      schemaVersion: 1, agentId: 'a392d8b9-76cc-4158-a381-1151ccf818fb', revision: 1,
-      name: 'Synthetic', instructions: 'Synthetic offline scheduled session.', skillRefs: [],
-      defaults: { model: { provider: 'anthropic', id: 'claude-sonnet-4-5' }, permission: 'read-only', thinkingLevel: 'off', workspace: 'shared' },
-      background: true, runId: 'manual:synthetic', projectPath: project,
-    };
-    const homeSession = await new HomeOwnership(path.join(root, 'sessions')).open({
-      agentId: preset.agentId, revision: 1, instructions: preset.instructions, projectPath: project, preset,
-    });
-    const context = () => ({ trusted: true, permission: 'read-only' as const,
-      binding: { runId: 'manual:synthetic', definitionRevision: 1, taskRevision: 1, permissionRevision: 0, projectPath: project } });
-    const repository = new AgentRepository(path.join(root, 'data'));
-    await auditedAccess(async (accesses) => {
-      const scheduled = await createAgentExecution({
-        preset, sessionFile: homeSession.file, modelRuntime, context,
-        approvals: new ApprovalGate(repository.approvalJournal(project), context, () => undefined),
-        agentDir, serverProfile: true,
-      });
-      try {
-        const names = scheduled.resourceLoader.getSkills().skills.map((skill) => skill.name);
-        expect(names).not.toContain(name);
-        expect(names).not.toContain('physical-ancestor');
-        expect(accesses).toEqual([]);
-      } finally { scheduled.dispose(); }
     });
   });
 });

@@ -102,7 +102,6 @@ export class FakePiRuntimeService {
   private conversationBranchesEnabled = false;
   private activeConversationBranchId = 'e2e-path-current';
   private readonly sessionPermissions = new Map<string, PermissionLevel>();
-  private readonly authorityRevisions = new Map<string, number>();
   private createdSessionSequence = 0;
   private permissionKey(sessionId: string): string { return `${this.project?.path ?? ''}\0${sessionId}`; }
   private sink: (events: PiEvent[]) => void = () => undefined;
@@ -415,7 +414,7 @@ export class FakePiRuntimeService {
   }
   async setModel(): Promise<RuntimeState> { return this.getState(); }
   setThinkingLevel(_level: ThinkingLevel): RuntimeState { return this.getState(); }
-  async setPermissionLevel(level: PermissionLevel): Promise<RuntimeState> { const key = this.permissionKey(this.activeSession); this.permissionLevel = level; this.sessionPermissions.set(key, level); this.authorityRevisions.set(key, (this.authorityRevisions.get(key) ?? 0) + 1); this.emitState(); return this.getState(); }
+  async setPermissionLevel(level: PermissionLevel): Promise<RuntimeState> { const key = this.permissionKey(this.activeSession); this.permissionLevel = level; this.sessionPermissions.set(key, level); this.emitState(); return this.getState(); }
   async mutateQueuedMessage(input: QueueMutationInput): Promise<QueueMutationResult> {
     const target = this.queuedMessages.find((item) => item.id === input.id);
     if (!target) throw new Error('That queued message is no longer waiting.');
@@ -557,15 +556,6 @@ export class FakePiRuntimeService {
     this.permissionLevel = 'edit';
     this.emitState();
     return this.getState();
-  }
-  registerAgentSession(summary: SessionSummary, permission: PermissionLevel): void {
-    if (!this.sessions.some((session) => session.id === summary.id)) this.sessions.push(summary);
-    this.sessionPermissions.set(this.permissionKey(summary.id), permission);
-  }
-  agentAuthority(sessionId: string): { level: PermissionLevel; revision: number } | null {
-    const key = this.permissionKey(sessionId);
-    const level = sessionId === this.activeSession ? this.permissionLevel : this.sessionPermissions.get(key);
-    return level ? { level, revision: this.authorityRevisions.get(key) ?? 0 } : null;
   }
   async listSessions(query = ''): Promise<SessionSummary[]> { return this.getState().sessions!.filter((session) => session.title.toLowerCase().includes(query.toLowerCase())); }
   async switchSession(sessionId: string): Promise<RuntimeState> { this.activeSession = sessionId; this.queuedMessages = []; this.permissionLevel = this.sessionPermissions.get(this.permissionKey(sessionId)) ?? 'edit'; this.emitState(true); return this.getState(); }

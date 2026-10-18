@@ -46,7 +46,7 @@ Delegation, goals, saved agents, and memory are parts of one runtime, not separa
 
 - **Agent Teams** is the only executor for child Pi sessions. `spawn_agent`, `agent_workflow` nodes, and GoalMax verifier and diagnostic reviews all run as Team nodes under the same permission, workspace, and writer-lease rules. Runs saved by the retired standalone subagent engine load as read-only history that can only be renamed.
 - **GoalMax** is a mode of a root conversation. It adds criteria, evidence, and automatic continuation, and reads child progress from the Team executor; with no open goal it does no child bookkeeping.
-- **Agents** are saved personas, task templates, and Routines. The Routine scheduler sleeps until the next due run or lease expiry and wakes early only when a definition is saved or the focused project changes.
+- **Agents** are saved personas with one conversation each, in a folder Fate UI owns. An Agent works in a trusted project by starting a run: an ordinary root conversation in an unselected slot of that project's runtime, which reports back into the Agent's conversation when it settles. Routines post messages into that conversation; the scheduler sleeps until the next due Routine and wakes early when a definition is saved.
 - **Memory Learning** attaches reviewed memory at the provider boundary of root turns. A turn that attaches or skips nothing writes nothing.
 
 ## Credentials

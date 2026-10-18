@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { previewAutomationCopy, restoreAutomationCopy } from './AutomationCopy';
+import { previewAutomationCopy } from './AutomationCopy';
 import { effectivePermission } from './RoutinePolicy';
 
 const automation = {
@@ -12,7 +12,7 @@ describe('D0-06 non-destructive Automation copy proof', () => {
   it.each(['read-only', 'edit'] as const)('preserves every source byte and %s permissions', (permissionLevel) => {
     const source = `${JSON.stringify({ ...automation, permissionLevel }, null, '\t')}\r\n`;
     const copy = previewAutomationCopy(source);
-    expect(restoreAutomationCopy(copy)).toBe(source);
+    expect(copy.source).toBe(source);
     expect(previewAutomationCopy(source)).toEqual(copy);
     expect(copy.task.messageRole).toBe('user');
     expect(copy.task.prompt).toBe(automation.prompt);
@@ -29,9 +29,7 @@ describe('D0-06 non-destructive Automation copy proof', () => {
     expect(copy.task).not.toHaveProperty('instructions');
     expect(() => previewAutomationCopy(JSON.stringify({ ...automation, prompt: 'x'.repeat(200_001) }))).toThrow();
   });
-  it('refuses modified archive bytes and unknown source fields rather than silently dropping them', () => {
-    const copy = previewAutomationCopy(JSON.stringify(automation));
-    expect(() => restoreAutomationCopy({ ...copy, source: copy.source + ' ' })).toThrow(/integrity/);
+  it('refuses unknown source fields rather than silently dropping them', () => {
     expect(() => previewAutomationCopy(JSON.stringify({ ...automation, futureField: true }))).toThrow();
   });
 });

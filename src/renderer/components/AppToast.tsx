@@ -25,7 +25,7 @@ export function AppToast() {
   return (
     <div className={`app-toast app-toast--${toast.kind}`} role={toast.kind === 'error' || toast.kind === 'warning' ? 'alert' : 'status'} aria-atomic="true">
       <Icon size={17} aria-hidden="true" />
-      <div><strong>{toast.title}</strong><span>{toast.message}</span>{toast.agentRun && <button className="agent-notice-action" type="button" onClick={() => { void openAgentNotice(toast.agentRun!.projectPath, toast.agentRun!.runId); dismissToast(); }}>View Agent run</button>}</div>
+      <div><strong>{toast.title}</strong><span>{toast.message}</span>{toast.agentRun && <button className="agent-notice-action" type="button" onClick={() => { void openAgentNotice(toast.agentRun!.runId); dismissToast(); }}>View Agent run</button>}</div>
       <button type="button" aria-label="Dismiss notification" onClick={dismissToast}><X size={13} /></button>
     </div>
   );

@@ -1,6 +1,5 @@
 import { BrowserWindow, Notification } from 'electron';
-import { agentChannels, agentChangedSchema } from '../../shared/contracts/agents';
-import type { AgentChange } from './AgentsService';
+import { agentChannels, agentChangedSchema, type AgentChange } from '../../shared/contracts/agents';
 
 export function notifyAgentRun(change: AgentChange, enabled: boolean): boolean {
   if (!enabled || !Notification.isSupported()) return false;

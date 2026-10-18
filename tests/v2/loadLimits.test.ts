@@ -97,9 +97,8 @@ describe('measured transport memory bounds', () => {
   it('keeps 15-second many-client monitor heartbeats compact and preserves partial/unknown sources', () => {
     const runs = Array.from({ length: 1_000 }, (_, index) => ({ id: `run-${index}`, status: index % 5 ? 'succeeded' : 'running',
       startedAt: 10_000, finishedAt: index % 5 ? 15_000 : null, scheduledFor: 0, error: null, resultSummary: 'Synthetic summary' }));
-    const fullRuns = runs.map((run) => agentRunSchema.parse({ ...run, schemaVersion: 1, projectPath: '/synthetic/project-0',
-      agentId: '00000000-0000-4000-8000-000000000001', taskTemplateId: '00000000-0000-4000-8000-000000000002',
-      routineId: null, agentRevision: 1, taskTemplateRevision: 1, routineRevision: null, sessionId: null, inputs: {}, permission: 'edit', approvals: [],
+    const fullRuns = runs.map((run) => agentRunSchema.parse({ ...run, schemaVersion: 2, projectPath: '/synthetic/project-0',
+      agentId: '00000000-0000-4000-8000-000000000001', routineId: null, agentRevision: 1, request: 'Synthetic request', mode: 'turn', sessionId: null, permission: 'edit',
     }));
     const input = { projectPath: '/synthetic/project-0', sessionId: 'session-0', runs: fullRuns, teams: [], tasks: null, goal: null,
       runsAvailable: true, sessionAvailable: true, runsPartial: true, runsCheckedAt: 15_000, now: 20_000 };

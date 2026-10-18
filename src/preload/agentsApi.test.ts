@@ -7,12 +7,12 @@ import { agentsApi } from './agentsApi';
 beforeEach(() => { electron.invoke.mockReset(); electron.on.mockReset(); electron.removeListener.mockReset(); });
 describe('named Agents preload bridge', () => {
   it('rejects malformed IDs and injected project paths before IPC', async () => {
-    await expect(agentsApi.openAgentConversation({ agentId: '../escape', mode: 'home' })).rejects.toThrow();
-    await expect(agentsApi.getAgentLibrary({ projectPath: '/other' } as never)).rejects.toThrow();
+    await expect(agentsApi.openAgentConversation({ agentId: '../escape' })).rejects.toThrow();
+    await expect(agentsApi.cancelAgentRun({ runId: '' })).rejects.toThrow();
     expect(electron.invoke).not.toHaveBeenCalled();
   });
   it('validates library responses and does not expose arbitrary IPC', async () => {
-    const library = { agents: [], tasks: [], routines: [], states: [], runs: [], revisions: {}, nextDue: {}, diagnostics: [] };
+    const library = { agents: [], routines: [], states: [], runs: [], revisions: {}, nextDue: {}, diagnostics: [] };
     electron.invoke.mockResolvedValueOnce(library);
     expect(await agentsApi.getAgentLibrary()).toEqual(library);
     expect(electron.invoke).toHaveBeenCalledWith(agentChannels.agentsList, {});
@@ -24,8 +24,8 @@ describe('named Agents preload bridge', () => {
     const listener = vi.fn();
     const unsubscribe = agentsApi.onAgentLibraryChanged(listener);
     const handler = electron.on.mock.calls[0]![1] as (event: unknown, value: unknown) => void;
-    handler({}, { projectPath: '/project', runId: 'run', status: 'needs-attention' });
-    handler({}, { projectPath: 1, status: 'execute-anything' });
+    handler({}, { runId: 'run', status: 'needs-attention' });
+    handler({}, { runId: 1, status: 'execute-anything' });
     expect(listener).toHaveBeenCalledOnce();
     unsubscribe();
     expect(electron.removeListener).toHaveBeenCalledWith(agentChannels.agentsChanged, handler);

@@ -100,6 +100,16 @@ export class ProjectTrustService {
     };
   }
 
+  async prepareAgentHome(home: { path: string; name: string; agentId: string }): Promise<ProjectActivation> {
+    return this.activation({ path: await canonicalizeProjectPath(home.path), name: home.name, trusted: true, agentId: home.agentId }, false);
+  }
+
+  async trustedProjectPaths(): Promise<string[]> {
+    const fresh = new ProjectTrustService(this.dataRoot);
+    await fresh.loadTrustedProjects();
+    return [...fresh.trustedProjects];
+  }
+
   /** Return the last project only when Fate UI already trusts it. */
   async lastTrustedProjectPath(): Promise<string | null> {
     const recent = await this.lastProjectPath();

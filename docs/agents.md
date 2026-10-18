@@ -1,28 +1,37 @@
-# Agents library and upgrade
+# Agents
 
-The **Agents** sidebar replaces the old **Automations** tab. It stores three separate things:
+An **Agent** is a saved persona with exactly one ongoing conversation of its own. You talk to it like any chat; it can start work in your trusted projects, which keeps running in the background and reports back into the same conversation.
 
-- **Agent:** an identity, instructions, skills, model, and read-only or edit permission. Open its home conversation or start a new one.
-- **TaskTemplate:** a reusable request. Run it with an enabled Agent.
-- **Routine:** a project-scoped interval that binds one Agent to one TaskTemplate. It runs only while Fate UI is open; missed intervals are skipped, not replayed.
+## Use an Agent
 
-Open and trust a project, then select **Agents** in the sidebar. Create an Agent and a TaskTemplate before you run a task. To schedule future runs, create a Routine for that pair. Review **Run history** for results, failures, skipped runs, and actions that need attention. A Routine's time zone controls display; the schedule is interval-based, not a calendar appointment. Foreground conversations and Agent Team workflows remain available; see [Agent orchestration](agent-orchestration.md).
+1. Select **Agents** in the sidebar and **+** to create one. The editor opens in **Settings → Agent → Saved agents**: name, model, thinking level, permission, Skills and instructions. Select **Save agent**.
+2. Click the Agent in the sidebar. Its conversation opens in the main pane and the sidebar stays on **Agents**. There is one conversation per Agent; it is not listed under any project.
+3. Ask for work in a project, for example “check why the build fails in fateUI”. The Agent starts a **run** with the `run_in_project` tool and answers right away. When the run finishes, its result is posted into the Agent's conversation and the Agent continues from there.
 
-## Upgrade from Automations
+The dot next to an Agent shows a run in progress, a new result, or a failed run. The **Monitor** in the inspector lists an Agent's runs while its conversation is open, and a project's Agent runs while that project is open. **Open run** shows the run's own conversation.
 
-**This is a workflow change, not an automatic migration.** The old Automations editor, direct launch action, and its renderer/IPC methods are removed in 1.1.0. Existing Automation documents remain on disk unchanged, but old Automations do not run or appear in the old tab.
+## Where an Agent works
 
-1. Back up your project and Fate data before upgrading. Open the original project and trust it.
-2. Go to **Agents → Copy Automations**. Select an old Automation and review its name, prompt, permission, and archived fields.
-3. Confirm **Copy**. Fate creates one TaskTemplate and retains the original Automation file. Importing the same source again opens its existing copy; it does not make another one.
-4. Create or choose an Agent. Run the copied TaskTemplate with that Agent. If you want scheduled execution, make a Routine explicitly; an old Automation is never turned into a scheduled run by itself.
-5. If the copy is wrong, use **Roll back copy** on that TaskTemplate. This removes the copy, not the original file. If the source has changed since preview, refresh and review it again.
+- **Its own folder.** Each Agent's conversation runs in a folder Fate UI owns, under the data directory at `agents/v1/homes/<agent id>`. Files, terminal and Memory Learning follow it like a project. Memory Learning's **PROJECT** store for that folder is the Agent's own memory; the **GLOBAL** profile applies as usual.
+- **Your projects, through runs.** A run is an ordinary conversation in a trusted project, started with the Agent's instructions. It can use Agent Teams, GoalMax (the Agent picks `goal` mode for multi-step outcomes) and that project's Memory Learning. You can open it, read it and steer it like any session. A project switch or a session switch does not stop it.
+- **Routines** send a message into the Agent's conversation on an interval, for example “every morning, check the open pull requests”. Add them on the Agent's card in Settings. They run only while Fate UI is open; missed intervals are skipped, not replayed.
 
-The import preserves the prompt and read-only/edit permission ceiling. Old launch counters, dates, and outcomes are archived with the copy, not turned into new Run history. Keep your backup until you confirm the new workflow works for your project. There is no one-click downgrade of a new Agent or Routine to the old Automations editor.
+## Permissions and limits
 
-## Safety and limits
-
-- Project trust and live permissions still apply. A saved definition or an approval cannot grant more authority than the current project and owner allow.
-- Background work is limited to classified, project-confined tools. Shell commands, browser effects, image generation, unknown tools, and background delegation are unavailable. A consequential file action requires review of its exact input before it runs; interrupted or uncertain effects are not replayed automatically.
+- An Agent's **permission** (Read only, Edit files or Full access) caps its conversation and every run it starts. The permission you set in the Agent's conversation lowers it further. Project trust still applies; a run can only target a trusted project.
+- **Edit files** writes without asking per file, like a normal conversation. Every change is in the run's conversation.
+- **Full access** adds shell commands and MCP servers, for that Agent only. Choose it per Agent; existing Agents keep their permission.
+- Agent Teams children in a run are capped at the run's permission.
+- The browser is available only in the Agent's own conversation while it is the selected conversation. Runs do not use the browser.
+- User-installed Pi extensions and project-local code are not loaded into Agent conversations or runs.
+- A run stops after 30 minutes. At most four runs are active at once, and a project keeps at most four live conversations; when they are full, the run fails instead of closing your work. Interrupted runs are not replayed.
+- Editing an Agent applies to its conversation the next time it starts; an idle conversation restarts right away.
 - A Git worktree is a separate checkout, **not** a security sandbox. Check the diff before you integrate or publish it.
-- Local runs can contact your configured AI provider. The app does not promise to run a Routine while closed, offline, or after the computer sleeps.
+- Runs contact your configured AI provider. The app does not run Routines while closed, offline, or asleep.
+
+## Earlier versions
+
+- Agents saved for one project are now available everywhere.
+- Earlier home chats stay as normal sessions in the projects where they were created; each Agent starts a fresh conversation in its own folder.
+- A Routine from an earlier version takes the prompt of its TaskTemplate and starts turned off. TaskTemplate files stay on disk unchanged.
+- Old Automations are not run. On an Agent's card, **Copy Automation** turns one into a Routine that starts turned off; the original file is unchanged.

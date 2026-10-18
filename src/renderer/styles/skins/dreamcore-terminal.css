@@ -132,7 +132,7 @@
 :root[data-skin="dreamcore"] .settings-nav button > .terminal-symbol { flex: 0 0 1ch; width: 1ch; padding: 0; }
 :root[data-skin="dreamcore"] .settings-nav button > span:not(.terminal-symbol) { padding-inline-end: 0; }
 :root[data-skin="dreamcore"] .settings-panel { padding: 22px 26px; }
-:root[data-skin="dreamcore"] :is(.custom-select-trigger, .settings-inline-action, .settings-input-row input, .primary-button) { border-radius: 0; box-shadow: none; font-family: var(--font-code); }
+:root[data-skin="dreamcore"] :is(.custom-select-trigger, .settings-inline-action, .settings-input-row input, .settings-input-row textarea, .primary-button) { border-radius: 0; box-shadow: none; font-family: var(--font-code); }
 :root[data-skin="dreamcore"] .settings-toggle > span { display: grid; width: 32px; height: 24px; place-items: center; border: 0; border-radius: 0; background: transparent; }
 :root[data-skin="dreamcore"] .settings-toggle > span::after { position: static; width: auto; height: auto; border-radius: 0; background: transparent; box-shadow: none; transform: none; content: '[ ]'; color: var(--theme-muted); font: 13px var(--font-code); }
 :root[data-skin="dreamcore"] .settings-toggle input:checked + span { background: transparent; }

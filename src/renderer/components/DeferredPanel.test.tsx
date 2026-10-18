@@ -184,7 +184,6 @@ describe('production deferred panel source contracts (no runtime execution)', ()
 
   it('keeps the global Agent run toast action styling available before the Agents chunk loads', () => {
     const global = parse(readFileSync(resolve(directory, '../styles/global.css'), 'utf8'));
-    const agents = parse(readFileSync(resolve(directory, '../features/agents/agents.css'), 'utf8'));
     const rules: Rule[] = [];
     global.walkRules('.app-toast .agent-notice-action', (rule) => { rules.push(rule); });
     expect(rules).toHaveLength(1);
@@ -195,7 +194,6 @@ describe('production deferred panel source contracts (no runtime execution)', ()
       margin: '0', padding: '0', 'border-radius': 'var(--surface-control-radius, 0)', color: 'var(--theme-accent)',
       font: 'inherit', 'font-size': 'var(--surface-font-size, .8em)', 'line-height': '1.5', 'text-decoration': 'underline',
     });
-    agents.walkRules((rule) => { expect(rule.selector).not.toMatch(/\.app-toast|\.agent-notice-action/u); });
     expect(readFileSync(resolve(directory, './AppToast.tsx'), 'utf8')).toContain('className="agent-notice-action"');
     for (const entry of ['../main.tsx', '../web-entry.tsx']) {
       expect(readFileSync(resolve(directory, entry), 'utf8')).toContain("import './styles/global.css'");

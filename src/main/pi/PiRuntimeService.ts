@@ -128,9 +128,9 @@ import { createTaskTools, TASK_TOOL_NAMES } from './tasks/TaskTools';
 import { buildMonitorDashboard, type MonitorRunsSource } from './monitor/MonitorDashboard';
 import { createMonitorDashboardTool, MONITOR_DASHBOARD_TOOL_NAME } from './monitor/MonitorDashboardTool';
 import type { MonitorDashboard, MonitorReadInput } from '../../shared/contracts/monitorDashboard';
-import { agentSessionPermission, bindAgentSessionPreset, filterAgentSessionTools, getAgentSessionPreset, readAgentSessionPreset } from '../agents/AgentSessionPreset';
-import { validateAgentSkills, type AgentExecutionHandle } from '../agents/AgentExecutor';
-import { agentDefaultsSchema } from '../../shared/contracts/agents';
+import { agentSessionPermission, bindAgentSessionPreset, filterAgentSessionTools, getAgentSessionPreset, presetPermission, readAgentSessionPreset, validateAgentSkills } from '../agents/AgentSessionPreset';
+import { AGENT_HOME_TOOL_NAMES, createRunInProjectTool, type AgentMessage, type AgentRunHandle, type AgentRunOutcome, type AgentRunStarter, type AgentRunTarget } from '../agents/AgentRunTool';
+import { agentDefaultsSchema, type SavedAgentSession } from '../../shared/contracts/agents';
 import { InMemoryTaskRepository, type TaskPersistence } from './tasks/TaskRepository';
 import { InMemorySessionQueueRepository, type SessionQueuePersistence } from './SessionQueueRepository';
 import { disabledModelMessage, isModelDisabled } from '../../shared/modelVisibility';
@@ -486,6 +486,7 @@ interface RuntimeSlot {
   firstTitleStarted: boolean;
   /** Frozen at user-prompt start so a mid-turn settings save cannot change child catalogs. */
   disabledModelsForTurn: readonly string[] | null;
+  agentRunSettled: ((outcome: AgentRunOutcome) => void) | null;
   createdAt: string;
   modifiedAt: string;
   disposed: boolean;
@@ -501,6 +502,12 @@ const DEFERRED_TOOLS = new Set<string>([
   ...ALL_ORCHESTRATION_TOOLS, ...TASK_TOOL_NAMES, MONITOR_DASHBOARD_TOOL_NAME,
   'generate_image', 'git_branch', 'git_push', 'pr_create', 'pr_status', 'message_session', 'fate_mcp',
 ]);
+
+function agentRunOutcome(session: AgentSession, failed: boolean): AgentRunOutcome {
+  const last = [...session.messages].reverse().find((message) => message.role === 'assistant');
+  const summary = last?.role === 'assistant' ? last.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('\n').slice(0, 4000) : '';
+  return { failed: failed || last?.role === 'assistant' && (last.stopReason === 'error' || last.stopReason === 'aborted'), summary, error: null };
+}
 
 function goalChildStatus(status: SubagentStatus): GoalMaxRuntimeChild['status'] {
   if (status === 'queued') return 'pending';
@@ -626,6 +633,7 @@ export const createDefaultModelRuntime = async (paths?: FatePaths): Promise<Mode
 export interface PiSdkAdapterOptions {
   codemode?: () => boolean;
   dailyBudgetUsd?: () => number | null;
+  currentAgentPreset?: (preset: SavedAgentSession) => Promise<SavedAgentSession>;
 }
 
 export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptions = {}): PiSdkAdapter => ({
@@ -639,7 +647,8 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
       // Project trust is decided by Fate UI's main-process prompt before the SDK
       // runtime exists. Pass that decision through so global extensions observe
       // the same trusted state and project settings/resources follow Pi semantics.
-      const preset = readAgentSessionPreset(sessionManager);
+      const saved = readAgentSessionPreset(sessionManager);
+      const preset = saved && !saved.runId && options.currentAgentPreset ? await options.currentAgentPreset(saved) : saved;
       if (preset && (projectTrusted !== true || path.resolve(preset.projectPath) !== path.resolve(effectiveCwd))) throw new Error('Saved Agent session requires its original trusted project.');
       const settingsManager = SettingsManager.create(effectiveCwd, agentDir, { projectTrusted: projectTrusted === true });
       const resolvedResources = await new DefaultPackageManager({
@@ -693,17 +702,16 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         ],
         { ...(getImageGenerationSettings ? { getImageGenerationSettings } : {}), ...(paths ? { imageAgentDir: paths.piAgentDir } : {}), ...(attestationSink ? { attestations: attestationSink } : {}) },
       );
-      const ownedTools = preset ? (preset.background ? [] : customTools.filter((tool) => !tool.name.startsWith('browser_'))) : customTools;
-      const ordinary = preset ? confinedTools.filter((tool) => ['read', 'grep', 'find', 'ls', ...(preset.background || preset.defaults.permission === 'read-only' ? [] : ['write', 'edit'])].includes(tool.name)) : confinedTools;
+      const ownedTools = customTools.filter((tool) => preset?.runId ? !tool.name.startsWith('browser_') && !AGENT_HOME_TOOL_NAMES.has(tool.name) : preset || !AGENT_HOME_TOOL_NAMES.has(tool.name));
       // A corrupt optional MCP config must not prevent normal project sessions.
       // Settings > MCP still reports the validation error so the user can repair it.
-      const mcpServers = preset ? [] : await new McpConfigService(paths?.dataRoot).list().catch(() => []);
+      const mcpServers = await new McpConfigService(paths?.dataRoot).list().catch(() => []);
       const mcpTool = mcpServers.some((server) => server.enabled)
         ? createMcpTool(mcpServers, () => toolAccess.fullAccess)
         : null;
-      const pullRequestTools = preset ? [] : createPullRequestTools(effectiveCwd, () => toolAccess.fullAccess);
-      const branchTools = preset ? [] : createBranchTools(new GitService(await FilesystemService.forRoot(effectiveCwd), undefined, undefined, hostCheckoutOwnership()), () => toolAccess.permissionLevel);
-      const allTools = [...ordinary, ...ownedTools, ...fate.lspTools, ...pullRequestTools, ...branchTools, ...(mcpTool ? [mcpTool] : [])];
+      const pullRequestTools = createPullRequestTools(effectiveCwd, () => toolAccess.fullAccess);
+      const branchTools = createBranchTools(new GitService(await FilesystemService.forRoot(effectiveCwd), undefined, undefined, hostCheckoutOwnership()), () => toolAccess.permissionLevel);
+      const allTools = [...confinedTools, ...ownedTools, ...fate.lspTools, ...pullRequestTools, ...branchTools, ...(mcpTool ? [mcpTool] : [])];
       if (!preset) for (const tool of allTools) if (DEFERRED_TOOLS.has(tool.name)) tool.exposure = 'deferred';
       const savedContext = preset ? sessionManager.buildSessionContext() : null;
       const modelChoice = savedContext?.model ? { provider: savedContext.model.provider, id: savedContext.model.modelId } : preset?.defaults.model;
@@ -1327,7 +1335,6 @@ export class PiRuntimeService {
   private goalEventSink: (event: GoalMaxEvent) => void = () => undefined;
   private taskEventSink: (event: TaskEvent) => void = () => undefined;
   private readonly goalSessionEntryCheckpoints = new Map<string, { goalId: string; status: GoalMaxState['status']; phase: GoalMaxState['phase']; revision: number; persistedAt: number }>();
-  private readonly agentAuthorityVersions = new Map<string, number>();
   private readonly batcher: PiEventBatcher;
   private readonly subagents: SubagentHistory;
   private readonly agentTeams: AgentTeamCoordinator;
@@ -1336,6 +1343,7 @@ export class PiRuntimeService {
   private readonly recoveredExecution: RecoveredExecutionPolicy;
   private readonly tasks: TaskService;
   private monitorRunsSource: ((projectPath: string) => Promise<MonitorRunsSource>) | null = null;
+  private agentRunStarter: AgentRunStarter | null = null;
   private readonly monitorEvents = new Map<string, Array<{ id: string; title: string; detail: string; state: 'normal' | 'attention'; timestamp: number }>>();
   private readonly disconnectedNormalizer = new PiEventNormalizer(() => null);
   private initialization = 0;
@@ -1572,8 +1580,10 @@ export class PiRuntimeService {
         const slot = this.findLiveSlot(rootSessionId);
         if (!slot || slot.disposed) return;
         this.syncGoalChildren(rootSessionId);
-        if (this.selectedSlot === slot) this.emitState();
-        else if (!this.hasOwnedAgentWork(rootSessionId) && !this.goalMax.hasRunnableGoal(rootSessionId) && !this.sessionHasActiveWork(slot.runtime.session)) this.settleInactiveSlot(slot);
+        if (this.selectedSlot === slot) {
+          this.emitState();
+          this.settleAgentRun(slot);
+        } else if (!this.hasOwnedAgentWork(rootSessionId) && !this.goalMax.hasRunnableGoal(rootSessionId) && !this.sessionHasActiveWork(slot.runtime.session)) this.settleInactiveSlot(slot);
       },
     }, this.paths ? path.join(this.paths.dataRoot, 'agent-teams') : undefined, childSessionFactory,
       this.paths && this.paths.profileKind === 'server' ? new AgentWorkspaceGitService(path.join(this.paths.dataRoot, 'agent-team-worktrees'), this.paths.attachmentRoot, checkoutOwnership) : undefined,
@@ -1619,8 +1629,10 @@ export class PiRuntimeService {
         const slot = this.findLiveSlot(parentSessionId);
         if (!slot || slot.disposed) return;
         this.syncGoalChildren(parentSessionId);
-        if (this.selectedSlot === slot) this.emitState();
-        else if (!this.hasOwnedAgentWork(parentSessionId) && !this.goalMax.hasRunnableGoal(parentSessionId) && !this.sessionHasActiveWork(slot.runtime.session)) this.settleInactiveSlot(slot);
+        if (this.selectedSlot === slot) {
+          this.emitState();
+          this.settleAgentRun(slot);
+        } else if (!this.hasOwnedAgentWork(parentSessionId) && !this.goalMax.hasRunnableGoal(parentSessionId) && !this.sessionHasActiveWork(slot.runtime.session)) this.settleInactiveSlot(slot);
       },
     }, nativeWorkflowSchedulerFactory);
     this.subagents = new SubagentHistory({
@@ -2231,16 +2243,23 @@ export class PiRuntimeService {
   }
 
   async prompt(input: PromptInput, skipCommandExpansion = false, preparedPrompt = false, replayedMessage?: QueuedMessageRecord,
-    assertSavedAgentAdmission?: () => void): Promise<PromptAcceptance> {
+    assertAdmission?: () => void): Promise<PromptAcceptance> {
     if (this.hostStopping) throw new Error('The core is shutting down; prompts are closed.');
     if (this.status === 'auth-required') throw new PiDesktopError(this.stateError ?? authRequiredError());
     await this.materializeColdSession();
-    const session = this.requireSession();
+    this.requireSession();
+    this.cancelPromptOptimization();
+    return this.promptSlot(this.selectedSlot!, input, skipCommandExpansion, preparedPrompt, replayedMessage, assertAdmission ? { assertAdmission } : {});
+  }
+
+  private async promptSlot(slot: RuntimeSlot, input: PromptInput, skipCommandExpansion: boolean, preparedPrompt: boolean, replayedMessage: QueuedMessageRecord | undefined,
+    options: { assertAdmission?: () => void; pinned?: boolean }): Promise<PromptAcceptance> {
+    if (this.hostStopping) throw new Error('The core is shutting down; prompts are closed.');
+    const session = slot.runtime.session;
     const agentPreset = getAgentSessionPreset(session);
     const workspacePolicy = this.agentWorkspacePolicySource();
     if (agentPreset && (agentPreset.defaults.workspace !== 'shared' || workspacePolicy.strict && workspacePolicy.preferredMode !== 'shared')) throw new Error('This saved Agent conversation requires a currently permitted shared workspace. No workspace fallback was used.');
-    this.cancelPromptOptimization();
-    const slot = this.selectedSlot!;
+    const targeted = () => options.pinned === true || this.selectedSlot === slot;
     const promptEpoch = slot.promptEpoch;
     const draftText = replayedMessage?.text ?? input.text;
     // Prompt preparation can await attachments while Pi begins a continuation.
@@ -2252,7 +2271,7 @@ export class PiRuntimeService {
     const initialization = this.initialization;
     const runId = randomUUID();
     const learningMasterOn = Boolean(this.learningService && this.project?.trusted && this.learningService.active(this.learningOrigin(slot)));
-    const learning = replayedMessage?.learning ?? input.learning ?? (!skipCommandExpansion && learningMasterOn ? { binding: this.learningOrigin(slot).binding, pins: [], excluded: [] } : undefined);
+    const learning = replayedMessage?.learning ?? input.learning ?? ((!skipCommandExpansion || options.pinned) && learningMasterOn ? { binding: this.learningOrigin(slot).binding, pins: [], excluded: [] } : undefined);
     if (learning && this.learningService) this.learningService.assertBinding(this.learningOrigin(slot), learning.binding, true);
     if (learning?.pins.length && !slot.learningContext) throw this.unsupported('Memory Learning context attachment');
     if (learning?.pins.length && input.text.trimStart().startsWith('/')) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Use selected learning on a plain user turn, not an extension command.', retryable: true });
@@ -2295,7 +2314,7 @@ export class PiRuntimeService {
     ) ? 'followUp' : input.behavior;
     if (
       (includesProjectResources || includesSessionReferences || includesBrowserAnnotations)
-      && (initialization !== this.initialization || slot.disposed || this.selectedSlot !== slot || slot.runtime.session !== session)
+      && (initialization !== this.initialization || slot.disposed || !targeted() || slot.runtime.session !== session)
     ) throw this.replacementSuperseded();
     if (slot.promptEpoch !== promptEpoch) throw this.replacementSuperseded();
     validatePromptImages(input.images);
@@ -2318,7 +2337,7 @@ export class PiRuntimeService {
     // message into Fate's bounded queue and replay it after compaction ends so
     // the composer never loses a draft or reports a false send failure.
     if (session.isCompacting) {
-      assertSavedAgentAdmission?.();
+      options.assertAdmission?.();
       if (slot.heldCompactionMessages.length + slot.queuedMessages.length + slot.recoveredMessages.length >= MAX_QUEUED_MESSAGES) {
         throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The message queue is full. Cancel or wait for a queued message before adding another.', retryable: true });
       }
@@ -2340,13 +2359,13 @@ export class PiRuntimeService {
       slot.heldCompactionMessages.push(heldRecord);
       try {
         await this.persistQueue(slot);
-        assertSavedAgentAdmission?.();
-        if (slot.disposed || this.selectedSlot !== slot || slot.runtime.session !== session || slot.promptEpoch !== promptEpoch) throw this.replacementSuperseded();
+        options.assertAdmission?.();
+        if (slot.disposed || !targeted() || slot.runtime.session !== session || slot.promptEpoch !== promptEpoch) throw this.replacementSuperseded();
       } catch (error) {
         slot.heldCompactionMessages = slot.heldCompactionMessages.filter((item) => item.id !== heldRecord.id);
         throw error;
       }
-      if (!replayedMessage && !assertSavedAgentAdmission && !promptStartsWithCommand) slot.freshIntentQueueIds.add(heldRecord.id);
+      if (!replayedMessage && !options.assertAdmission && !promptStartsWithCommand) slot.freshIntentQueueIds.add(heldRecord.id);
       slot.modifiedAt = new Date().toISOString();
       this.mergeLiveSessionSummaries();
       if (this.selectedSlot === slot) {
@@ -2412,7 +2431,7 @@ export class PiRuntimeService {
         }
       }
     }
-    if (!ownsSlot() || this.selectedSlot !== slot) {
+    if (!ownsSlot() || !targeted()) {
       if (startsRun && stagedModel) restoreStagedModel(stagedModel);
       if (startsRun && stagedThinkingLevel) restoreStagedThinkingLevel(stagedThinkingLevel);
       clearRunReservation();
@@ -2451,7 +2470,7 @@ export class PiRuntimeService {
     if (activeGoal && !skipCommandExpansion && activeGoal.status !== 'completed' && activeGoal.status !== 'cancelled') {
       try {
         activeGoal = await this.goalMax.prepareUserTurn(session.sessionId);
-        if (!ownsSlot() || this.selectedSlot !== slot) throw this.replacementSuperseded();
+        if (!ownsSlot() || !targeted()) throw this.replacementSuperseded();
       } catch (error) {
         if (queuedRecord) slot.queuedMessages = slot.queuedMessages.filter((item) => item.id !== queuedRecord.id);
         if (startsRun && stagedModel) restoreStagedModel(stagedModel);
@@ -2476,7 +2495,7 @@ export class PiRuntimeService {
         clearRunReservation();
         throw error;
       }
-      if (!ownsSlot() || this.selectedSlot !== slot) {
+      if (!ownsSlot() || !targeted()) {
         if (stagedModel) restoreStagedModel(stagedModel);
         if (stagedThinkingLevel) restoreStagedThinkingLevel(stagedThinkingLevel);
         clearRunReservation();
@@ -2487,7 +2506,7 @@ export class PiRuntimeService {
     if (queuedRecord) {
       try {
         await this.persistQueue(slot);
-        if (!ownsSlot() || this.selectedSlot !== slot) throw this.replacementSuperseded();
+        if (!ownsSlot() || !targeted()) throw this.replacementSuperseded();
       } catch (error) {
         slot.queuedMessages = slot.queuedMessages.filter((item) => item.id !== queuedRecord.id);
         clearRunReservation();
@@ -2498,7 +2517,7 @@ export class PiRuntimeService {
       this.assertPermissionAdmission(slot);
       // Saved Agent preparation above can await disk after its outer gate.
       // Recheck immediately before the existing Pi SDK prompt admission.
-      assertSavedAgentAdmission?.();
+      options.assertAdmission?.();
     } catch (error) {
       if (queuedRecord) slot.queuedMessages = slot.queuedMessages.filter((item) => item.id !== queuedRecord.id);
       clearRunReservation();
@@ -2539,7 +2558,7 @@ export class PiRuntimeService {
           return;
         }
         if (accepted) {
-          if (disposition !== 'handled' && (!replayedMessage || slot.freshIntentQueueIds.has(replayedMessage.id)) && !assertSavedAgentAdmission && !promptStartsWithCommand) {
+          if (disposition !== 'handled' && (!replayedMessage || slot.freshIntentQueueIds.has(replayedMessage.id)) && !options.assertAdmission && !promptStartsWithCommand) {
             try { this.recordFreshExecutionIntent(session.sessionId); }
             catch (error) { rejectReservation(); resolve({ accepted: false, runId }); throw error; }
           }
@@ -2879,7 +2898,7 @@ export class PiRuntimeService {
     if (!target || slot?.sessionInvalidated || slot?.disposed) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Wait for a healthy session before changing permissions.', retryable: true });
     if (cold) {
       const preset = readAgentSessionPreset({ getEntries: () => cold.snapshot.entries });
-      if (preset && (level === 'full-access' || (level === 'edit' && (preset.background || preset.defaults.permission === 'read-only')))) throw new Error('This saved Agent session cannot exceed its retained permission ceiling.');
+      if (preset && presetPermission(preset, level) !== level) throw new Error('This saved Agent session cannot exceed its retained permission ceiling.');
     } else if (session && agentSessionPermission(session, level) !== level) {
       throw new Error('This saved Agent session cannot exceed its retained permission ceiling.');
     }
@@ -2890,7 +2909,6 @@ export class PiRuntimeService {
     const sessionGeneration = slot?.sessionGeneration;
     const change = Symbol('permission-change');
     target.permissionChange = change;
-    this.agentAuthorityVersions.set(sessionId, (this.agentAuthorityVersions.get(sessionId) ?? 0) + 1);
     const ownsSelection = () => this.project === project && initialization === this.initialization
       && selectionGeneration === this.coldSelectionGeneration
       && (cold ? this.coldSession === cold : this.selectedSlot === slot && !slot!.disposed && slot!.sessionGeneration === sessionGeneration && slot!.runtime.session === session);
@@ -2971,7 +2989,6 @@ export class PiRuntimeService {
     for (const slot of this.liveSlots) {
       if (slot.disposed) continue;
       slot.permissionError = failure;
-      this.agentAuthorityVersions.set(slot.runtime.session.sessionId, (this.agentAuthorityVersions.get(slot.runtime.session.sessionId) ?? 0) + 1);
       const access = toolAccessBySession.get(slot.runtime.session);
       if (access) { access.fullAccess = false; access.permissionLevel = 'read-only'; }
       slot.permissionLevel = 'read-only';
@@ -2991,7 +3008,6 @@ export class PiRuntimeService {
       if (slot.disposed) continue;
       slot.stateError = failure;
       this.revokeSlotToolAccess(slot);
-      this.agentAuthorityVersions.set(slot.runtime.session.sessionId, (this.agentAuthorityVersions.get(slot.runtime.session.sessionId) ?? 0) + 1);
       try { slot.runtime.session.setActiveToolsByName(filterAgentSessionTools(slot.runtime.session, activeToolsForPermission(slot.runtime.session.getActiveToolNames(), 'read-only'))); } catch { /* Retained write handles are revoked independently. */ }
       try { this.agentTeams.lowerRootPermission(slot.runtime.session.sessionId, 'read-only'); } catch { /* Fence every root even if a descendant failed. */ }
     }
@@ -3551,63 +3567,74 @@ export class PiRuntimeService {
     });
   }
 
-  agentAuthority(sessionId: string): { level: PermissionLevel; revision: number } | null {
-    if (this.permissionStoreFailure) return null;
-    try { this.sessionPermissions.assertHealthy(); } catch { return null; }
-    const slot = this.findLiveSlot(sessionId);
-    const cold = this.coldSession?.snapshot.summary.id === sessionId ? this.coldSession : null;
-    if (slot && (slot.permissionError || slot.permissionChange || slot.sessionInvalidated) || cold && (cold.permissionError || cold.permissionChange)) return null;
-    const level = slot && !slot.disposed ? slot.permissionLevel : cold?.permissionLevel ?? null;
-    return level ? { level, revision: this.agentAuthorityVersions.get(sessionId) ?? 0 } : null;
-  }
-
-  async agentResources(skillNames: readonly string[]) {
+  async startAgentRun(target: AgentRunTarget, assertAdmission: () => void): Promise<AgentRunHandle> {
+    if (this.hostStopping) throw new Error('The core is shutting down; Agent runs are closed.');
+    if (this.status === 'auth-required') throw new PiDesktopError(this.stateError ?? authRequiredError());
     const project = this.project;
-    if (!project?.trusted) throw new Error('Agent resources require the trusted project.');
-    const available = this.selectedSlot?.runtime.session.resourceLoader.getSkills().skills ?? [];
-    const skills = skillNames.map((name) => {
-      const skill = available.find((candidate) => candidate.name === name);
-      if (!skill) throw new Error(`Skill ${name} is unavailable in the live foreground resource set. Load it explicitly before scheduling.`);
-      return skill;
-    });
-    await validateAgentSkills(skills, project.path, this.paths?.piAgentDir, !this.paths || this.paths.profileKind === 'desktop');
-    const contextPrompts = [...await boundedContextPrompts(this.paths?.piAgentDir ?? getAgentDir(), 'Global'), ...await boundedContextPrompts(project.path, 'Project')];
+    if (!project?.trusted) throw new Error('Agent runs need a trusted project.');
+    assertAdmission();
+    await this.sessionPermissions.set(project.path, target.sessionId, target.permission);
     if (this.project !== project) throw this.replacementSuperseded();
-    return { skills, contextPrompts };
-  }
-
-  async agentModelRuntime(): Promise<ModelRuntime> {
-    if (!this.project?.trusted) throw new Error('Open a trusted project before running an Agent.');
-    return this.modelRuntime ?? this.providerLoginRuntime();
-  }
-
-  async createAgentForegroundExecution(sessionId: string, assertAdmission?: () => void): Promise<AgentExecutionHandle> {
-    await this.openAgentSavedSession(sessionId);
-    await this.materializeColdSession();
-    const slot = this.findLiveSlot(sessionId);
-    if (!slot || !getAgentSessionPreset(slot.runtime.session)) throw new Error('The saved Agent session is unavailable.');
-    const session = slot.runtime.session;
+    const slot = await this.createAdditionalSlot(target.sessionPath, target.sessionId);
+    const sessionId = slot.runtime.session.sessionId;
+    const settled = new Promise<AgentRunOutcome>((resolve) => { slot.agentRunSettled = resolve; });
+    try {
+      if (!getAgentSessionPreset(slot.runtime.session)?.runId) throw new Error('The run session is not a saved Agent run.');
+      if (target.mode === 'goal') {
+        assertAdmission();
+        await this.goalMax.create({ objective: target.request, verificationLevel: 'normal', agentStrategy: 'auto', tokenLimit: null, timeLimitMs: target.timeLimitMs }, sessionId);
+      } else if (!(await this.promptSlot(slot, { text: target.request, behavior: 'prompt' }, true, false, undefined, { assertAdmission, pinned: true })).accepted) {
+        throw new Error('Pi rejected the Agent run before it started.');
+      }
+    } catch (error) {
+      slot.agentRunSettled = null;
+      await this.disposeSlot(slot, true).catch(() => undefined);
+      throw error;
+    }
+    this.setSessionAttention(slot, 'running');
+    this.mergeLiveSessionSummaries();
+    this.emitState();
     return {
       sessionId,
-      get messages() { return session.messages; },
-      prompt: async (text) => {
-        if (this.selectedSlot !== slot || slot.disposed) throw new Error('The Agent session selection changed before the task was accepted.');
-        const accepted = await this.prompt({ text, behavior: 'prompt' }, true, false, undefined, assertAdmission);
-        if (!accepted.accepted) throw new Error('Pi rejected the Agent task before execution.');
-        while (!slot.disposed && (this.sessionHasActiveWork(session) || this.hasActiveAgentWork(sessionId) || slot.activeRunId !== null)) {
-          await new Promise<void>((resolve) => { const timer = setTimeout(resolve, 25); timer.unref?.(); });
-        }
+      settled,
+      abort: async () => {
+        if (this.project && this.goalMax.get(this.project.path, sessionId)) await this.goalMax.control({ action: 'cancel', reason: 'The Agent run was stopped.' }, sessionId).catch(() => undefined);
+        await this.abortGoalSession(sessionId);
+        const live = this.findLiveSlot(sessionId);
+        if (live) this.settleAgentRun(live);
       },
-      abort: () => this.abortGoalSession(sessionId),
-      // The workbench owns this root slot, including its saved-session UI and Team children.
-      dispose: () => undefined,
     };
   }
 
-  async openAgentSavedSession(sessionId: string): Promise<RuntimeState> {
-    if (!this.project?.trusted) throw new Error('Open a trusted project before opening an Agent conversation.');
-    this.sessionRepository.invalidate?.(this.project.path);
-    return this.switchSession(sessionId);
+  async deliverAgentMessage(sessionPath: string, sessionId: string, message: AgentMessage): Promise<void> {
+    if (this.coldSession?.snapshot.summary.id === sessionId) await this.materializeColdSession();
+    const slot = this.findLiveSlot(sessionId) ?? await this.createAdditionalSlot(sessionPath, sessionId);
+    await this.sendChildGeneratedMessage(slot, slot.runtime.session, { customType: message.customType, content: [{ type: 'text', text: message.text }], display: true, details: message.details }, 'followUp', true);
+    if (slot.disposed) return;
+    slot.modifiedAt = new Date().toISOString();
+    this.setSessionAttention(slot, 'running');
+    this.mergeLiveSessionSummaries();
+    this.emitState();
+  }
+
+  async refreshAgentSession(sessionId: string): Promise<void> {
+    const slot = this.findLiveSlot(sessionId);
+    if (!slot || slot.activeRunId !== null || this.sessionHasActiveWork(slot.runtime.session) || this.hasOwnedAgentWork(sessionId) || this.goalMax.hasRunnableGoal(sessionId)) return;
+    const selected = this.selectedSlot === slot;
+    await this.disposeSlot(slot, false);
+    if (selected) await this.switchSession(sessionId);
+  }
+
+  setAgentRunStarter(starter: AgentRunStarter | null): void { this.agentRunStarter = starter; }
+
+  private settleAgentRun(slot: RuntimeSlot): void {
+    const settle = slot.agentRunSettled;
+    const session = slot.runtime.session;
+    if (!settle || this.sessionHasActiveWork(session) || this.hasOwnedAgentWork(session.sessionId) || this.goalMax.hasRunnableGoal(session.sessionId)) return;
+    slot.agentRunSettled = null;
+    const goal = this.project ? this.goalMax.get(this.project.path, session.sessionId) : null;
+    const outcome = agentRunOutcome(session, slot.runFailed || Boolean(goal && goal.status !== 'completed'));
+    settle(goal?.failure ? { ...outcome, error: goal.failure.message } : outcome);
   }
 
   async listSessions(query = ''): Promise<SessionSummary[]> {
@@ -3672,7 +3699,7 @@ export class PiRuntimeService {
       const pendingThinkingLevel = this.coldPendingThinkingLevels.get(summary.id) ?? null;
       const savedPermission = await this.permissionForColdSession(projectPath, summary.id, () => selectionGeneration === this.coldSelectionGeneration);
       const preset = readAgentSessionPreset({ getEntries: () => snapshot.entries });
-      const permissionLevel = preset ? savedPermission === 'read-only' || preset.background || preset.defaults.permission === 'read-only' ? 'read-only' : 'edit' : savedPermission;
+      const permissionLevel = preset ? presetPermission(preset, savedPermission) : savedPermission;
       if (selectionGeneration !== this.coldSelectionGeneration || this.project?.path !== projectPath) throw this.replacementSuperseded();
       this.coldSession = {
         snapshot,
@@ -4150,6 +4177,7 @@ export class PiRuntimeService {
       firstPromptText: '',
       firstTitleStarted: false,
       disabledModelsForTurn: null,
+      agentRunSettled: null,
       createdAt: now,
       modifiedAt: now,
       disposed: false,
@@ -4736,6 +4764,7 @@ export class PiRuntimeService {
         this.mergeLiveSessionSummaries();
         this.emitState();
       } else if (selected) {
+        this.settleAgentRun(slot);
         this.onSessionSettled?.(session.sessionId);
         this.mergeLiveSessionSummaries();
         this.emitState();
@@ -4778,6 +4807,7 @@ export class PiRuntimeService {
   }
 
   private settleInactiveSlot(slot: RuntimeSlot): void {
+    this.settleAgentRun(slot);
     if (slot.disposed || this.selectedSlot === slot || this.sessionHasActiveWork(slot.runtime.session) || this.hasOwnedAgentWork(slot.runtime.session.sessionId) || this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId)) return;
     const initialization = this.initialization;
     const sessionId = slot.runtime.session.sessionId;
@@ -5182,7 +5212,7 @@ export class PiRuntimeService {
     const modelRuntime = this.modelRuntime;
     const generation = this.initialization;
     for (const slot of [...this.liveSlots]) {
-      if (slot !== this.selectedSlot && !this.sessionHasActiveWork(slot.runtime.session) && !this.hasOwnedAgentWork(slot.runtime.session.sessionId) && !this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId)) {
+      if (slot !== this.selectedSlot && !slot.agentRunSettled && !this.sessionHasActiveWork(slot.runtime.session) && !this.hasOwnedAgentWork(slot.runtime.session.sessionId) && !this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId)) {
         await this.disposeSlot(slot, false);
         if (generation !== this.initialization || this.project !== project) throw this.replacementSuperseded();
       }
@@ -5439,8 +5469,9 @@ export class PiRuntimeService {
 
   private async startGoalTurn(sessionId: string, objective: string, _capsule: string): Promise<boolean> {
     const slot = this.findLiveSlot(sessionId);
-    if (!slot || slot.disposed || this.selectedSlot !== slot || slot.runtime.session.isStreaming) return false;
-    return (await this.prompt({ text: objective, behavior: 'prompt' }, true)).accepted;
+    if (!slot || slot.disposed || slot.runtime.session.isStreaming) return false;
+    if (this.selectedSlot === slot) return (await this.prompt({ text: objective, behavior: 'prompt' }, true)).accepted;
+    return (await this.promptSlot(slot, { text: objective, behavior: 'prompt' }, true, false, undefined, { pinned: true })).accepted;
   }
 
   private async continueGoalTurn(sessionId: string, capsule: string, goalId: string, revision: number): Promise<void> {
@@ -5649,6 +5680,7 @@ export class PiRuntimeService {
         if (this.selectedSlot === slot) this.emitError(slot.stateError);
       }
     }
+    if (event.type === 'goalmax.snapshot' && !this.goalMax.hasRunnableGoal(event.sessionId)) this.settleAgentRun(slot);
     if (this.selectedSlot === slot) return;
     if (event.type === 'goalmax.snapshot') {
       const status = event.goal.status;
@@ -5682,7 +5714,13 @@ export class PiRuntimeService {
     const tools = [...agents, workflow, catalog, createMonitorDashboardTool((input, sessionId) => this.getMonitorDashboard(input, sessionId)), this.questionnaires.createTool((sessionId) => {
       const slot = this.findLiveSlot(sessionId);
       return Boolean(this.project?.trusted && slot && !slot.sessionInvalidated && slot.runtime.session.sessionId === sessionId);
-    }), ...this.createSessionMessagingTools(), ...this.goalMax.createTools(), ...taskTools, ...browser];
+    }), ...this.createSessionMessagingTools(), ...this.goalMax.createTools(), ...taskTools, ...browser, createRunInProjectTool(async (sessionId, input) => {
+      const slot = this.findLiveSlot(sessionId);
+      const preset = slot ? getAgentSessionPreset(slot.runtime.session) : undefined;
+      if (!slot || !preset || preset.runId || !this.agentRunStarter) throw new Error('Only an Agent chat can start project runs.');
+      const model = slot.runtime.session.model;
+      return this.agentRunStarter({ agentId: preset.agentId, permission: slot.permissionLevel, model: model ? { provider: model.provider, id: model.id } : null }, input);
+    })];
     for (const tool of tools) installToolExecutionAdmission(tool, () => {
       if (this.hostStopping) throw new Error('The core is shutting down; a live root session cannot admit retained tools.');
       this.executionAdmissionGuard();
@@ -6013,6 +6051,9 @@ export class PiRuntimeService {
 
   private async disposeSlot(slot: RuntimeSlot, abortRunning: boolean): Promise<void> {
     if (slot.disposePromise) return slot.disposePromise;
+    const settle = slot.agentRunSettled;
+    slot.agentRunSettled = null;
+    settle?.({ ...agentRunOutcome(slot.runtime.session, true), error: 'The run conversation closed before it finished.' });
     const session = slot.runtime.session;
     const sessionId = session.sessionId;
     this.questionnaires.cancel(sessionId);

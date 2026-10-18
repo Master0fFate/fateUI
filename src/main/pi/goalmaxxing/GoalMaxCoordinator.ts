@@ -282,9 +282,9 @@ export class GoalMaxCoordinator {
     return structuredClone(this.recoveryView(failClosed?.id === goal.id && failClosed.projectPath === goal.projectPath ? failClosed : goal));
   }
 
-  async create(inputValue: GoalMaxCreateInput): Promise<GoalMaxState> {
+  async create(inputValue: GoalMaxCreateInput, sessionId = ''): Promise<GoalMaxState> {
     const input = goalMaxCreateInputSchema.parse(inputValue);
-    const runtime = this.requireSelectedRuntime();
+    const runtime = this.requireRuntime(sessionId);
     const key = goalKey(runtime.projectPath, runtime.sessionId);
     const existing = this.states.get(key) ?? await this.repository.load(runtime.projectPath, runtime.sessionId);
     if (existing) throw new Error(isGoalMaxTerminal(existing.status) ? 'Clear the finished goal before starting a new one.' : 'This session already has an active goal.');
@@ -373,9 +373,9 @@ export class GoalMaxCoordinator {
     return structuredClone(this.requireState(runtime.sessionId));
   }
 
-  async control(inputValue: GoalMaxControlInput): Promise<GoalMaxState> {
+  async control(inputValue: GoalMaxControlInput, sessionId = ''): Promise<GoalMaxState> {
     const input = goalMaxControlInputSchema.parse(inputValue);
-    const runtime = this.requireSelectedRuntime();
+    const runtime = this.requireRuntime(sessionId);
     let goal = this.requireState(runtime.sessionId);
     if (input.action === 'cancel') {
       const failures: unknown[] = [];
@@ -448,7 +448,7 @@ export class GoalMaxCoordinator {
 
   async update(inputValue: GoalMaxUpdateInput): Promise<GoalMaxState> {
     const input = goalMaxUpdateInputSchema.parse(inputValue);
-    const runtime = this.requireSelectedRuntime();
+    const runtime = this.requireRuntime();
     const current = this.requireState(runtime.sessionId);
     if (isGoalMaxTerminal(current.status)) throw new Error('Clear this finished goal before replacing it.');
     if (current.revision !== input.expectedRevision) throw new Error('The goal changed while it was being edited. Reopen the editor and retry.');
@@ -637,7 +637,7 @@ export class GoalMaxCoordinator {
   }
 
   async clear(): Promise<GoalMaxClearResult> {
-    const runtime = this.requireSelectedRuntime();
+    const runtime = this.requireRuntime();
     let goal = this.requireState(runtime.sessionId);
     if (!isGoalMaxTerminal(goal.status)) {
       await this.control({ action: 'cancel', reason: 'Cleared by the user.' });
@@ -1876,10 +1876,10 @@ export class GoalMaxCoordinator {
     this.completionFenceConflicts.delete(goal.sessionId);
   }
 
-  private requireSelectedRuntime(): GoalMaxRuntimeSnapshot {
+  private requireRuntime(sessionId = ''): GoalMaxRuntimeSnapshot {
     // UI control calls always target the currently selected runtime. Iterating bound
     // background sessions here can mutate the wrong session after a tab switch.
-    const selected = this.host.runtime('');
+    const selected = this.host.runtime(sessionId);
     if (!selected) throw new Error('Open and trust a project before using GoalMax.');
     return selected;
   }

@@ -352,6 +352,7 @@ export const projectStateSchema = z.object({
   path: z.string().min(1),
   name: z.string().min(1),
   trusted: z.boolean(),
+  agentId: z.string().uuid().optional(),
 });
 
 // ---------------------------------------------------------------------------

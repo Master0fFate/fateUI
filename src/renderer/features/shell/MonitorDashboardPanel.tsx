@@ -19,9 +19,9 @@ const SECTION_LABELS = { overview: 'Overview', runs: 'Runs', teams: 'Teams', tas
 const ROW_ICONS = { run: Play, 'team-node': Users, task: ListChecks, event: Activity } as const;
 const clock = (value: number) => new Date(value).toLocaleTimeString();
 
-function DetailLink({ item, projectPath }: { item: MonitorItem; projectPath: string }) {
+function DetailLink({ item }: { item: MonitorItem }) {
   const openTeamNode = useUiStore((state) => state.openAgentTeamNode);
-  if (item.ref.kind === 'run') return <button type="button" className="activity-refresh" onClick={() => void openAgentNotice(projectPath, item.ref.id)}>Open run<ArrowUpRight size={10} aria-hidden="true" /></button>;
+  if (item.ref.kind === 'run') return <button type="button" className="activity-refresh" onClick={() => void openAgentNotice(item.ref.id)}>Open run<ArrowUpRight size={10} aria-hidden="true" /></button>;
   if (item.ref.kind === 'team-node' && item.ref.teamId) return <button type="button" className="activity-refresh" onClick={() => openTeamNode(item.ref.teamId!, item.ref.id)}>Open agent<ArrowUpRight size={10} aria-hidden="true" /></button>;
   return null;
 }
@@ -207,7 +207,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
                 {webScope && 'navigation' in item && item.navigation
                   ? <button type="button" className="activity-refresh" aria-label={`Open Monitor row ${item.id}`} onClick={() => void readDetail(item.id)}>Open details<ArrowUpRight size={10} aria-hidden="true" /></button> : null}
                 {!webScope && project && monitorItemSchema.safeParse(item).success
-                  ? <DetailLink item={monitorItemSchema.parse(item)} projectPath={project.path} /> : null}
+                  ? <DetailLink item={monitorItemSchema.parse(item)} /> : null}
               </span>
             </li>;
           })}

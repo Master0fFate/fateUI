@@ -101,13 +101,13 @@ describe('preload desktop bridge', () => {
   it('lists legacy Automations through the Agents bridge with schema validation', async () => {
     const item = {
       sourceId: '00000000-0000-4000-8000-000000000001', sourceDigest: 'a'.repeat(64), name: 'Review auth', prompt: 'Review auth changes.',
-      permissionCeiling: 'read-only' as const, archivedFields: ['launchCount'], existingTaskId: null,
+      existingRoutineId: null,
     };
     electron.invoke.mockResolvedValueOnce([item]);
-    await expect(piDesktopApi.listLegacyAutomations({})).resolves.toEqual([item]);
+    await expect(piDesktopApi.listLegacyAutomations()).resolves.toEqual([item]);
     expect(electron.invoke).toHaveBeenCalledWith(ipcChannels.agentsLegacyList, {});
-    electron.invoke.mockResolvedValueOnce([{ ...item, permissionCeiling: 'full-access' }]);
-    await expect(piDesktopApi.listLegacyAutomations({})).rejects.toThrow();
+    electron.invoke.mockResolvedValueOnce([{ ...item, existingRoutineId: 'not-an-id' }]);
+    await expect(piDesktopApi.listLegacyAutomations()).rejects.toThrow();
   });
 
   it('checks for updates through the pathless typed IPC channel', async () => {

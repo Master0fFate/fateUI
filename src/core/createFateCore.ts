@@ -278,7 +278,8 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
       onReport: () => logs.write('warn', 'durable', 'Native workflow reported an execution diagnostic; inspect its retained workflow state.'),
     }) : undefined;
     const dependencies: MultiProjectPiRuntimeDeps = {
-      adapter: options.adapter ?? createPiSdkAdapter(paths, { codemode: () => settings.get().piCodemode, dailyBudgetUsd: () => settings.get().dailyBudgetUsd }),
+      adapter: options.adapter ?? createPiSdkAdapter(paths, { codemode: () => settings.get().piCodemode, dailyBudgetUsd: () => settings.get().dailyBudgetUsd,
+        currentAgentPreset: async (preset) => savedAgents ? savedAgents.currentPreset(preset) : preset }),
       ...(nativeWorkflowSchedulerFactory ? { nativeWorkflowSchedulerFactory } : {}),
       requireFreshExecutionIntent: explicitWorkOnly,
       paths,
@@ -298,6 +299,10 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
       monitorRuns: async (projectPath) => {
         if (!savedAgents) throw new Error('Scheduled Agents are unavailable.');
         return savedAgents.monitorRuns(projectPath);
+      },
+      agentRunStarter: (home, input) => {
+        if (!savedAgents) throw new Error('Agents are unavailable.');
+        return savedAgents.startProjectRun(home, input);
       },
       ...(options.providerAuthUrlPresenter ? { providerAuthUrlPresenter: options.providerAuthUrlPresenter } : {}),
       ...(options.attention ? { notifySessionSettled: () => options.attention!.sessionSettled() } : {}),
@@ -358,22 +363,23 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
     });
     owned.push(async () => { stopRecovery(); await recovery.flush(); });
     if (options.savedAgents) {
+      const focused = () => runtime.asRouter().getState(false);
       const agents = new AgentsService({
-        runtime: runtime.asRouter(),
-        workspacePolicy: () => settings.get().agentWorkspace,
-        disabledModels: () => settings.get().disabledModels ?? [],
-        readMonitorDashboard: async (projectPath, rootSessionId, query) => {
-          const owner = runtime.peekWorkspace(projectPath);
-          if (!owner) throw new Error('The owning project runtime is not available.');
-          return owner.getMonitorDashboard(query, rootSessionId);
+        workspace: async (project) => {
+          const live = runtime.peekWorkspace(project.path);
+          if (live) return live;
+          runtime.registerKnownWorkspace({ path: project.path, name: project.name, trusted: true, ...(project.agentId ? { agentId: project.agentId } : {}) });
+          return runtime.acquireWorkspace(project.path);
         },
+        liveWorkspace: (projectPath) => runtime.peekWorkspace(projectPath),
+        trustedProjects: () => projects.trustedProjectPaths(),
+        currentModel: () => { const model = focused().model; return model ? { provider: model.provider, id: model.id } : null; },
+        currentProjectPath: () => { const project = focused().project; return project?.trusted && !project.agentId ? project.path : null; },
         sessionsRoot: paths.sessionsRoot,
-        piAgentDir: paths.piAgentDir,
-        serverProfile: paths.profileKind === 'server',
         assertAdmission: (root, sessionId) => recovery.assertAdmission(root, sessionId),
         ...(options.savedAgents.notify ? { notify: options.savedAgents.notify } : {}),
       }, new AgentRepository(path.join(paths.dataRoot, 'agents', 'v1')), options.savedAgents.legacy);
-      owned.push(runtime.onFocusChanged(() => agents.wake()), () => agents.dispose());
+      owned.push(() => agents.dispose());
       if (options.savedAgents.scheduleRoutines && recovered.admissionsAllowed && !explicitWorkOnly) agents.start();
       savedAgents = agents;
     }

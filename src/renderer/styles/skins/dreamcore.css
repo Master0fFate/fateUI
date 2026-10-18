@@ -276,6 +276,7 @@
 :root[data-skin="dreamcore"] .settings-inline-action,
 :root[data-skin="dreamcore"] .settings-input-row input,
 :root[data-skin="dreamcore"] .settings-input-row select,
+:root[data-skin="dreamcore"] .settings-input-row textarea,
 :root[data-skin="dreamcore"] .settings-card,
 :root[data-skin="dreamcore"] .settings-providers-add,
 :root[data-skin="dreamcore"] .usage-table,

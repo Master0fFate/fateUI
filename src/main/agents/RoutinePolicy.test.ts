@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { claimRun, consumeApproval, effectivePermission, effectiveWorkspace, evaluateDue, recoverRun, retainPerRoutine, type Approval, type ApprovalBinding, type IntervalSchedule, type LeasedRun, type Permission } from './RoutinePolicy';
+import { claimRun, effectivePermission, evaluateDue, recoverRun, retainPerRoutine, type IntervalSchedule, type LeasedRun, type Permission } from './RoutinePolicy';
 
 const instant = (date: string) => Date.parse(date);
 const schedule = (anchor: number, timeZone = 'UTC'): IntervalSchedule => ({ anchor, intervalMs: 60 * 60_000, timeZone });
-const binding: ApprovalBinding = { runId: 'run-1', actionDigest: 'digest-of-exact-action', definitionRevision: 1, taskRevision: 2, permissionRevision: 3, projectPath: '/trusted' };
-const approval: Approval = { ...binding, approvedAt: 1000, expiresAt: 301_000, consumed: false };
 
 describe('D0-04 deterministic default precedence', () => {
   for (const live of ['read-only', 'edit', 'full-access'] as Permission[]) {
@@ -18,11 +16,6 @@ describe('D0-04 deterministic default precedence', () => {
       }
     }
   }
-  it('honors strict global workspace policy rather than treating defaults as authority', () => {
-    expect(effectiveWorkspace({ preferredMode: 'worktree', strict: true })).toBe('worktree');
-    expect(() => effectiveWorkspace({ preferredMode: 'worktree', strict: true }, 'shared')).toThrow(/strict/);
-    expect(effectiveWorkspace({ preferredMode: 'shared', strict: false }, 'worktree')).toBe('worktree');
-  });
 });
 
 describe('D0-05 interval scheduler fake-clock examples', () => {
@@ -69,22 +62,7 @@ describe('D0-05 interval scheduler fake-clock examples', () => {
   });
 });
 
-describe('D0-08 approval binding and expiry proof', () => {
-  it('consumes exact approved work once', () => {
-    const consumed = consumeApproval(approval, binding, 1001, true, 'edit');
-    expect(consumed.consumed).toBe(true);
-    expect(() => consumeApproval(consumed, binding, 1002, true, 'edit')).toThrow();
-  });
-  it.each(['runId', 'actionDigest', 'definitionRevision', 'taskRevision', 'permissionRevision', 'projectPath'] as const)('rejects changed %s', (key) => {
-    expect(() => consumeApproval(approval, { ...binding, [key]: 'changed' }, 1001, true, 'edit')).toThrow();
-  });
-  it('rejects expiry, rollback, revoked trust and live permission lowering', () => {
-    expect(() => consumeApproval(approval, binding, approval.expiresAt, true, 'edit')).toThrow();
-    expect(() => consumeApproval(approval, binding, 999, true, 'edit')).toThrow();
-    expect(() => consumeApproval(approval, binding, 1001, false, 'edit')).toThrow();
-    expect(() => consumeApproval(approval, binding, 1001, true, 'read-only')).toThrow();
-    expect(() => consumeApproval(approval, {} as ApprovalBinding, 1001, true, 'edit')).toThrow();
-  });
+describe('D0-08 run history retention', () => {
   it('retains unresolved runs and caps terminal history per Routine, not Agent', () => {
     const runs = [
       { routineId: 'a', status: 'succeeded' as const, id: 'a-old' },

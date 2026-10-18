@@ -125,7 +125,6 @@ export class RoutineLedger {
       const status = expiredQueue ? 'skipped' as const : recovered.status;
       const next = { ...run, ...recovered, status, payload: run.payload ? { ...run.payload, status,
         error: uncertain ? 'Execution was interrupted or its lease expired. It will not be replayed automatically.' : expiredQueue ? 'Queued work was not replayed after restart.' : run.payload.error,
-        approvals: uncertain || expiredQueue ? run.payload.approvals.map((approval) => approval.status === 'pending' ? { ...approval, status: 'uncertain' as const } : approval) : run.payload.approvals,
       } : null };
       if (JSON.stringify(next) !== JSON.stringify(run)) changed = true;
       return next;

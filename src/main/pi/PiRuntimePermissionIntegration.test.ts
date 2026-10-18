@@ -101,7 +101,6 @@ describe('real SDK root permission fencing (no provider requests)', () => {
       try {
         await saving;
         expect(service.getState(false).permissionLevel).toBe(previous);
-        expect(service.agentAuthority(session.sessionId)).toBeNull();
         const write = session.agent.state.tools.find((tool) => tool.name === 'write');
         const bash = session.agent.state.tools.find((tool) => tool.name === 'bash');
         expect(write).toBeDefined();
@@ -135,7 +134,6 @@ describe('real SDK root permission fencing (no provider requests)', () => {
       await second.openProject({ path: secondProject, name: 'second', trusted: true });
       vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('grant rename failed'));
       await expect(second.setPermissionLevel('full-access')).rejects.toThrow(/blocked/);
-      expect(first.agentAuthority(session.sessionId)).toBeNull();
       expect(first.getState(false).permissionLevel).toBe('read-only');
       const target = path.join(firstProject, 'sentinel.txt');
       await fs.writeFile(target, 'unchanged');

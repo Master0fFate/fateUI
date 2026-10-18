@@ -83,21 +83,20 @@ describe('D0-05 persisted schedule/claim transaction proof', () => {
     await expect(first.heartbeat('routine-1', run!.id, 'self', 120_001)).rejects.toThrow(/no longer owned/);
   });
 
-  it('keeps a live approval pending across observation and marks it uncertain only after lease expiry', async () => {
+  it('keeps a live lease across observation and marks the run uncertain only after lease expiry', async () => {
     const { first, second } = await fixture();
     const run = await first.tick('routine-1', 0, (id, scheduledFor, status) => ({
-      schemaVersion: 1, id, agentId: 'a392d8b9-76cc-4158-a381-1151ccf818fb', agentRevision: 1,
-      taskTemplateId: 'b392d8b9-76cc-4158-a381-1151ccf818fb', taskTemplateRevision: 1, routineId: 'c392d8b9-76cc-4158-a381-1151ccf818fb', routineRevision: 1,
-      projectPath: '/project', scheduledFor, startedAt: null, finishedAt: null, status, sessionId: null, resultSummary: '', error: null,
-      inputs: {}, permission: 'edit', approvals: [{ id: 'approval', digest: 'a'.repeat(64), revision: 1, action: '{}', expiresAt: 300_000, status: 'pending' }],
+      schemaVersion: 2, id, agentId: 'a392d8b9-76cc-4158-a381-1151ccf818fb', agentRevision: 1, routineId: 'c392d8b9-76cc-4158-a381-1151ccf818fb',
+      projectPath: '/project', request: 'Check the project.', mode: 'turn', scheduledFor, startedAt: null, finishedAt: null, status, sessionId: null, resultSummary: '', error: null,
+      permission: 'edit',
     }));
     await first.claim('routine-1', run!.id, 'first-process', 0);
     await first.update('routine-1', run!.id, (current) => ({ ...current, status: 'needs-attention' }));
     await first.heartbeat('routine-1', run!.id, 'first-process', 50_000);
     await second.recover('routine-1', 60_000, true, 'second-process');
-    expect((await second.read('routine-1')).state.runs[0]).toMatchObject({ status: 'needs-attention', owner: 'first-process', expiresAt: 110_000, payload: { approvals: [{ status: 'pending' }] } });
+    expect((await second.read('routine-1')).state.runs[0]).toMatchObject({ status: 'needs-attention', owner: 'first-process', expiresAt: 110_000, payload: { error: null } });
     await second.recover('routine-1', 110_000, false, 'second-process');
-    expect((await second.read('routine-1')).state.runs[0]).toMatchObject({ status: 'needs-attention', owner: null, expiresAt: null, payload: { approvals: [{ status: 'uncertain' }] } });
+    expect((await second.read('routine-1')).state.runs[0]).toMatchObject({ status: 'needs-attention', owner: null, expiresAt: null, payload: { error: expect.stringMatching(/not be replayed/) } });
   });
 
   it('skips wake catch-up once and retains the monotonically advanced watermark after restart', async () => {

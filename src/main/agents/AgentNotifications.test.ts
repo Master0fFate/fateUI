@@ -14,13 +14,13 @@ import { agentChannels } from '../../shared/contracts/agents';
 beforeEach(() => { vi.clearAllMocks(); native.supported.mockReturnValue(true); });
 describe('Agent OS notifications', () => {
   it('respects disabled and unavailable OS notifications', () => {
-    expect(notifyAgentRun({ projectPath: '/project' }, false)).toBe(false);
+    expect(notifyAgentRun({ agentId: '00000000-0000-4000-8000-000000000001' }, false)).toBe(false);
     native.supported.mockReturnValue(false);
-    expect(notifyAgentRun({ projectPath: '/project' }, true)).toBe(false);
+    expect(notifyAgentRun({ agentId: '00000000-0000-4000-8000-000000000001' }, true)).toBe(false);
     expect(native.show).not.toHaveBeenCalled();
   });
-  it('links an immutable notification to its exact project and run', () => {
-    const change = { projectPath: '/project', runId: 'routine:run', status: 'needs-attention' as const, message: 'Review action.' };
+  it('links an immutable notification to its exact Agent and run', () => {
+    const change = { agentId: '00000000-0000-4000-8000-000000000001', runId: 'routine:run', status: 'needs-attention' as const, message: 'Review action.' };
     expect(notifyAgentRun(change, true)).toBe(true);
     change.runId = 'changed';
     native.on.mock.calls[0]![1]();
@@ -30,6 +30,6 @@ describe('Agent OS notifications', () => {
   });
   it('does not turn an OS notification error into execution failure', () => {
     native.show.mockImplementationOnce(() => { throw new Error('OS declined'); });
-    expect(notifyAgentRun({ projectPath: '/project', runId: 'run' }, true)).toBe(false);
+    expect(notifyAgentRun({ runId: 'run' }, true)).toBe(false);
   });
 });

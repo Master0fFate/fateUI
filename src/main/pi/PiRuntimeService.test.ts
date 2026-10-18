@@ -255,7 +255,6 @@ describe('PiRuntimeService', () => {
       vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk unavailable'));
       await expect(b.setPermissionLevel('full-access')).rejects.toThrow(/could not be changed safely/);
       await expect(permissions.get('/project-a', 'session-1')).rejects.toThrow(/storage failed/);
-      expect(a.agentAuthority('session-1')).toBeNull();
       expect(a.getState(false)).toMatchObject({ permissionLevel: 'read-only', error: { message: expect.stringMatching(/permission storage|permission store/) } });
       await expect(a.prompt({ text: 'must not continue', behavior: 'prompt' })).rejects.toThrow();
       expect(first.session.prompt).not.toHaveBeenCalled();
@@ -328,7 +327,6 @@ describe('PiRuntimeService', () => {
       barrier.release();
       const state = await opening;
       expect(state.permissionLevel).toBe('read-only');
-      expect(a.agentAuthority('session-1')).toBeNull();
       // SDK name lists can retain a stale tool, but its effect ceiling and
       // model admission remain closed (also exercised with real SDK handles).
       await expect(a.prompt({ text: 'must not resume', behavior: 'prompt' })).rejects.toThrow();
@@ -411,7 +409,6 @@ describe('PiRuntimeService', () => {
     await entered.promise;
     expect(service.getState(false).permissionLevel).toBe('edit');
     expect(fake.session.getActiveToolNames()).toContain('bash');
-    expect(service.agentAuthority('session-1')).toBeNull();
     await expect(service.prompt({ text: 'not yet', behavior: 'prompt' })).rejects.toThrow(/permissions are being saved/);
     const stagedCalls = fake.session.setActiveToolsByName.mock.calls.length;
     finish.release();
@@ -446,7 +443,6 @@ describe('PiRuntimeService', () => {
     finish.release();
     await rejected; await stopping;
     expect(disposed).toBe(true);
-    expect(service.agentAuthority('session-1')).toBeNull();
     if (!fails) await expect(permissions.get('/project', 'session-1')).resolves.toBe('full-access');
   });
 
@@ -560,7 +556,6 @@ describe('PiRuntimeService', () => {
     finish.release();
     await rejected;
     expect(service.getState(false)).toMatchObject({ project: { path: '/other' }, permissionLevel: 'full-access', error: { code: 'PROJECT_NOT_TRUSTED' } });
-    expect(service.agentAuthority('session-1')).toBeNull();
     expect(fake.session.setActiveToolsByName).toHaveBeenCalledTimes(callsAfterReplacement);
     await service.dispose();
   });
@@ -704,17 +699,6 @@ describe('PiRuntimeService', () => {
     expect(service.getState(false).permissionLevel).toBe('read-only');
     expect(fake.session.getActiveToolNames()).toEqual(['read']);
     await expect(service.setPermissionLevel('edit')).rejects.toThrow(/ceiling/);
-    await service.dispose();
-  });
-
-  it('versions live authority changes so lowering and raising cannot revive old approvals', async () => {
-    const fake = fixture();
-    const service = new PiRuntimeService(fake.adapter);
-    await service.openProject({ path: '/project', name: 'project', trusted: true });
-    const initial = service.agentAuthority(fake.session.sessionId)!;
-    await service.setPermissionLevel('read-only');
-    await service.setPermissionLevel('edit');
-    expect(service.agentAuthority(fake.session.sessionId)).toEqual({ level: 'edit', revision: initial.revision + 2 });
     await service.dispose();
   });
 

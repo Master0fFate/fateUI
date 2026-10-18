@@ -9,7 +9,7 @@ export interface AppToastMessage {
   kind: AppToastKind;
   title: string;
   message: string;
-  agentRun?: { projectPath: string; runId: string };
+  agentRun?: { runId: string };
 }
 
 let nextToastId = 0;

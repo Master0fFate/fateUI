@@ -23,9 +23,3 @@ export function previewAutomationCopy(source: string) {
     routine: null,
   };
 }
-
-export function restoreAutomationCopy(archive: { source: string; sourceDigest: string }): string {
-  if (hash(archive.source) !== archive.sourceDigest) throw new Error('Migration archive integrity mismatch.');
-  automationDefinitionSchema.parse(JSON.parse(archive.source));
-  return archive.source;
-}

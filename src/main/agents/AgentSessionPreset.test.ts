@@ -9,7 +9,7 @@ describe('saved Agent session restoration boundaries', () => {
     const entry = { type: 'custom', customType: SAVED_AGENT_SESSION_TYPE, data: presetFixture };
     expect(readAgentSessionPreset({ getEntries: () => [entry] })).toEqual(presetFixture);
     expect(() => readAgentSessionPreset({ getEntries: () => [entry, entry] })).toThrow(/ambiguous/);
-    expect(() => readAgentSessionPreset({ getEntries: () => [{ ...entry, data: { ...presetFixture, defaults: { ...presetFixture.defaults, permission: 'full-access' } } }] })).toThrow();
+    expect(() => readAgentSessionPreset({ getEntries: () => [{ ...entry, data: { ...presetFixture, defaults: { ...presetFixture.defaults, permission: 'admin' } } }] })).toThrow();
     expect(readAgentSessionPreset({ getEntries: () => [{ type: 'message', message: { role: 'user', content: 'persona' } }] })).toBeNull();
   });
   it('prevents generic root tool activation from regranting removed effects', () => {
@@ -18,9 +18,10 @@ describe('saved Agent session restoration boundaries', () => {
     expect(agentSessionPermission(session, 'full-access')).toBe('read-only');
     expect(filterAgentSessionTools(session, ['read', 'write', 'bash', 'generate_image', 'browser_click'])).toEqual(['read']);
   });
-  it('opens saved background run histories read-only, without replaying approval authority', () => {
+  it('caps a run at the lower of its Agent permission and the live session permission', () => {
     const session = {} as AgentSession;
-    bindAgentSessionPreset(session, { ...presetFixture, background: true, defaults: { ...presetFixture.defaults, permission: 'edit' } }, ['read']);
-    expect(agentSessionPermission(session, 'edit')).toBe('read-only');
+    bindAgentSessionPreset(session, { ...presetFixture, background: true, runId: 'runs:1', defaults: { ...presetFixture.defaults, permission: 'edit' } }, ['read', 'write']);
+    expect(agentSessionPermission(session, 'full-access')).toBe('edit');
+    expect(agentSessionPermission(session, 'read-only')).toBe('read-only');
   });
 });
