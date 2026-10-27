@@ -1321,7 +1321,7 @@ describe('PiRuntimeService', () => {
   it('gates controlled tools without disabling active extension capabilities', () => {
     expect(activeToolsForPermission(['read', 'bash', 'edit', 'write', 'generate_image', 'imagegen'], 'edit')).toEqual(['read', 'edit', 'write', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'pdf_read', 'pdf_fill', 'pdf_create']);
     expect(activeToolsForPermission(['read', 'edit', 'write', 'generate_image', 'imagegen'], 'read-only')).toEqual(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'pdf_read']);
-    expect(activeToolsForPermission(['read', 'generate_image', 'imagegen'], 'full-access')).toEqual(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash']);
+    expect(activeToolsForPermission(['read', 'generate_image', 'imagegen'], 'full-access')).toEqual(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'computer']);
   });
 
   it('fails closed if an extension replaces a Fate-owned orchestration tool', () => {
@@ -2816,7 +2816,7 @@ describe('PiRuntimeService', () => {
 
     const fullAccess = await service.setPermissionLevel('full-access');
     expect(fullAccess.permissionLevel).toBe('full-access');
-    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash']);
+    expect(fake.session.setActiveToolsByName).toHaveBeenLastCalledWith(['read', 'generate_image', 'imagegen', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'computer']);
 
     const editable = await service.setPermissionLevel('edit');
     expect(editable.permissionLevel).toBe('edit');

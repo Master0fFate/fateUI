@@ -21,7 +21,7 @@ import type { PiSessionRepository } from './PiSessionRepository';
 import type { SessionTitleGenerator } from './PiSessionTitleGenerator';
 import type { ModelsDevService } from './modelsdev/ModelsDevService';
 import type { TaskPersistence } from './tasks/TaskRepository';
-import type { ProviderAuthUrlPort } from '../../core/ports';
+import type { ComputerUsePort, ProviderAuthUrlPort } from '../../core/ports';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -129,6 +129,7 @@ export interface MultiProjectPiRuntimeDeps {
   providerAuthUrlPresenter?: ProviderAuthUrlPort;
   browserIntegration: PiBrowserRuntimeIntegration | null;
   monitorRuns?: (projectPath: string) => Promise<MonitorRunsSource>;
+  computerUse?: ComputerUsePort | null;
   agentRunStarter?: AgentRunStarter;
   google?: GoogleAccount;
   defaults: () => Promise<SessionDefaults>;
@@ -395,11 +396,32 @@ export class MultiProjectPiRuntime {
     this.attentionByProject.delete(projectPath);
   }
 
+  runningSessionsForPath(projectPath: string): ReturnType<PiRuntimeService['runningSessionsForPath']> {
+    return this.manager.get(projectPath)?.runningSessionsForPath(projectPath) ?? [];
+  }
+
   async deleteSessionsForPath(projectPath: string): Promise<{ deleted: number; skipped: number }> {
     const live = this.manager.get(projectPath);
     const result = await (live ?? this.getFocused()).deleteSessionsForPath(projectPath);
     this.attentionByProject.delete(projectPath);
     return result;
+  }
+
+  async deleteSession(sessionId: string, projectPath?: string): Promise<RuntimeState> {
+    const focused = this.getFocused();
+    const live = projectPath === undefined ? undefined : this.manager.get(projectPath);
+    const background = live && live !== focused ? live : undefined;
+    if (projectPath !== undefined && background) {
+      if (background.getState(false).sessionId !== sessionId) {
+        await background.deleteSession(sessionId, projectPath);
+        this.attentionByProject.get(projectPath)?.delete(sessionId);
+        return focused.getState(false);
+      }
+      await this.closeProjectPath(projectPath);
+    }
+    const state = await focused.deleteSession(sessionId, projectPath);
+    if (projectPath !== undefined) this.attentionByProject.get(projectPath)?.delete(sessionId);
+    return state;
   }
 
   async listSessionsForPath(projectPath: string, query = ''): Promise<SessionSummary[]> {
@@ -553,6 +575,7 @@ export class MultiProjectPiRuntime {
     });
     if (this.deps.learning) service.setLearningService(this.deps.learning);
     if (this.deps.monitorRuns) service.setMonitorRunsSource(this.deps.monitorRuns);
+    if (this.deps.computerUse) service.setComputerUse(this.deps.computerUse);
     if (this.deps.agentRunStarter) service.setAgentRunStarter(this.deps.agentRunStarter);
     if (this.deps.google) service.setGoogleAccount(this.deps.google);
     service.setSessionSettledListener(() => this.deps.notifySessionSettled?.());
@@ -606,7 +629,9 @@ export class MultiProjectPiRuntime {
           case 'closeProject': return () => self.closeProject();
           case 'closeProjectPath': return (projectPath: string) => self.closeProjectPath(projectPath);
           case 'listSessionsForPath': return (projectPath: string, query?: string) => self.listSessionsForPath(projectPath, query);
+          case 'deleteSession': return (sessionId: string, projectPath?: string) => self.deleteSession(sessionId, projectPath);
           case 'deleteSessionsForPath': return (projectPath: string) => self.deleteSessionsForPath(projectPath);
+          case 'runningSessionsForPath': return (projectPath: string) => self.runningSessionsForPath(projectPath);
           case 'switchSession': return async (sessionId: string) => {
             const state = await self.getFocused().switchSession(sessionId);
             if (state.project?.path && state.sessionId) self.attentionByProject.get(state.project.path)?.delete(state.sessionId);

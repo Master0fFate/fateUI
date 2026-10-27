@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, webContents } from 'electron';
+import { isElevated, relaunchElevated } from '../computer/elevation';
 import { registerLearningIpc } from '../learning/registerLearningIpc';
 import { createRuntimeHandlers, createScopedRuntimeHandlers } from '../../core/handlers/runtimeHandlers';
 import { createSessionHandlers, createScopedSessionHandlers } from '../../core/handlers/sessionHandlers';
@@ -35,9 +36,14 @@ import {
   filePathInputSchema,
   getAppInfoInputSchema,
   sessionExportResultSchema,
+  gitBranchNameInputSchema,
   gitStatusSchema,
   gitWorktreeInputSchema,
   gitWorktreeSessionResultSchema,
+  historyImagesInputSchema,
+  historyImagesSchema,
+  historyPageInputSchema,
+  historyPageSchema,
   ipcChannels,
   imageSaveInputSchema,
   imageSaveResultSchema,
@@ -56,6 +62,8 @@ import {
   piMigrationResultSchema,
   musicClearResultSchema,
   musicDurationsEventSchema,
+  computerUseSetEnabledInputSchema,
+  computerUseStateSchema,
   musicLoadInputSchema,
   musicQueueResultSchema,
   musicQueueSchema,
@@ -73,7 +81,7 @@ import {
   runtimeImageSchema,
   runtimeStateSchema,
   sessionEntryInputSchema,
-  sessionIdInputSchema,
+  sessionDeleteInputSchema,
   sessionRenameInputSchema,
   sessionDirectMessageInputSchema,
   forkSessionResultSchema,
@@ -140,6 +148,7 @@ import { registerSkinIpc } from '../settings/registerSkinIpc';
 import type { TerminalService } from '../terminal/TerminalService';
 import type { AppLogService } from '../logging/AppLogService';
 import type { MusicService } from '../music/MusicService';
+import type { ComputerUseService } from '../computer/ComputerUseService';
 import type { SpeechService } from '../speech/SpeechService';
 import type { GlobalHotkeyService } from '../speech/GlobalHotkeyService';
 import type { UpdateService } from '../updates/UpdateService';
@@ -227,6 +236,7 @@ export interface IpcServices {
   terminal: TerminalService;
   logs: AppLogService;
   music: Pick<MusicService, 'getStatus' | 'load' | 'resolveTrack' | 'clearQueue' | 'reset' | 'setDurationSink'>;
+  computerUse?: Pick<ComputerUseService, 'getState' | 'setEnabled' | 'onState'>;
   speech: Pick<SpeechService, 'setEventSink' | 'setStreamSink' | 'getStatus' | 'download' | 'cancelDownload' | 'remove' | 'transcribe' | 'cancel' | 'streamStart' | 'streamFeed' | 'streamStop' | 'streamCancel'>;
   hotkey: GlobalHotkeyService;
   updates: Pick<UpdateService, 'check' | 'openDownload' | 'downloadAndInstall'>;
@@ -518,7 +528,7 @@ async function applyPendingRecovery(
   await recovery?.markClean();
 }
 
-export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, google, terminal, logs, music, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
+export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
   const sessionHandlers = createSessionHandlers(runtime);
   const runtimeHandlers = createRuntimeHandlers(runtime, (projectPath) => projects.prepareSessionListPath(projectPath));
   const goalHandlers = createGoalHandlers(runtime);
@@ -629,6 +639,12 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
   music.setDurationSink((updates) => {
     const payload = musicDurationsEventSchema.parse({ updates });
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send(ipcChannels.musicDurations, payload);
+  });
+  computerUse?.onState((state) => {
+    const payload = computerUseStateSchema.parse(state);
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send(ipcChannels.computerUseState, payload);
+    }
   });
 
   const handle = (channel: string, handler: (event: Electron.IpcMainInvokeEvent, input: unknown) => unknown | Promise<unknown>) => register(channel, rendererPolicy,
@@ -1025,6 +1041,10 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     emptyInputSchema.parse(input);
     return runtimeStateSchema.parse(runtime.getHydrationState());
   });
+  handle(ipcChannels.runtimeHistoryImages, (_event, input) =>
+    historyImagesSchema.parse(runtime.loadHistoryImages(historyImagesInputSchema.parse(input))));
+  handle(ipcChannels.runtimeHistoryPage, (_event, input) =>
+    historyPageSchema.parse(runtime.loadHistoryPage(historyPageInputSchema.parse(input))));
   handle(ipcChannels.runtimeMonitorDashboard, (event, input) => core
     ? coreAdapter(event).monitor(input) : agentHandlers.desktopMonitor(input));
   handle(ipcChannels.runtimePrompt, async (event, input) => runRuntimeMutation('sending a prompt', () => core
@@ -1147,8 +1167,9 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     return runRuntimeMutation('renaming a session', async () => runtimeStateSchema.parse(await runtime.renameSession(parsed.sessionId, parsed.name)));
   });
   handle(ipcChannels.runtimeDeleteSession, async (_event, input) => {
-    const parsed = sessionIdInputSchema.parse(input);
-    return runRuntimeMutation('deleting a session', async () => runtimeStateSchema.parse(await runtime.deleteSession(parsed.sessionId)));
+    const parsed = sessionDeleteInputSchema.parse(input);
+    const canonicalPath = parsed.projectPath === undefined ? undefined : await projects.prepareKnownProjectCleanupPath(parsed.projectPath);
+    return runRuntimeMutation('deleting a session', async () => runtimeStateSchema.parse(await runtime.deleteSession(parsed.sessionId, canonicalPath)));
   });
   handle(ipcChannels.runtimeForkSession, async (_event, input) => {
     const parsed = sessionEntryInputSchema.parse(input);
@@ -1248,6 +1269,52 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     } catch (error) {
       return discardCreatedWorktreeAfterFailure(error, () => git.discardCreatedWorktree(worktree));
     }
+  }));
+  handle(ipcChannels.gitOpenBranchWorktree, async (_event, input) => queueProjectActivation.run(async () => {
+    assertProjectActivationIdle(runtime, 'opening a branch worktree');
+    const current = runtime.getState(false);
+    if (!current.project?.trusted) {
+      throw new PiDesktopError({ code: 'PROJECT_NOT_TRUSTED', message: 'Trust the active project before opening a branch in its own worktree.', retryable: false });
+    }
+    const { name } = gitBranchNameInputSchema.parse(input);
+    const sourceProjectPath = current.project.path;
+    const worktreePath = await git.openBranchWorktree(name);
+    try {
+      const activation = await projects.prepareDerivedWorktree(worktreePath, sourceProjectPath);
+      return runtimeStateSchema.parse(await activatePreparedProject(activation, activationServices, 'opening a branch worktree'));
+    } catch (error) {
+      return discardCreatedWorktreeAfterFailure(error, () => git.discardCreatedWorktree({ path: worktreePath, branch: null }));
+    }
+  }));
+  handle(ipcChannels.gitDeleteBranch, async (event, input) => queueProjectActivation.run(async () => {
+    const { name } = gitBranchNameInputSchema.parse(input);
+    const current = runtime.getState(false);
+    if (!current.project?.trusted) {
+      throw new PiDesktopError({ code: 'PROJECT_NOT_TRUSTED', message: 'Trust the active project before deleting branches.', retryable: false });
+    }
+    const worktrees = await git.worktrees();
+    const held = worktrees.find((worktree) => worktree.branch === name);
+    if (held && held.path === worktrees[0]?.path) {
+      throw new PiDesktopError({ code: 'INVALID_REQUEST', message: `${name} is checked out in the primary worktree. Switch that worktree to another branch first.`, retryable: false });
+    }
+    const running = held ? runtime.runningSessionsForPath(held.path) : [];
+    if (running.length > 0) {
+      const titles = running.map((session) => `“${session.title}”`).join(', ');
+      throw new PiDesktopError({ code: 'RUN_ACTIVE', message: `${name} is in use by ${running.length === 1 ? 'running session' : 'running sessions'} ${titles}. Stop ${running.length === 1 ? 'it' : 'them'} before deleting the branch.`, retryable: true });
+    }
+    let state = current;
+    if (held?.current) {
+      assertProjectActivationIdle(runtime, 'deleting the active branch');
+      const activation = await projects.prepareOpenPath(worktrees[0]!.path, BrowserWindow.fromWebContents(event.sender) ?? undefined);
+      if (!activation) return runtimeStateSchema.parse(current);
+      state = await activatePreparedProject(activation, activationServices, 'deleting the active branch');
+    }
+    if (held) {
+      const closeProjectPath = (runtime as unknown as { closeProjectPath?: (projectPath: string) => Promise<void> }).closeProjectPath;
+      await closeProjectPath?.(held.path);
+    }
+    await git.deleteBranch(name);
+    return runtimeStateSchema.parse(state);
   }));
   handle(ipcChannels.gitHistory, (event, input) => core
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedGitHandlers(workspace, authorize).history(input)) : desktopGit.history(input));
@@ -1355,11 +1422,20 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     return appSettingsSchema.parse(await settings.load());
   });
   handle(ipcChannels.settingsSet, async (_event, input) => {
-    const previousLearning = settings.get().memoryLearning;
-    const saved = appSettingsSchema.parse(await settings.set(appSettingsSchema.parse(input)));
-    if (JSON.stringify(previousLearning) !== JSON.stringify(saved.memoryLearning)) learning?.settingsChanged();
+    const previous = settings.get();
+    let saved = appSettingsSchema.parse(await settings.set(appSettingsSchema.parse(input)));
+    if (JSON.stringify(previous.memoryLearning) !== JSON.stringify(saved.memoryLearning)) learning?.settingsChanged();
     if (!saved.musicPlayerEnabled) music.reset();
     await hotkey.applySpeechSettings(saved.speech);
+    if (saved.computerUseElevated && !previous.computerUseElevated) {
+      if (!isElevated()) {
+        if (!await relaunchElevated()) saved = appSettingsSchema.parse(await settings.set({ ...saved, computerUseElevated: false }));
+      } else {
+        void computerUse?.setEnabled(true);
+      }
+    } else if (!saved.computerUseElevated && previous.computerUseElevated) {
+      void computerUse?.setEnabled(false);
+    }
     return saved;
   });
   handle(ipcChannels.updatesCheck, async (_event, input) => {
@@ -1472,6 +1548,16 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
       return musicClearResultSchema.parse({ ok: false, error: normalized });
     }
   });
+  if (computerUse) {
+    handle(ipcChannels.computerUseGetState, (_event, input) => {
+      emptyInputSchema.parse(input);
+      return computerUseStateSchema.parse(computerUse.getState());
+    });
+    handle(ipcChannels.computerUseSetEnabled, async (_event, input) => {
+      const { enabled } = computerUseSetEnabledInputSchema.parse(input);
+      return computerUseStateSchema.parse(await computerUse.setEnabled(enabled));
+    });
+  }
   handle(ipcChannels.diagnosticsGet, (_event, input) => {
     emptyInputSchema.parse(input);
     const state = runtime.getState(false);

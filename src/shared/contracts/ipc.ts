@@ -147,6 +147,8 @@ export const ipcChannels = {
   browserRespondConfirmation: 'browser:respond-confirmation',
   browserEvents: 'browser:events',
   runtimeGetState: 'runtime:get-state',
+  runtimeHistoryImages: 'runtime:history-images',
+  runtimeHistoryPage: 'runtime:history-page',
   runtimeMonitorDashboard: 'runtime:monitor-dashboard',
   runtimePrompt: 'runtime:prompt',
   runtimeOptimizePrompt: 'runtime:optimize-prompt',
@@ -259,6 +261,9 @@ export const ipcChannels = {
   musicResolveTrack: 'music:resolve-track',
   musicClearQueue: 'music:clear-queue',
   musicDurations: 'music:durations',
+  computerUseGetState: 'computer-use:get-state',
+  computerUseSetEnabled: 'computer-use:set-enabled',
+  computerUseState: 'computer-use:state',
   diagnosticsGet: 'diagnostics:get',
   logsGet: 'logs:get',
   attestationsQuery: 'attestations:query',
@@ -277,6 +282,8 @@ export const ipcChannels = {
   gitSwitchBranch: 'git:switch-branch',
   gitSwitchWorktree: 'git:switch-worktree',
   gitCreateWorktreeSession: 'git:create-worktree-session',
+  gitOpenBranchWorktree: 'git:open-branch-worktree',
+  gitDeleteBranch: 'git:delete-branch',
   gitHistory: 'git:history',
   gitCommitDetails: 'git:commit-details',
   gitOperation: 'git:operation',
@@ -529,6 +536,7 @@ export const gitSwitchBranchInputSchema = z.object({
   create: z.boolean().optional(),
   base: z.string().min(1).max(250).optional(),
 }).strict();
+export const gitBranchNameInputSchema = z.object({ name: z.string().min(1).max(250) }).strict();
 export const gitWorktreeSessionResultSchema = z.object({
   state: z.lazy(() => runtimeStateSchema),
   selectedText: z.string().max(2_000),
@@ -634,6 +642,12 @@ export const imageSaveResultSchema = z.discriminatedUnion('saved', [
   z.object({ saved: z.literal(false) }).strict(),
   z.object({ saved: z.literal(true), path: z.string().min(1).max(32_768) }).strict(),
 ]);
+export const historyImagesInputSchema = z.object({
+  sessionId: z.string().min(1).max(500),
+  kind: z.enum(['message', 'tool']),
+  id: z.string().min(1).max(500),
+}).strict();
+export const historyImagesSchema = z.array(runtimeImageSchema).max(8);
 export const clipboardTextInputSchema = z.object({ text: z.string().max(200_000) }).strict();
 export const clipboardWriteResultSchema = z.object({ written: z.literal(true) }).strict();
 
@@ -643,6 +657,7 @@ export const runtimeMessageSchema = z.object({
   text: z.string().max(65_000),
   reasoning: z.string().max(65_000).optional(),
   images: z.array(runtimeImageSchema).max(8).optional(),
+  deferredImages: z.number().int().positive().max(8).optional(),
   timestamp: z.number().finite(),
   timelinePosition: z.number().finite().optional(),
   historyOmitted: z.number().int().positive().optional(),
@@ -662,8 +677,18 @@ export const runtimeToolSchema = z.object({
   durationMs: z.number().finite().nonnegative().optional(),
   timelinePosition: z.number().finite().optional(),
   images: z.array(runtimeImageSchema).max(8).optional(),
+  deferredImages: z.number().int().positive().max(8).optional(),
   subagentRunIds: z.array(z.string().min(1).max(100)).optional(),
   provenance: toolProvenanceSchema.optional(),
+}).strict();
+export const historyPageInputSchema = z.object({
+  sessionId: z.string().min(1).max(500),
+  before: z.number().int().nonnegative(),
+}).strict();
+export const historyPageSchema = z.object({
+  start: z.number().int().nonnegative(),
+  messages: z.array(runtimeMessageSchema).max(5_000),
+  tools: z.array(runtimeToolSchema).max(5_000),
 }).strict();
 
 export const slashCommandSchema = z.object({
@@ -1252,6 +1277,7 @@ export const projectOpenInputSchema = projectPathInputSchema.extend({ target: pr
 export const projectSessionListInputSchema = z.object({ projectPath: z.string().min(1).max(32_768), query: z.string().max(500).default('') }).strict();
 export const projectDeleteSessionsResultSchema = z.object({ deleted: z.number().int().nonnegative().max(100_000), skipped: z.number().int().nonnegative().max(100_000) }).strict();
 export const sessionIdInputSchema = z.object({ sessionId: z.string().min(1).max(500) }).strict();
+export const sessionDeleteInputSchema = z.object({ sessionId: z.string().min(1).max(500), projectPath: z.string().min(1).max(32_768).optional() }).strict();
 export const sessionRenameInputSchema = z.object({
   sessionId: z.string().min(1).max(500),
   name: z.string().trim().min(1).max(120).refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'Session names cannot contain control characters.'),
@@ -1457,6 +1483,7 @@ export const appSettingsSchema = z.object({
   codeFont: codeFontSchema.default('jetbrains-mono'),
   imageGeneration: imageGenerationSettingsSchema.default({ provider: 'auto', model: null, customProvider: null }),
   speech: speechSettingsSchema.default(defaultSpeechSettings),
+  computerUseElevated: z.boolean().default(false),
 }).strict();
 export const musicStatusSchema = z.object({
   available: z.boolean(),
@@ -1499,6 +1526,15 @@ export const musicDurationUpdateSchema = z.object({
 export const musicDurationsEventSchema = z.object({
   updates: z.array(musicDurationUpdateSchema).min(1).max(200),
 }).strict();
+export const computerUseStateSchema = z.object({
+  supported: z.boolean(),
+  enabled: z.boolean(),
+  active: z.boolean(),
+  elevated: z.boolean(),
+  issue: z.string().min(1).max(500).nullable(),
+  stopShortcut: z.string().min(1).max(40),
+}).strict();
+export const computerUseSetEnabledInputSchema = z.object({ enabled: z.boolean() }).strict();
 export { themeCatalogSchema };
 export const skinRemovalResultSchema = z.object({ catalog: skinCatalogSchema, settings: appSettingsSchema }).strict();
 export const diagnosticsSchema = z.object({
@@ -1540,6 +1576,9 @@ export type ModelInfo = z.infer<typeof modelInfoSchema>;
 export type ProjectState = z.infer<typeof projectStateSchema>;
 export type RuntimeImage = z.infer<typeof runtimeImageSchema>;
 export type ImageSaveInput = z.infer<typeof imageSaveInputSchema>;
+export type HistoryImagesInput = z.infer<typeof historyImagesInputSchema>;
+export type HistoryPageInput = z.infer<typeof historyPageInputSchema>;
+export type HistoryPage = z.infer<typeof historyPageSchema>;
 export type ImageSaveResult = z.infer<typeof imageSaveResultSchema>;
 export type RuntimeMessage = z.infer<typeof runtimeMessageSchema>;
 export type RuntimeTool = z.infer<typeof runtimeToolSchema>;
@@ -1616,6 +1655,7 @@ export type MusicQueue = z.infer<typeof musicQueueSchema>;
 export type MusicStream = z.infer<typeof musicStreamSchema>;
 export type MusicDurationUpdate = z.infer<typeof musicDurationUpdateSchema>;
 export type MusicDurationsEvent = z.infer<typeof musicDurationsEventSchema>;
+export type ComputerUseState = z.infer<typeof computerUseStateSchema>;
 export type Diagnostics = z.infer<typeof diagnosticsSchema>;
 export type LogEntry = z.infer<typeof logEntrySchema>;
 export type AppCommand = z.infer<typeof appCommandSchema>;
@@ -1646,6 +1686,8 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   revealProjectPath: (projectPath: string) => Promise<z.infer<typeof revealProjectResultSchema>>;
   readLocalImage: (path: string) => Promise<RuntimeImage>;
   saveImageAs: (input: ImageSaveInput) => Promise<ImageSaveResult>;
+  loadHistoryImages: (input: HistoryImagesInput) => Promise<RuntimeImage[]>;
+  loadHistoryPage: (input: HistoryPageInput) => Promise<HistoryPage>;
   writeClipboardText: (text: string) => Promise<void>;
   initializeBrowser: () => Promise<BrowserState>;
   getBrowserState: () => Promise<BrowserState>;
@@ -1719,7 +1761,7 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   switchSession: (sessionId: string) => Promise<RuntimeState>;
   sendSessionMessage: (input: SessionDirectMessageInput) => Promise<RuntimeState>;
   renameSession: (sessionId: string, name: string) => Promise<RuntimeState>;
-  deleteSession: (sessionId: string) => Promise<RuntimeState>;
+  deleteSession: (sessionId: string, projectPath?: string) => Promise<RuntimeState>;
   forkSession: (entryId: string) => Promise<z.infer<typeof forkSessionResultSchema>>;
   navigateSessionBranch: (entryId: string) => Promise<z.infer<typeof navigateSessionBranchResultSchema>>;
   deleteSessionBranch: (entryId: string) => Promise<z.infer<typeof deleteSessionBranchResultSchema>>;
@@ -1739,6 +1781,8 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   switchGitBranch: (input: GitSwitchBranchInput) => Promise<GitStatus>;
   switchGitWorktree: (path: string) => Promise<RuntimeState>;
   createWorktreeSession: (entryId: string) => Promise<z.infer<typeof gitWorktreeSessionResultSchema>>;
+  openBranchWorktree: (name: string) => Promise<RuntimeState>;
+  deleteGitBranch: (name: string) => Promise<RuntimeState>;
   getGitHistory: () => Promise<GitHistory>;
   getGitCommitDetails: (hash: string) => Promise<GitCommitDetails>;
   runGitOperation: (operation: GitOperation) => Promise<GitOperationResult>;
@@ -1797,6 +1841,9 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   resolveMusicTrack: (trackId: string) => Promise<MusicStream>;
   clearMusicQueue: () => Promise<void>;
   onMusicDurations: (handler: (event: MusicDurationsEvent) => void) => () => void;
+  getComputerUseState: () => Promise<ComputerUseState>;
+  setComputerUseEnabled: (enabled: boolean) => Promise<ComputerUseState>;
+  onComputerUseState: (listener: (state: ComputerUseState) => void) => () => void;
   getDiagnostics: () => Promise<Diagnostics>;
   getLogs: () => Promise<LogEntry[]>;
   queryAttestations: (request?: AttestationQueryRequestInput) => Promise<AttestationQueryResult>;

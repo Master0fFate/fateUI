@@ -161,6 +161,10 @@ Use `styles.normal.questionnaire` to override global surface defaults for this f
 
 The field inherits the active palette and interface font. The `questionnaire` surface supplies its `--surface-*` spacing, radius, row-height, background, and border variables, with global and theme fallbacks. These selectors document application-owned styling; packs still cannot inject arbitrary CSS.
 
+### Image attachments
+
+Pasted or attached images in the composer and images in sent or received messages (not tool calls) are grouped into two-per-row pill tiles that open the full-size viewer on click. Hooks: `.composer-attachments` (draft chips), `.chat-image-grid` (message grid), `.chat-image-trigger` (a tile; click opens `.cinematic-image-viewer`), and its `> span` View badge. Each skin shapes them: Default uses rounded tiles, Angelcore square bordered tiles with a lowercase monospace badge, and M3 Expressive large-radius tonal pills. Packs inherit the shape of their `base` skin and cannot restyle tiles beyond the `composer` and `conversation` surface entries, with colors from the palette. The viewer stays full-size in every skin.
+
 ### Embedded image
 
 Instead of a separate image file, version 2 can contain raw PNG base64:

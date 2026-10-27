@@ -171,3 +171,9 @@
   :root[data-skin="dreamcore"] .settings-nav button small { display: none; }
   :root[data-skin="dreamcore"] .settings-nav button strong { font-size: 10px; }
 }
+
+:root[data-skin="dreamcore"] .chat-image-grid .chat-image-trigger { border-color: var(--theme-border-strong); border-radius: 0; }
+:root[data-skin="dreamcore"] .chat-image-grid .chat-image-trigger > span { border-radius: 0; font-family: var(--font-code); text-transform: lowercase; }
+:root[data-skin="dreamcore"] .composer-attachments > span { border-radius: 0; }
+
+:root[data-skin="dreamcore"] :is(.permission-cu-row, .permission-cu-row > span:last-child, .permission-cu-row > span:last-child::after) { border-radius: 0; }

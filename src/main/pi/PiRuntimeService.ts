@@ -44,6 +44,9 @@ import { Type } from 'typebox';
 import type {
   AppError,
   ExtensionUiState,
+  HistoryImagesInput,
+  HistoryPage,
+  HistoryPageInput,
   ModelInfo,
   ModelsDevListResult,
   ModelsDevManagedProvider,
@@ -62,6 +65,7 @@ import type {
   QueuedMessage,
   QueueMutationInput,
   QueueMutationResult,
+  RuntimeImage,
   RuntimeMessage,
   RuntimeState,
   RuntimeTokenTelemetry,
@@ -149,7 +153,8 @@ import {
   type TaskUpdateInput,
 } from '../../shared/contracts/tasks';
 import type { PiBrowserRuntimeIntegration } from './BrowserRuntimeBridge';
-import type { ProviderAuthUrlPort } from '../../core/ports';
+import type { ComputerUsePort, ProviderAuthUrlPort } from '../../core/ports';
+import { COMPUTER_TOOL_NAME, createComputerTool } from './PiComputerTool';
 import type { SnapshotView } from '../../core/views/WorkspaceSnapshotService';
 import type { FatePaths } from '../../core/FatePaths';
 import { projectSessionDirectory } from './PiSessionRepository';
@@ -434,6 +439,11 @@ interface ColdSessionState {
   tokenTelemetry: RuntimeTokenTelemetry | undefined;
   subagents: SubagentRun[];
   agentTeams: AgentTeam[];
+}
+
+export interface RunningSessionRef {
+  id: string;
+  title: string;
 }
 
 interface RuntimeSlot {
@@ -723,7 +733,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
       );
       const googleAllowed = Boolean(preset && !preset.runId && preset.google);
       const ownedTools = customTools.filter((tool) => (googleAllowed || !GOOGLE_TOOL_NAMES.has(tool.name))
-        && (preset?.runId ? !tool.name.startsWith('browser_') && !AGENT_HOME_TOOL_NAMES.has(tool.name) : preset || !AGENT_HOME_TOOL_NAMES.has(tool.name)));
+        && (preset?.runId ? !tool.name.startsWith('browser_') && tool.name !== COMPUTER_TOOL_NAME && !AGENT_HOME_TOOL_NAMES.has(tool.name) : preset || !AGENT_HOME_TOOL_NAMES.has(tool.name)));
       // A corrupt optional MCP config must not prevent normal project sessions.
       // Settings > MCP still reports the validation error so the user can repair it.
       const mcpServers = await new McpConfigService(paths?.dataRoot).list().catch(() => []);
@@ -817,7 +827,7 @@ function toModelInfo(model: { provider: string; id: string; name: string; reason
 
 function toMessage(message: unknown, id: string, timelinePosition: number): RuntimeMessage | null {
   if (!message || typeof message !== 'object') return null;
-  const value = message as { role?: unknown; timestamp?: unknown; isError?: unknown; stopReason?: unknown; content?: unknown; display?: unknown; customType?: unknown; omittedEntries?: unknown };
+  const value = message as { role?: unknown; timestamp?: unknown; isError?: unknown; stopReason?: unknown; content?: unknown; display?: unknown };
   const role = value.role === 'user'
     ? 'user'
     : value.role === 'assistant'
@@ -828,9 +838,6 @@ function toMessage(message: unknown, id: string, timelinePosition: number): Runt
   if (!role) return null;
   const timestamp = typeof value.timestamp === 'number' ? value.timestamp : 0;
   const result: RuntimeMessage = { id, role, text: safeText(messageText(message)), timestamp, timelinePosition };
-  if (value.customType === 'history-boundary' && typeof value.omittedEntries === 'number') {
-    result.historyOmitted = Math.max(1, Math.floor(value.omittedEntries));
-  }
   if (Array.isArray(value.content)) {
     let reasoning = '';
     for (let index = 0; index < Math.min(value.content.length, MAX_MESSAGE_CONTENT_BLOCKS); index += 1) {
@@ -849,7 +856,7 @@ function toMessage(message: unknown, id: string, timelinePosition: number): Runt
   return result;
 }
 
-function toTools(messages: readonly unknown[], isToolRunning: (toolCallId: string) => boolean, activeAssistantIndex = -1): RuntimeTool[] {
+function toTools(messages: readonly unknown[], isToolRunning: (toolCallId: string) => boolean, activeAssistantIndex = -1, positionOffset = 0): RuntimeTool[] {
   const tools = new Map<string, RuntimeTool>();
   const notYetStarted = new Set<string>();
   messages.forEach((message, messageIndex) => {
@@ -874,7 +881,7 @@ function toTools(messages: readonly unknown[], isToolRunning: (toolCallId: strin
           status: running ? 'running' : 'error',
           startedAt: timestamp,
           updatedAt: timestamp,
-          timelinePosition: messageIndex + (partIndex + 1) / (content.length + 1),
+          timelinePosition: positionOffset + messageIndex + (partIndex + 1) / (content.length + 1),
           ...(provenance ? { provenance } : {}),
         });
       });
@@ -896,7 +903,7 @@ function toTools(messages: readonly unknown[], isToolRunning: (toolCallId: strin
       updatedAt: timestamp,
       endedAt: timestamp,
       ...(typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) && value.durationMs >= 0 ? { durationMs: value.durationMs } : {}),
-      timelinePosition: existing?.timelinePosition ?? messageIndex,
+      timelinePosition: existing?.timelinePosition ?? positionOffset + messageIndex,
       ...(images.length ? { images } : {}),
       ...(runIds ? { subagentRunIds: runIds } : {}),
       ...(existing?.provenance ? { provenance: existing.provenance } : {}),
@@ -908,14 +915,14 @@ function toTools(messages: readonly unknown[], isToolRunning: (toolCallId: strin
   return [...tools.values()].filter((tool) => !notYetStarted.has(tool.id) || tool.status === 'running' || tool.endedAt !== undefined);
 }
 
-function historyBoundary(omittedEntries: number, scope = 'history'): Record<string, unknown> {
+function historyBoundary(sessionId: string | null, omittedEntries: number): RuntimeMessage {
   return {
-    role: 'custom',
-    customType: 'history-boundary',
-    content: `${omittedEntries.toLocaleString()} earlier ${scope} entries remain in the Pi session file and were omitted from this view to keep Fate UI responsive.`,
-    omittedEntries,
-    display: true,
+    id: `history-boundary:${sessionId}`,
+    role: 'system',
+    text: `${omittedEntries.toLocaleString()} earlier history entries. Scroll up to load them.`,
     timestamp: 0,
+    timelinePosition: -1,
+    historyOmitted: omittedEntries,
   };
 }
 
@@ -1147,10 +1154,7 @@ async function persistedChildUsage(branch: readonly Record<string, unknown>[], p
 
 function sessionHistoryFromPersistedBranch(branch: readonly Record<string, unknown>[]): readonly unknown[] {
   const projected: unknown[] = [];
-  const omittedEntries = Math.max(0, branch.length - (MAX_HYDRATED_HISTORY_ENTRIES - 1));
-  if (omittedEntries > 0) projected.push(historyBoundary(omittedEntries, 'branch'));
-  const visible = omittedEntries > 0 ? branch.slice(-(MAX_HYDRATED_HISTORY_ENTRIES - 1)) : branch;
-  for (const entry of visible) {
+  for (const entry of branch) {
     const timestamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
     if (entry.type === 'message') {
       const message = entry.message;
@@ -1198,16 +1202,9 @@ function sessionHistory(session: AgentSession): readonly unknown[] {
   const branch = session.sessionManager?.getBranch?.() ?? [];
   const projected: unknown[] = [];
   if (branch.length === 0) {
-    const omittedEntries = Math.max(0, session.messages.length - (MAX_HYDRATED_HISTORY_ENTRIES - 1));
-    if (omittedEntries > 0) projected.push(historyBoundary(omittedEntries));
-    projected.push(...(omittedEntries > 0 ? session.messages.slice(-(MAX_HYDRATED_HISTORY_ENTRIES - 1)) : session.messages));
+    projected.push(...session.messages);
   } else {
-    const omittedBranchEntries = Math.max(0, branch.length - (MAX_HYDRATED_HISTORY_ENTRIES - 1));
-    if (omittedBranchEntries > 0) {
-      projected.push(historyBoundary(omittedBranchEntries, 'branch'));
-    }
-    const visibleBranch = omittedBranchEntries > 0 ? branch.slice(-(MAX_HYDRATED_HISTORY_ENTRIES - 1)) : branch;
-    for (const entry of visibleBranch) {
+    for (const entry of branch) {
       const timestamp = Date.parse(entry.timestamp);
       if (entry.type === 'message') {
         const message: unknown = entry.message;
@@ -1244,8 +1241,8 @@ function sessionHistory(session: AgentSession): readonly unknown[] {
   return projected.length > 0 ? projected : session.messages;
 }
 
-function hydrationCost(message: unknown): { text: number; images: number } {
-  if (!message || typeof message !== 'object') return { text: 0, images: 0 };
+function hydrationTextCost(message: unknown): number {
+  if (!message || typeof message !== 'object') return 0;
   const value = message as { content?: unknown; details?: unknown };
   let text = safeText(messageText(message)).length;
   if (Array.isArray(value.content)) {
@@ -1258,16 +1255,7 @@ function hydrationCost(message: unknown): { text: number; images: number } {
     }
   }
   if (value.details !== undefined) text += safeText(value.details).length;
-  const images = messageImages(message).reduce((total, image) => total + image.data.length, 0);
-  return { text, images };
-}
-
-function representedHistoryEntries(message: unknown): number {
-  if (!message || typeof message !== 'object') return 1;
-  const boundary = message as { customType?: unknown; omittedEntries?: unknown };
-  return boundary.customType === 'history-boundary' && typeof boundary.omittedEntries === 'number'
-    ? Math.max(1, Math.floor(boundary.omittedEntries))
-    : 1;
+  return text;
 }
 
 function hydrationEntities(message: unknown): number {
@@ -1289,42 +1277,41 @@ function hydrationEntities(message: unknown): number {
   return Math.min(MAX_HYDRATED_TIMELINE_ENTITIES, entities);
 }
 
-function boundedSessionHistory(messages: readonly unknown[]): readonly unknown[] {
-  if (messages.length === 0) return messages;
-  const selected: unknown[] = [];
-  let selectedEntities = 0;
+function boundedHistoryWindow(history: readonly unknown[], end = history.length): { start: number; entries: readonly unknown[] } {
+  let start = end;
+  let entities = 0;
   let textCharacters = 0;
-  let imageCharacters = 0;
-  let omitted = 0;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    const cost = hydrationCost(message);
-    const entities = hydrationEntities(message);
-    if (
-      selected.length >= MAX_HYDRATED_HISTORY_ENTRIES
-      || selectedEntities + entities > MAX_HYDRATED_TIMELINE_ENTITIES - 1
-      || textCharacters + cost.text > MAX_HYDRATED_TEXT_CHARACTERS
-      || imageCharacters + cost.images > MAX_HYDRATED_IMAGE_CHARACTERS
-    ) {
-      omitted = index + 1;
-      break;
-    }
-    selected.push(message);
-    selectedEntities += entities;
-    textCharacters += cost.text;
-    imageCharacters += cost.images;
+  while (start > 0) {
+    const message = history[start - 1];
+    const nextEntities = entities + hydrationEntities(message);
+    const nextText = textCharacters + hydrationTextCost(message);
+    if (start < end && (
+      end - start >= MAX_HYDRATED_HISTORY_ENTRIES - 1
+      || nextEntities > MAX_HYDRATED_TIMELINE_ENTITIES - 1
+      || nextText > MAX_HYDRATED_TEXT_CHARACTERS
+    )) break;
+    start -= 1;
+    entities = nextEntities;
+    textCharacters = nextText;
   }
-  selected.reverse();
-  if (omitted > 0) {
-    let omittedEntries = messages.slice(0, omitted).reduce<number>((total, message) => total + representedHistoryEntries(message), 0);
-    while (selected.length >= MAX_HYDRATED_HISTORY_ENTRIES || selectedEntities >= MAX_HYDRATED_TIMELINE_ENTITIES) {
-      const removed = selected.shift();
-      omittedEntries += representedHistoryEntries(removed);
-      selectedEntities -= hydrationEntities(removed);
+  return { start, entries: history.slice(start, end) };
+}
+
+function deferOlderImages(messages: RuntimeMessage[], tools: RuntimeTool[], budget = MAX_HYDRATED_IMAGE_CHARACTERS): void {
+  const carriers = [...messages, ...tools]
+    .filter((item) => item.images?.length)
+    .sort((left, right) => (right.timelinePosition ?? 0) - (left.timelinePosition ?? 0));
+  let retainedCharacters = 0;
+  for (const item of carriers) {
+    const images = item.images!;
+    const characters = images.reduce((total, image) => total + image.data.length, 0);
+    if (retainedCharacters + characters <= budget) {
+      retainedCharacters += characters;
+      continue;
     }
-    selected.unshift(historyBoundary(omittedEntries));
+    item.deferredImages = images.length;
+    delete item.images;
   }
-  return selected;
 }
 
 const noopScopedPiSink = (_event: PiEvent, _sessionId: string | null): void => undefined;
@@ -1364,6 +1351,7 @@ export class PiRuntimeService {
   private readonly recoveredExecution: RecoveredExecutionPolicy;
   private readonly tasks: TaskService;
   private monitorRunsSource: ((projectPath: string) => Promise<MonitorRunsSource>) | null = null;
+  private computerUse: ComputerUsePort | null = null;
   private agentRunStarter: AgentRunStarter | null = null;
   private googleAccount: GoogleAccount | null = null;
   private readonly monitorEvents = new Map<string, Array<{ id: string; title: string; detail: string; state: 'normal' | 'attention'; timestamp: number }>>();
@@ -1406,6 +1394,7 @@ export class PiRuntimeService {
 
   setLearningService(service: LearningService): void { this.learningService = service; }
   setMonitorRunsSource(source: ((projectPath: string) => Promise<MonitorRunsSource>) | null): void { this.monitorRunsSource = source; }
+  setComputerUse(port: ComputerUsePort | null): void { this.computerUse = port; }
 
   /** Host-owned admission only. The renderer cannot install or reset this guard. */
   setExecutionAdmissionGuard(assertAdmission: () => void): void { this.executionAdmissionGuard = assertAdmission; }
@@ -1793,11 +1782,11 @@ export class PiRuntimeService {
     const session = this.runtime?.session;
     const cold = this.coldSession;
     const selectedSessionId = session?.sessionId ?? cold?.snapshot.summary.id ?? null;
-    const allMessages = session && includeMessages
-      ? boundedSessionHistory(sessionHistory(session))
+    const { start: historyStart, entries: allMessages } = boundedHistoryWindow(session && includeMessages
+      ? sessionHistory(session)
       : cold && includeMessages
-        ? boundedSessionHistory(sessionHistoryFromPersistedBranch(cold.snapshot.branch))
-        : [];
+        ? sessionHistoryFromPersistedBranch(cold.snapshot.branch)
+        : []);
     const streamingMessage = session?.isStreaming
       ? (session as AgentSession & { agent?: { state?: { streamingMessage?: unknown } } }).agent?.state?.streamingMessage
       : undefined;
@@ -1806,9 +1795,10 @@ export class PiRuntimeService {
       .map((message, index) => toMessage(
         message,
         message === streamingMessage && activeAssistantId ? activeAssistantId : this.normalizer.messageId(message),
-        index,
+        historyStart + index,
       ))
       .filter((message): message is RuntimeMessage => message !== null);
+    if (historyStart > 0) messages.unshift(historyBoundary(selectedSessionId, historyStart));
     if (cold?.snapshot.previewNotice && includeMessages) {
       // Presentation only: never append preview omissions to Pi's saved or
       // model-visible history. A clipped child state must not look current.
@@ -1825,7 +1815,8 @@ export class PiRuntimeService {
       : -1;
     const tools = toTools(allMessages, (toolCallId) => Boolean(session?.isStreaming
       && (pendingToolCalls?.has(toolCallId) || this.normalizer.isToolRunning(toolCallId))),
-    activeAssistantIndex > lastUserIndex ? activeAssistantIndex : -1);
+    activeAssistantIndex > lastUserIndex ? activeAssistantIndex : -1, historyStart);
+    deferOlderImages(messages, tools);
     const activeGoal = selectedSessionId && this.project ? this.goalMax.get(this.project.path, selectedSessionId) : null;
     let objective = activeGoal?.objective ?? this.objective;
     if (includeMessages && !activeGoal) {
@@ -1947,6 +1938,40 @@ export class PiRuntimeService {
     // renderer reconciles buffered events against this authoritative snapshot.
     this.batcher.flush();
     return this.getState();
+  }
+
+  private selectedHistory(sessionId: string): readonly unknown[] | null {
+    const session = this.runtime?.session;
+    const cold = this.coldSession;
+    if (sessionId !== (session?.sessionId ?? cold?.snapshot.summary.id)) return null;
+    return session ? sessionHistory(session) : cold ? sessionHistoryFromPersistedBranch(cold.snapshot.branch) : [];
+  }
+
+  loadHistoryPage(input: HistoryPageInput): HistoryPage {
+    const history = this.selectedHistory(input.sessionId);
+    if (!history) return { start: input.before, messages: [], tools: [] };
+    const { start, entries } = boundedHistoryWindow(history, Math.min(input.before, history.length));
+    const messages = entries
+      .map((message, index) => toMessage(message, this.normalizer.messageId(message), start + index))
+      .filter((message): message is RuntimeMessage => message !== null);
+    const tools = toTools(entries, () => false, -1, start);
+    deferOlderImages(messages, tools, 0);
+    return { start, messages, tools };
+  }
+
+  loadHistoryImages(input: HistoryImagesInput): RuntimeImage[] {
+    const history = this.selectedHistory(input.sessionId) ?? [];
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const message = history[index];
+      if (!message || typeof message !== 'object') continue;
+      const { role, toolCallId } = message as { role?: unknown; toolCallId?: unknown };
+      if (input.kind === 'tool') {
+        if (role === 'toolResult' && toolCallId === input.id) return messageImages(message);
+      } else if ((role === 'user' || role === 'assistant') && this.normalizer.messageId(message) === input.id) {
+        return messageImages(message, role === 'user' ? 'Attached image' : 'Generated image');
+      }
+    }
+    return [];
   }
 
   /** Set a lightweight focused-project snapshot without starting Pi. */
@@ -3946,6 +3971,8 @@ export class PiRuntimeService {
       this.sessionAttention.delete(candidate.id);
       this.goalSessionEntryCheckpoints.delete(candidate.id);
       this.coldPendingModels.delete(candidate.id);
+      this.coldPendingThinkingLevels.delete(candidate.id);
+      this.monitorEvents.delete(candidate.id);
       this.subagents.releaseParent(candidate.id);
       this.agentWorkflows.releaseParent(candidate.id);
       this.agentTeams.releaseRoot(candidate.id);
@@ -3962,50 +3989,58 @@ export class PiRuntimeService {
     return { deleted, skipped: listedLive + blocked.size };
   }
 
-  async deleteSession(sessionId: string): Promise<RuntimeState> {
-    const currentSessionId = this.selectedSessionId;
-    const projectPath = this.project?.path;
-    if (!projectPath || !currentSessionId) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Open and select a project session before deleting a session.', retryable: true });
-    if (currentSessionId === sessionId) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Switch to another session before deleting this one.', retryable: true });
-    if (this.findLiveSlot(sessionId)) throw new PiDesktopError({ code: 'RUN_ACTIVE', message: 'Wait for that session to finish before deleting it.', retryable: true });
+  async deleteSession(sessionId: string, targetProjectPath?: string): Promise<RuntimeState> {
+    const focusedPath = this.project?.path;
+    const projectPath = targetProjectPath ?? focusedPath;
+    const foreign = targetProjectPath !== undefined && targetProjectPath !== focusedPath;
+    if (!projectPath || (!foreign && !this.selectedSessionId)) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Open and select a project session before deleting a session.', retryable: true });
+    if (!foreign && this.selectedSessionId === sessionId) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Switch to another session before deleting this one.', retryable: true });
     const initialization = this.initialization;
+    const stale = () => !foreign && (initialization !== this.initialization || this.project?.path !== projectPath);
+    const liveSlot = foreign ? undefined : this.findLiveSlot(sessionId);
+    if (liveSlot) await this.disposeSlot(liveSlot, true);
+    if (stale()) throw this.replacementSuperseded();
     // A successful parent deletion must never strand persistent child transcripts.
     await this.agentTeams.deleteRootStorage(sessionId);
-    if (initialization !== this.initialization || this.project?.path !== projectPath) throw this.replacementSuperseded();
+    if (stale()) throw this.replacementSuperseded();
     await this.sessionRepository.delete(projectPath, sessionId);
-    if (initialization !== this.initialization || this.project?.path !== projectPath) throw this.replacementSuperseded();
+    if (stale()) throw this.replacementSuperseded();
     this.manualSessionNames.add(this.sessionClaimKey(projectPath, sessionId));
     while (this.manualSessionNames.size > MAX_MANUAL_SESSION_NAME_CLAIMS) this.manualSessionNames.delete(this.manualSessionNames.values().next().value!);
     await this.goalMax.deleteSession(projectPath, sessionId).catch((error: unknown) => {
-      if (initialization === this.initialization && this.project?.path === projectPath) {
+      if (!stale()) {
         this.emitSystemMessage(`Deleted goal metadata could not be removed: ${error instanceof Error ? error.message : String(error)}`, 'warning');
       }
     });
     await this.queuePersistence.deleteSession(projectPath, sessionId).catch((error: unknown) => {
-      if (initialization === this.initialization && this.project?.path === projectPath) this.emitSystemMessage(`Deleted message queue could not be removed: ${error instanceof Error ? error.message : String(error)}`, 'warning');
+      if (!stale()) this.emitSystemMessage(`Deleted message queue could not be removed: ${error instanceof Error ? error.message : String(error)}`, 'warning');
     });
     await this.tasks.deleteSession(projectPath, sessionId).catch((error: unknown) => {
-      if (initialization === this.initialization && this.project?.path === projectPath) {
+      if (!stale()) {
         this.emitSystemMessage(`Deleted task metadata could not be removed: ${error instanceof Error ? error.message : String(error)}`, 'warning');
       }
     });
     try {
       await this.sessionPermissions.delete(projectPath, sessionId);
     } catch (error) {
-      if (initialization === this.initialization && this.project?.path === projectPath) {
+      if (!stale()) {
         this.emitSystemMessage(`Deleted session permission metadata could not be removed: ${error instanceof Error ? error.message : String(error)}`, 'warning');
       }
     }
-    if (initialization !== this.initialization || this.project?.path !== projectPath) throw this.replacementSuperseded();
+    if (stale()) throw this.replacementSuperseded();
     this.sessionAttention.delete(sessionId);
     this.goalSessionEntryCheckpoints.delete(sessionId);
     this.coldPendingModels.delete(sessionId);
+    this.coldPendingThinkingLevels.delete(sessionId);
+    this.monitorEvents.delete(sessionId);
     this.subagents.releaseParent(sessionId);
     this.agentWorkflows.releaseParent(sessionId);
     this.agentTeams.releaseRoot(sessionId);
-    await this.refreshSessions();
-    if (initialization !== this.initialization || this.project?.path !== projectPath) throw this.replacementSuperseded();
-    this.emitState();
+    if (!foreign) {
+      await this.refreshSessions();
+      if (stale()) throw this.replacementSuperseded();
+      this.emitState();
+    }
     return this.getState(false);
   }
 
@@ -5765,6 +5800,7 @@ export class PiRuntimeService {
     const workflow = this.agentWorkflows.createTool(modelRuntime);
     const catalog = this.subagents.createCatalogTool(modelRuntime);
     const browser = this.browserIntegration?.createTools() ?? [];
+    const computer = this.computerUse ? [createComputerTool(this.computerUse, (sessionId) => this.findLiveSlot(sessionId)?.permissionLevel ?? null)] : [];
     const taskTools = createTaskTools(this.tasks, (sessionId) => {
       const project = this.project;
       const slot = this.findLiveSlot(sessionId);
@@ -5778,7 +5814,7 @@ export class PiRuntimeService {
           && slot.sessionGeneration === generation && slot.runtime.session === session && session.sessionId === sessionId,
       };
     });
-    const tools = [...agents, workflow, catalog, createMonitorDashboardTool((input, sessionId) => this.getMonitorDashboard(input, sessionId)), this.questionnaires.createTool((sessionId) => this.canAskUser(sessionId)), ...this.createSessionMessagingTools(), ...this.goalMax.createTools(), ...taskTools, ...browser, createRunInProjectTool(async (sessionId, input) => {
+    const tools = [...agents, workflow, catalog, createMonitorDashboardTool((input, sessionId) => this.getMonitorDashboard(input, sessionId)), this.questionnaires.createTool((sessionId) => this.canAskUser(sessionId)), ...this.createSessionMessagingTools(), ...this.goalMax.createTools(), ...taskTools, ...browser, ...computer, createRunInProjectTool(async (sessionId, input) => {
       const slot = this.findLiveSlot(sessionId);
       const preset = slot ? getAgentSessionPreset(slot.runtime.session) : undefined;
       if (!slot || !preset || preset.runId || !this.agentRunStarter) throw new Error('Only an Agent chat can start project runs.');
@@ -5870,11 +5906,21 @@ export class PiRuntimeService {
       || this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId)));
   }
 
+  runningSessionsForPath(projectPath: string): RunningSessionRef[] {
+    if (this.project?.path !== projectPath) return [];
+    return [...this.liveSlots].filter((slot) => this.slotIsRunning(slot)).map((slot) => {
+      const id = slot.runtime.session.sessionId;
+      return { id, title: this.sessions.find((summary) => summary.id === id)?.title ?? id };
+    });
+  }
+
+  private slotIsRunning(slot: RuntimeSlot): boolean {
+    return !slot.disposed && (slot.activeRunId !== null || this.sessionHasActiveWork(slot.runtime.session) || this.hasActiveAgentWork(slot.runtime.session.sessionId) || this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId));
+  }
+
   private runningSessionCount(): number {
     let count = 0;
-    for (const slot of this.liveSlots) {
-      if (!slot.disposed && (slot.activeRunId !== null || this.sessionHasActiveWork(slot.runtime.session) || this.hasActiveAgentWork(slot.runtime.session.sessionId) || this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId))) count += 1;
-    }
+    for (const slot of this.liveSlots) if (this.slotIsRunning(slot)) count += 1;
     return count;
   }
 

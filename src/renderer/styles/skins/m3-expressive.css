@@ -258,3 +258,10 @@
   :root[data-skin="m3-expressive"] .inspector-secondary-tooltip { flex: 1 1 0; }
   :root[data-skin="m3-expressive"] .inspector-secondary-trigger { width: 100%; padding: 0; }
 }
+
+:root[data-skin="m3-expressive"] .chat-image-grid .chat-image-trigger { border-radius: 28px; background: var(--theme-raised); }
+:root[data-skin="m3-expressive"] .chat-image-grid .chat-image-trigger > span { border-radius: 16px; }
+:root[data-skin="m3-expressive"] .composer-attachments > span { border-radius: 20px; background: var(--theme-raised); }
+
+:root[data-skin="m3-expressive"] .permission-cu-row { border-radius: 16px; }
+:root[data-skin="m3-expressive"] .permission-cu-row > span:last-child { border-radius: 10px; }

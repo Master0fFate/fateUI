@@ -18,7 +18,7 @@ const browserFeatureSupport: FeatureSupport = Object.freeze({
 type EventChannel = 'onEvents' | 'onGoalMaxEvents' | 'onTaskEvents';
 type NativeEventChannel = 'onWindowState' | 'onBrowserLinkOpen' | 'onBrowserEvents'
   | 'onUpdatesProgress' | 'onSpeechDownload' | 'onSpeechStreamUpdate'
-  | 'onVoiceHotkey' | 'onMusicDurations' | 'onTerminalEvent'
+  | 'onVoiceHotkey' | 'onMusicDurations' | 'onTerminalEvent' | 'onComputerUseState'
   | 'onAppCommand' | 'onAgentLibraryChanged' | 'onLearningChanged';
 
 let current: RendererFateApi | null = null;
@@ -106,6 +106,7 @@ function managed(api: RendererFateApi): { api: RendererFateApi; release: () => v
     ...(typeof desktop.onSpeechStreamUpdate === 'function' ? { onSpeechStreamUpdate: trackNative('onSpeechStreamUpdate') } : {}),
     ...(typeof desktop.onVoiceHotkey === 'function' ? { onVoiceHotkey: trackNative('onVoiceHotkey') } : {}),
     ...(typeof desktop.onMusicDurations === 'function' ? { onMusicDurations: trackNative('onMusicDurations') } : {}),
+    ...(typeof desktop.onComputerUseState === 'function' ? { onComputerUseState: trackNative('onComputerUseState') } : {}),
     ...(typeof desktop.onTerminalEvent === 'function' ? { onTerminalEvent: trackNative('onTerminalEvent') } : {}),
     ...(typeof desktop.onAppCommand === 'function' ? { onAppCommand: trackNative('onAppCommand') } : {}),
     ...(typeof desktop.onAgentLibraryChanged === 'function' ? { onAgentLibraryChanged: trackNative('onAgentLibraryChanged') } : {}),
