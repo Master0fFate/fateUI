@@ -27,6 +27,7 @@ import { GoalMaxRail } from '../goalmaxxing/GoalMaxRail';
 import { GoalMaxTaskStrip } from '../goalmaxxing/GoalMaxTaskStrip';
 import { parseGoalMaxCommand } from '../goalmaxxing/parseGoalMaxCommand';
 import { BranchChip } from './BranchChip';
+import { useComputerUseSwitch } from '../computerUseSwitch';
 import { ContextWheel } from './ContextWheel';
 import { EffortSlider } from './EffortSlider';
 import { ComposerPresentation } from './ComposerInput';
@@ -624,6 +625,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const [modelBusy, setModelBusy] = useState(false);
   const [thinkingDraft, setThinkingDraft] = useState<typeof thinkingLevels[number] | null>(null);
   const [permissionBusy, setPermissionBusy] = useState(false);
+  const computerUse = useComputerUseSwitch();
   const [queueBusyId, setQueueBusyId] = useState<string | null>(null);
   const [goalUpdateBusyId, setGoalUpdateBusyId] = useState<string | null>(null);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -2932,6 +2934,19 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                           <Zap size={15} aria-hidden="true" /><strong>Full access</strong>
                         </button>
                       </div>
+                      {computerUse.supported && (
+                        <>
+                          <div className="permission-cu-divider" />
+                          <label className="permission-cu-row">
+                            <span><strong>Computer use</strong><small>{computerUse.issue ?? 'Relaunches elevated'}</small></span>
+                            <input type="checkbox" checked={computerUse.on} disabled={computerUse.busy} onChange={(e) => {
+                              const next = e.target.checked;
+                              void computerUse.toggle(next).then(() => { if (next && permissionLevel !== 'full-access') void changePermissionLevel('full-access'); });
+                            }} />
+                            <span aria-hidden="true" />
+                          </label>
+                        </>
+                      )}
                     </>
                   )}
                 </Popover.Content>

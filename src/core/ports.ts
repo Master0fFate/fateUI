@@ -77,6 +77,37 @@ export interface BrowserIntegrationPort {
   setFocusedProjectPath?(projectPath: string | null): void;
 }
 
+export type ComputerAction =
+  | 'screenshot' | 'zoom' | 'list_displays' | 'cursor_position'
+  | 'left_click' | 'right_click' | 'middle_click' | 'double_click' | 'triple_click'
+  | 'mouse_move' | 'left_click_drag' | 'left_mouse_down' | 'left_mouse_up'
+  | 'scroll' | 'type' | 'key' | 'hold_key' | 'wait';
+
+export type ComputerScrollDirection = 'up' | 'down' | 'left' | 'right';
+
+export interface ComputerActionInput {
+  readonly action: ComputerAction;
+  readonly coordinate?: readonly [number, number];
+  readonly startCoordinate?: readonly [number, number];
+  readonly region?: readonly [number, number, number, number];
+  readonly text?: string;
+  readonly scrollDirection?: ComputerScrollDirection;
+  readonly scrollAmount?: number;
+  readonly duration?: number;
+  readonly display?: number;
+}
+
+export interface ComputerActionOutput {
+  readonly text: string;
+  readonly display: number;
+  readonly image?: { readonly data: string; readonly mimeType: string };
+}
+
+export interface ComputerUsePort {
+  isEnabled(): boolean;
+  perform(input: ComputerActionInput, signal?: AbortSignal): Promise<ComputerActionOutput>;
+}
+
 export class UnsupportedHostCapabilityError extends Error {
   readonly code = 'UNSUPPORTED_CAPABILITY';
 

@@ -35,6 +35,7 @@ const settings: AppSettings = {
   codeFont: 'jetbrains-mono',
   imageGeneration: { provider: 'auto', model: null, customProvider: null },
   speech: { enabled: true, modelId: 'canary-flash', language: 'auto', inputDeviceId: null, liveTranscription: true, finalAccuracyPass: false, voiceHotkey: null, voiceHotkeyMode: 'toggle' },
+  computerUseElevated: false,
 };
 
 let speechListener: ((progress: SpeechDownloadProgress) => void) | null = null;

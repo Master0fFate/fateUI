@@ -31,6 +31,8 @@ import { notifyAgentRun } from './agents/AgentNotifications';
 import { GoogleAccount } from './google/GoogleAccount';
 import { MEDIA_SCHEME, MusicService, PublicHttpsProxy } from './music/MusicService';
 import { BrowserRuntimeBridge } from './pi/BrowserRuntimeBridge';
+import { ComputerUseService } from './computer/ComputerUseService';
+import { isElevated, relaunchElevated } from './computer/elevation';
 import type { PiRuntimeService } from './pi/PiRuntimeService';
 import { ConnectionProfileStore } from './connections/ConnectionProfileStore';
 import { ConnectionProfileEditor } from './connections/ConnectionProfileEditor';
@@ -174,6 +176,7 @@ const updates = new UpdateService(path.join(app.isPackaged ? process.resourcesPa
 });
 const windowState = new WindowStateService(logs);
 const music = new MusicService();
+const computerUse = new ComputerUseService(logs);
 const rendererNetworkProxy = new PublicHttpsProxy();
 const speech = new SpeechService(logs);
 const emitVoiceHotkey = (action: 'start' | 'stop') => {
@@ -230,7 +233,7 @@ const shutdown = new ShutdownCoordinator({
     core?.shutdownCore();
     rememberWindowPlacement(dispatcher.activeHandle(), windowState);
   },
-  disposeSync: () => { terminal?.dispose(); music.dispose(); rendererNetworkProxy.dispose(); },
+  disposeSync: () => { terminal?.dispose(); music.dispose(); computerUse.dispose(); rendererNetworkProxy.dispose(); },
   disposeAsync: () => [
     connections?.close() ?? Promise.resolve(),
     core?.shutdownCore() ?? coreStartup?.then((created) => created.shutdownCore()) ?? Promise.resolve({ status: 'settled' as const }),
@@ -392,6 +395,7 @@ app.whenReady().then(async () => {
     } },
     workspaceMembership: (identity) => identity.adapter === 'local-ipc',
     browserIntegration: browserBridge,
+    computerUse,
     providerAuthUrlPresenter: { present: (url) => shell.openExternal(url) },
     attention: { sessionSettled: () => {
       for (const window of BrowserWindow.getAllWindows()) {
@@ -484,7 +488,15 @@ app.whenReady().then(async () => {
     }
   }
   await recovery.load();
-  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy });
+  if (settings.get().computerUseElevated) {
+    if (!isElevated()) {
+      if (await relaunchElevated()) return;
+      await settings.set({ ...settings.get(), computerUseElevated: false });
+    } else {
+      void computerUse.setEnabled(true);
+    }
+  }
+  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy });
   // Refresh every models.dev-managed provider's model list once per Fate GUI
   // start. Runs beside startup, never blocking it; offline keeps the cache.
   // A saved remote target never starts local scheduled work or an automatic provider refresh.

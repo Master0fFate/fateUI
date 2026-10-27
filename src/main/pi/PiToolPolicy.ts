@@ -29,9 +29,9 @@ const MAX_PI_READ_BYTES = 8 * 1024 * 1024;
 const toolsByPermissionLevel: Record<PermissionLevel, readonly string[]> = {
   'read-only': ['read', 'grep', 'find', 'ls', 'pdf_read', 'generate_image'],
   edit: ['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'generate_image'],
-  'full-access': ['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image'],
+  'full-access': ['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image', 'computer'],
 };
-const permissionControlledTools = new Set(['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image']);
+const permissionControlledTools = new Set(['read', 'grep', 'find', 'ls', 'pdf_read', 'write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'generate_image', 'computer']);
 
 /** Minimum child permission that grants each ordinary tool. */
 const toolMinimumPermission: Record<string, PermissionLevel> = {
@@ -46,6 +46,7 @@ const toolMinimumPermission: Record<string, PermissionLevel> = {
   pdf_fill: 'edit',
   pdf_create: 'edit',
   bash: 'full-access',
+  computer: 'full-access',
 };
 
 export function requiredPermissionForTool(tool: string): PermissionLevel | undefined {

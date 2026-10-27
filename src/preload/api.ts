@@ -1,5 +1,6 @@
 import type { PiDesktopApi } from '../shared/contracts/ipc';
 import { browserApi } from './browserApi';
+import { computerUseApi } from './computerUseApi';
 import { connectionApi } from './connectionApi';
 import { agentsApi } from './agentsApi';
 import { learningApi } from './learningApi';
@@ -10,6 +11,7 @@ import { workspaceApi } from './workspaceApi';
 
 export const piDesktopApi: PiDesktopApi = Object.freeze({
   ...browserApi,
+  ...computerUseApi,
   ...connectionApi,
   ...agentsApi,
   ...learningApi,

@@ -42,7 +42,7 @@ import { resolveStatePersistenceBackend, type StatePersistenceBackend } from '..
 import { CoreLifecycle, type CoreClientResources } from './lifecycle/CoreLifecycle';
 import { WorkspaceEventHub } from './events/WorkspaceEventHub';
 import { FatePaths } from './FatePaths';
-import type { AttentionPort, BrowserIntegrationPort, ClockPort, FatePathConfiguration, ProjectRegistrationPort, ProviderAuthUrlPort } from './ports';
+import type { AttentionPort, BrowserIntegrationPort, ClockPort, ComputerUsePort, FatePathConfiguration, ProjectRegistrationPort, ProviderAuthUrlPort } from './ports';
 import type { RequestContext } from './dispatch/RequestContext';
 import { WorkspaceRegistry } from './workspaces/WorkspaceRegistry';
 import { ProjectTrustService } from './projects/ProjectTrustService';
@@ -61,6 +61,7 @@ export interface FateCoreOptions {
   readonly adapter?: PiSdkAdapter;
   readonly permissionHost?: PermissionHostPolicy;
   readonly browserIntegration?: BrowserIntegrationPort | null;
+  readonly computerUse?: ComputerUsePort | null;
   readonly providerAuthUrlPresenter?: ProviderAuthUrlPort;
   readonly attention?: AttentionPort;
   /** Both host-owned sources are required; omission creates no workspace registry. */
@@ -298,6 +299,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
       createSessionRepository: () => new PiSessionRepository(undefined, paths.sessionsRoot),
       createModelsDevService: () => new ModelsDevService({ store: new ModelsDevStore(paths.dataRoot), now: () => clock.now(), log: (message) => logs.write('warn', 'models', message) }),
       browserIntegration: options.browserIntegration ?? null,
+      computerUse: options.computerUse ?? null,
       monitorRuns: async (projectPath) => {
         if (!savedAgents) throw new Error('Scheduled Agents are unavailable.');
         return savedAgents.monitorRuns(projectPath);

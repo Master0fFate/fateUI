@@ -41,6 +41,7 @@ const defaults: AppSettings = {
   codeFont: 'jetbrains-mono',
   imageGeneration: { provider: 'auto', model: null, customProvider: null },
   speech: defaultSpeechSettings,
+  computerUseElevated: false,
 };
 
 export interface SettingsHostOptions {

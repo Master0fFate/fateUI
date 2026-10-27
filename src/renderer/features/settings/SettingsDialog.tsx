@@ -1,3 +1,4 @@
+import { useComputerUseSwitch } from '../computerUseSwitch';
 import { getFateApiOptional, getDesktopApi, getDesktopApiOptional, hasCapability } from '../../platform/api';
 import { unavailableExplanation } from '../../platform/capabilityPolicy';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -78,6 +79,7 @@ const fallback: AppSettings = {
   imageGeneration: { provider: 'auto', model: null, customProvider: null },
   speech: defaultSpeechSettings,
   memoryLearning: defaultMemoryLearning,
+  computerUseElevated: false,
 };
 
 type SettingsToast = { kind: 'success' | 'error'; title: string; message: string };
@@ -150,6 +152,11 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
   const open = useUiStore((state) => state.settingsOpen);
   const desktopSettingsAvailable = typeof getDesktopApiOptional()?.getSettings === 'function';
   const voiceSupported = hasCapability('microphone');
+  const computerUse = useComputerUseSwitch();
+  useEffect(() => {
+    setSettings((current) => (current.computerUseElevated === computerUse.on ? current : { ...current, computerUseElevated: computerUse.on }));
+    setPersistedSettings((current) => (current.computerUseElevated === computerUse.on ? current : { ...current, computerUseElevated: computerUse.on }));
+  }, [computerUse.on]);
   const voiceHotkeysSupported = voiceSupported && hasCapability('hotkeys');
   const setOpen = useUiStore((state) => state.setSettingsOpen);
   const setMusicPlayerEnabled = useUiStore((state) => state.setMusicPlayerEnabled);
@@ -951,6 +958,9 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                 <div className="settings-panel" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace">
                   <div className="settings-title"><div><h3>Project trust</h3></div></div>
                   <div className="settings-notice"><ShieldCheck size={14} /><div><strong>Project-confined by default</strong><p>Read only and Edit files stay inside the trusted project. Full access explicitly unlocks host files and shell execution, is saved per session, and is not sandboxed.</p></div></div>
+                  {computerUse.supported && <div className="settings-group">
+                    <label className="settings-toggle"><div><strong>Computer use</strong><small>{computerUse.issue ?? 'Pi sees your screen and controls the mouse and keyboard. Launches elevated for full OS control.'}</small></div><input type="checkbox" checked={computerUse.on} disabled={computerUse.busy} onChange={(event) => { void computerUse.toggle(event.target.checked); }} /><span aria-hidden="true" /></label>
+                  </div>}
                   <div className="settings-title settings-title--spaced"><div><h3>Terminal</h3></div></div>
                   <label className="settings-input-row"><span>Shell executable</span><input value={settings.terminalShell ?? ''} onChange={(event) => setSettings({ ...settings, terminalShell: event.target.value || null })} placeholder="System default" /></label>
                   <div className="settings-title settings-title--spaced"><div><h3>Message composer</h3></div></div>
