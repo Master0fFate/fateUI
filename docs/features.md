@@ -85,6 +85,8 @@ A long session opens on its most recent window of history. Scroll up to load ear
 
 ## Computer use
 
+![Fate UI with the computer use overlay: a frame around the screen, a pill with a Stop button and the agent cursor](../screenshots/computer-use-overlay.png)
+
 The `computer` tool lets the agent take screenshots and use the mouse and keyboard: click, drag, scroll, type, key chords, zoom into a region and choose a display. Every action except `list_displays` and `cursor_position` returns a fresh screenshot.
 
 - It is off until you turn it on in the permission menu of the composer or in **Settings → Workspace**, and it only works in a Full access session. Agent runs started from an Agent chat do not get it.
