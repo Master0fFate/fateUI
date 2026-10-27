@@ -77,7 +77,21 @@ Status, history, commits, Monaco diffs, and project-confined file browsing witho
 
 ### Branches
 
-The composer shows a branch chip for repository projects. On an empty session it opens a picker: switch to a local or remote branch, or create a branch from the current one by typing its name. Branches checked out in another worktree are not listed. Once the session has a message the branch is fixed for that session and the picker is read-only. The agent names, switches, and renames branches through the `git_branch` tool (list, switch, create, rename), which runs with hooks and unsafe protocols disabled. Listing works at every permission level; switching, creating, and renaming need Edit files or Full access. Status, changes, and history refresh after the tool completes.
+The composer shows a branch chip for repository projects. On an empty session it opens a picker: switch to a local or remote branch, or create a branch from the current one by typing its name. Branches checked out in another worktree are listed with a **worktree** tag and open that worktree. Picking a branch while the working tree has uncommitted changes opens it in a managed worktree and leaves the changes on the current branch. Each local branch has a delete button with a confirmation; deleting also removes its worktree, and is refused while a running session uses that worktree or when the branch is checked out in the primary worktree. Once the session has a message the branch is fixed for that session and the picker is read-only. The agent names, switches, and renames branches through the `git_branch` tool (list, switch, create, rename), which runs with hooks and unsafe protocols disabled. Listing works at every permission level; switching, creating, and renaming need Edit files or Full access. Status, changes, and history refresh after the tool completes.
+
+## Long conversations
+
+A long session opens on its most recent window of history. Scroll up to load earlier messages in pages. Images outside the recent budget stay as placeholders and load when you open them. Attached and received images are grouped into two-per-row tiles that open the full-size viewer. Sessions of any project can be deleted from the sidebar.
+
+## Computer use
+
+The `computer` tool lets the agent take screenshots and use the mouse and keyboard: click, drag, scroll, type, key chords, zoom into a region and choose a display. Every action except `list_displays` and `cursor_position` returns a fresh screenshot.
+
+- It is off until you turn it on in the permission menu of the composer or in **Settings → Workspace**, and it only works in a Full access session. Agent runs started from an Agent chat do not get it.
+- Turning it on relaunches Fate UI elevated: a UAC prompt on Windows, an administrator prompt on macOS, `pkexec` on Linux. The app and everything it starts then run with administrator rights. On Windows the UAC secure desktop prompt is switched off while computer use is on and restored when it is turned off.
+- An overlay shows when the agent is acting. Its Stop button, or **Alt+Shift+Esc** (**⌥⇧Esc** on macOS), turns computer use off. It also turns off when the last window closes.
+- macOS needs Accessibility and Screen Recording permission. Linux needs an X11 or XWayland display.
+- Everything on screen is untrusted input. The agent is told not to enter secrets or take irreversible actions without asking, but that is guidance, not a sandbox.
 
 ## PDFs
 

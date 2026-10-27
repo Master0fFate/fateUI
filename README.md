@@ -89,6 +89,26 @@ Optional local voice transcription, image generation, and ambient audio. Reviewe
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+### Let the agent use your computer
+
+Turn on computer use for a Full access session and the agent can see your screen and use the mouse and keyboard. An overlay shows when it acts, and Alt+Shift+Esc stops it from anywhere. It is off by default and relaunches Fate UI elevated.
+
+[Computer use →](docs/features.md#computer-use)
+
+</td>
+<td valign="top">
+
+### Run Fate where the code lives
+
+Keep the agent running on another machine with the Node companion. Work on it from the desktop app over SSH or from a browser, with one controller at a time and an explicit permission ceiling.
+
+[Remote hosts →](docs/v2/current-status.md)
+
+</td>
+</tr>
 </table>
 
 ## Skins and themes
@@ -194,6 +214,7 @@ Projects, session history, settings, and credentials are stored locally. **Promp
 | Read only | Fate's governed project-write and shell tools are unavailable. |
 | Edit files | Default for new trusted sessions. Agent file operations remain project-confined. |
 | Full access | Explicitly unsandboxed access with your account’s permissions. Use deliberately. |
+| Computer use | Off by default. Needs Full access, relaunches Fate UI elevated, and lets the agent see the screen and use the mouse and keyboard until you stop it. |
 | Agent worktrees | Isolated Git checkouts, **not security sandboxes**. Integration is a separate action. |
 | Local credentials | Fate’s provider store is separate from Pi Terminal’s; existing credentials copy on first run, and missing entries can be imported later without replacing Fate values. |
 
