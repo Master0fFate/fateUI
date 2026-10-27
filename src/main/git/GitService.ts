@@ -667,6 +667,13 @@ function boundedGitMessage(operation: GitOperation, stdout: string, stderr: stri
   return 'Push completed.';
 }
 
+interface ManagedWorktreeSetup {
+  head: string;
+  managedRoot: string;
+  hooksDirectory: string;
+  config: string[];
+}
+
 export class GitService {
   private statusRequest: { root: string; promise: Promise<GitStatus>; next?: Promise<GitStatus> } | null = null;
   private lastStatus: { root: string; value: GitStatus } | null = null;
@@ -907,6 +914,36 @@ export class GitService {
     }
   }
 
+  async deleteBranch(name: string): Promise<void> {
+    const root = this.files.getRoot();
+    return this.ownership ? this.ownership.mutation(root, () => this.deleteBranchUnlocked(root, name)) : this.deleteBranchUnlocked(root, name);
+  }
+
+  private async deleteBranchUnlocked(root: string, name: string): Promise<void> {
+    const status = await this.readStatus(root);
+    if (!status.repository) throw new Error('Branch controls require a repository.');
+    await assertBranchName(root, name);
+    if (status.branch === name) throw new Error(`Switch away from ${name} before deleting it.`);
+    if (!await refExists(root, `refs/heads/${name}`)) throw new Error(`Branch does not exist: ${name}`);
+    const held = (await this.worktrees()).find((worktree) => worktree.branch === name);
+    const hooksDirectory = await this.hooksDirectory();
+    const config = [
+      '-c', `core.hooksPath=${hooksDirectory}`,
+      '-c', 'protocol.allow=never',
+      '-c', 'protocol.file.allow=never',
+      '-c', 'protocol.ext.allow=never',
+    ];
+    try {
+      if (held) await execute(root, ['worktree', 'remove', '--force', held.path], MAX_GIT_OUTPUT, config);
+      await execute(root, ['branch', '-D', '--', name], 64_000, config);
+      this.statusRequest = null;
+      this.lastStatus = null;
+      this.historyRequest = null;
+    } finally {
+      await fs.rm(hooksDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
   async renameBranch(input: GitRenameBranchInput): Promise<GitStatus> {
     const root = this.files.getRoot();
     return this.ownership ? this.ownership.mutation(root, () => this.renameBranchUnlocked(root, input)) : this.renameBranchUnlocked(root, input);
@@ -952,44 +989,81 @@ export class GitService {
 
   private async createWorktreeUnlocked(branchSeed: string): Promise<GitWorktree> {
     const root = this.files.getRoot();
-    const status = await this.readStatus(root);
-    if (!status.repository) throw new Error('An isolated session requires a Git repository.');
-    const head = (await execute(root, ['rev-parse', '--verify', 'HEAD'], 16_384)).toString('utf8').trim();
-    if (!/^[0-9a-f]{40,64}$/u.test(head)) throw new Error('Create the first commit before starting an isolated worktree session.');
-
-    const worktreesRoot = this.managedWorktreeRoot(root);
-    if (!this.worktreesRoot) await excludeManagedDirectory(root);
-    await fs.mkdir(worktreesRoot, { recursive: true });
-    const managedRoot = path.normalize(await fs.realpath(worktreesRoot));
-    const hooksDirectory = await this.hooksDirectory();
-    const filterConfig = await safeFilterConfig(root);
-    const worktreeConfig = [
-      ...await inheritedLineEndingConfig(root),
-      ...filterConfig,
-      '-c', `core.hooksPath=${hooksDirectory}`,
-      '-c', 'protocol.allow=never',
-      '-c', 'protocol.file.allow=never',
-      '-c', 'protocol.ext.allow=never',
-    ];
+    const setup = await this.prepareManagedWorktree(root, 'An isolated session requires a Git repository.', 'Create the first commit before starting an isolated worktree session.');
     const baseBranch = worktreeBranchName(branchSeed);
     let branch: string | null = null;
-    let destination: string | null = null;
     try {
       for (let suffix = 1; suffix <= 100; suffix += 1) {
         const candidate = suffix === 1 ? baseBranch : `${baseBranch}-${suffix}`;
         try {
-          await execute(root, ['branch', '--', candidate, 'HEAD'], 64_000, worktreeConfig);
+          await execute(root, ['branch', '--', candidate, 'HEAD'], 64_000, setup.config);
           branch = candidate;
           break;
         } catch (error) {
           try {
-            await execute(root, ['show-ref', '--verify', '--quiet', `refs/heads/${candidate}`], 16_384, worktreeConfig);
+            await execute(root, ['show-ref', '--verify', '--quiet', `refs/heads/${candidate}`], 16_384, setup.config);
           } catch {
             throw error;
           }
         }
       }
       if (!branch) throw new Error(`Could not find an available branch name based on ${baseBranch}.`);
+      const canonical = await this.addManagedWorktree(root, branch, setup);
+      return { path: canonical, branch, head: setup.head, detached: false, bare: false, current: false };
+    } catch (error) {
+      if (!branch) throw error;
+      try {
+        await execute(root, ['branch', '-D', '--', branch], 64_000, setup.config);
+      } catch (cleanupError) {
+        const errors = error instanceof AggregateError ? error.errors : [error];
+        throw new AggregateError([...errors, cleanupError], 'Managed worktree creation failed and rollback was incomplete.');
+      }
+      throw error;
+    } finally {
+      await fs.rm(setup.hooksDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  async openBranchWorktree(name: string): Promise<string> {
+    const root = this.files.getRoot();
+    return this.ownership ? this.ownership.mutation(root, () => this.openBranchWorktreeUnlocked(root, name)) : this.openBranchWorktreeUnlocked(root, name);
+  }
+
+  private async openBranchWorktreeUnlocked(root: string, name: string): Promise<string> {
+    await assertBranchName(root, name);
+    const setup = await this.prepareManagedWorktree(root, 'Branch worktrees require a Git repository.', 'Create the first commit before opening a branch in its own worktree.');
+    try {
+      return await this.addManagedWorktree(root, name, setup);
+    } finally {
+      await fs.rm(setup.hooksDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  private async prepareManagedWorktree(root: string, repositoryError: string, headError: string): Promise<ManagedWorktreeSetup> {
+    const status = await this.readStatus(root);
+    if (!status.repository) throw new Error(repositoryError);
+    const head = (await execute(root, ['rev-parse', '--verify', 'HEAD'], 16_384)).toString('utf8').trim();
+    if (!/^[0-9a-f]{40,64}$/u.test(head)) throw new Error(headError);
+
+    const worktreesRoot = this.managedWorktreeRoot(root);
+    if (!this.worktreesRoot) await excludeManagedDirectory(root);
+    await fs.mkdir(worktreesRoot, { recursive: true });
+    const managedRoot = path.normalize(await fs.realpath(worktreesRoot));
+    const hooksDirectory = await this.hooksDirectory();
+    const config = [
+      ...await inheritedLineEndingConfig(root),
+      ...await safeFilterConfig(root),
+      '-c', `core.hooksPath=${hooksDirectory}`,
+      '-c', 'protocol.allow=never',
+      '-c', 'protocol.file.allow=never',
+      '-c', 'protocol.ext.allow=never',
+    ];
+    return { head, managedRoot, hooksDirectory, config };
+  }
+
+  private async addManagedWorktree(root: string, branch: string, { managedRoot, config }: ManagedWorktreeSetup): Promise<string> {
+    let destination: string | null = null;
+    try {
       const reserved = await fs.mkdtemp(path.join(managedRoot, 'fate-ui-worktree-'));
       const canonical = path.normalize(await fs.realpath(reserved));
       const relative = path.relative(managedRoot, canonical);
@@ -997,18 +1071,18 @@ export class GitService {
         throw new Error('Refusing to create a worktree outside Fate UI managed storage.');
       }
       destination = canonical;
-      await execute(root, ['worktree', 'add', destination, branch], MAX_GIT_OUTPUT, worktreeConfig);
+      await execute(root, ['worktree', 'add', destination, branch], MAX_GIT_OUTPUT, config);
       this.statusRequest = null;
       this.lastStatus = null;
       this.historyRequest = null;
-      return { path: canonical, branch, head, detached: false, bare: false, current: false };
+      return canonical;
     } catch (error) {
       const cleanupErrors: unknown[] = [];
       if (destination) {
         try {
-          const listed = parseGitWorktrees((await execute(root, ['worktree', 'list', '--porcelain', '-z'], 1_000_000, worktreeConfig)).toString('utf8'), root);
+          const listed = parseGitWorktrees((await execute(root, ['worktree', 'list', '--porcelain', '-z'], 1_000_000, config)).toString('utf8'), root);
           if (listed.some((worktree) => path.normalize(worktree.path) === path.normalize(destination!))) {
-            await execute(root, ['worktree', 'remove', '--force', destination], MAX_GIT_OUTPUT, worktreeConfig);
+            await execute(root, ['worktree', 'remove', '--force', destination], MAX_GIT_OUTPUT, config);
           }
         } catch (cleanupError) {
           cleanupErrors.push(cleanupError);
@@ -1019,26 +1093,17 @@ export class GitService {
           cleanupErrors.push(cleanupError);
         }
       }
-      if (branch) {
-        try {
-          await execute(root, ['branch', '-D', '--', branch], 64_000, worktreeConfig);
-        } catch (cleanupError) {
-          cleanupErrors.push(cleanupError);
-        }
-      }
       if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors], 'Managed worktree creation failed and rollback was incomplete.');
       throw error;
-    } finally {
-      await fs.rm(hooksDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
-  async discardCreatedWorktree(worktree: GitWorktree): Promise<void> {
+  async discardCreatedWorktree(worktree: Pick<GitWorktree, 'path' | 'branch'>): Promise<void> {
     const root = this.files.getRoot();
     return this.ownership ? this.ownership.mutation(root, () => this.discardCreatedWorktreeUnlocked(worktree)) : this.discardCreatedWorktreeUnlocked(worktree);
   }
 
-  private async discardCreatedWorktreeUnlocked(worktree: GitWorktree): Promise<void> {
+  private async discardCreatedWorktreeUnlocked(worktree: Pick<GitWorktree, 'path' | 'branch'>): Promise<void> {
     const root = this.files.getRoot();
     const canonical = await this.resolveWorktree(worktree.path);
     const managedRoot = path.normalize(await fs.realpath(this.managedWorktreeRoot(root)));
