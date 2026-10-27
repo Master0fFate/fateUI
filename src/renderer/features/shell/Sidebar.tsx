@@ -465,15 +465,19 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
     const id = editingSessionId;
     if (invokeState('Renaming session', () => getFateApi().renameSession(id, name))) setEditingSessionId(null);
   };
-  const deleteSession = (sessionId: string) => {
+  const deleteSession = (sessionId: string, projectPath?: string) => {
     if (!getFateApiOptional()) return;
     // Non-blocking: a delete only removes one saved session. Locking the whole
     // list (via invokeState/actionBusy) made every other session unclickable
     // until the disk refresh finished. Run it in the background and update the
     // list when it lands; the activation queue still serializes it safely.
     setConfirmingDeleteId(null);
-    void getFateApi().deleteSession(sessionId)
-      .then((state) => { if (mounted.current) setRuntime(state); })
+    void getFateApi().deleteSession(sessionId, projectPath)
+      .then((state) => {
+        if (!mounted.current) return;
+        setRuntime(state);
+        if (projectPath) refreshPreviews([projectPath]);
+      })
       .catch((error: unknown) => {
         if (mounted.current) showToast({ kind: 'error', title: 'Deleting session failed', message: sidebarErrorMessage(error, 'The session could not be deleted.') });
       });
@@ -991,7 +995,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
       capabilities?.clone ? { key: 'clone', label: sessionActionTooltip(session, 'Clone session'), ariaLabel: `Clone ${session.title}`, icon: Copy, disabled: sessionActionDisabled(session), onClick: () => void runSessionAction(session, 'clone') } : null,
       capabilities?.compact ? { key: 'compact', label: sessionActionTooltip(session, 'Compact session context'), ariaLabel: `Compact ${session.title}`, icon: Shrink, disabled: sessionActionDisabled(session), onClick: () => void runSessionAction(session, 'compact') } : null,
       { key: 'rename', label: operationUnavailableReason ?? 'Rename session', ariaLabel: `Rename ${session.title}`, icon: Pencil, disabled: replacementBusy, onClick: () => beginRename(session) },
-      { key: 'delete', label: sessionActionTooltip(session, session.active ? 'Switch to another session before deleting this one' : 'Delete session'), ariaLabel: `Delete ${session.title}`, icon: Trash2, disabled: session.active || sessionActionDisabled(session), onClick: () => setConfirmingDeleteId(session.id), className: 'session-delete-button', danger: true },
+      { key: 'delete', label: operationUnavailableReason ?? (session.active ? 'Switch to another session before deleting this one' : 'Delete session'), ariaLabel: `Delete ${session.title}`, icon: Trash2, disabled: session.active || replacementBusy, onClick: () => setConfirmingDeleteId(session.id), className: 'session-delete-button', danger: true },
     ].filter((action): action is SessionAction => action !== null);
     return (
       <div className={`session-row-actions${inMenu ? ' session-row-actions--menu' : ''}`} role={inMenu ? 'menu' : undefined}>
@@ -1008,6 +1012,15 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
       </div>
     );
   };
+  const renderForeignSessionActions = (session: SessionSummary) => (
+    <div className="session-row-actions session-row-actions--menu" role="menu">
+      <AppTooltip content="Delete session" wrapTrigger>
+        <button type="button" role="menuitem" className="session-delete-button" aria-label={`Delete ${session.title}`} onClick={() => setConfirmingDeleteId(session.id)}>
+          <Trash2 size={13} aria-hidden="true" />
+        </button>
+      </AppTooltip>
+    </div>
+  );
   const renderSessionRow = (session: SessionSummary) => {
     if (confirmingDeleteId === session.id) {
       return (
@@ -1123,11 +1136,11 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
   // folder gains or loses focus. Active-folder rows additionally carry drag
   // reordering and a hover-only actions menu.
   const renderCompactSessionRow = (session: SessionSummary, project: KnownProject, asActiveFolder: boolean) => {
-    if (asActiveFolder && confirmingDeleteId === session.id) {
+    if (confirmingDeleteId === session.id) {
       return (
         <div className="session-delete-confirm session-delete-confirm--compact" key={session.id}>
           <span>Delete this session?</span>
-          <AppTooltip content="Delete session" wrapTrigger triggerClassName="session-delete-confirm-button session-delete-confirm-button--danger"><button type="button" onClick={() => deleteSession(session.id)}>Delete</button></AppTooltip>
+          <AppTooltip content="Delete session" wrapTrigger triggerClassName="session-delete-confirm-button session-delete-confirm-button--danger"><button type="button" onClick={() => deleteSession(session.id, asActiveFolder ? undefined : project.path)}>Delete</button></AppTooltip>
           <AppTooltip content="Cancel deletion" wrapTrigger triggerClassName="session-delete-confirm-button"><button type="button" onClick={() => setConfirmingDeleteId(null)}>Cancel</button></AppTooltip>
         </div>
       );
@@ -1173,20 +1186,18 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
             <span className="session-attention-dot session-attention-dot--preview" data-attention={session.attention} role="img" aria-label={attentionLabels[session.attention]} />
           </AppTooltip>
         )}
-        {asActiveFolder && (
-          <Popover.Root>
-            <AppTooltip content="Session actions">
-              <Popover.Trigger asChild>
-                <button className="session-menu-trigger" type="button" aria-label={`Actions for ${session.title}`}><MoreHorizontal size={14} /></button>
-              </Popover.Trigger>
-            </AppTooltip>
-            <Popover.Portal>
-              <Popover.Content className="session-action-menu" side="top" align="end" sideOffset={6} onOpenAutoFocus={(event) => event.preventDefault()}>
-                {renderSessionActions(session, true)}
-              </Popover.Content>
-            </Popover.Portal>
-          </Popover.Root>
-        )}
+        <Popover.Root>
+          <AppTooltip content="Session actions">
+            <Popover.Trigger asChild>
+              <button className="session-menu-trigger" type="button" aria-label={`Actions for ${session.title}`}><MoreHorizontal size={14} /></button>
+            </Popover.Trigger>
+          </AppTooltip>
+          <Popover.Portal>
+            <Popover.Content className="session-action-menu" side="top" align="end" sideOffset={6} onOpenAutoFocus={(event) => event.preventDefault()}>
+              {asActiveFolder ? renderSessionActions(session, true) : renderForeignSessionActions(session)}
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
       </div>
     );
   };

@@ -353,7 +353,7 @@ describe('Sidebar sessions', () => {
     expect(screen.getByRole('button', { name: 'Create an isolated Git worktree session from First' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Clone First' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Clone Second' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Delete Second' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete Second' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Rename Second' })).toBeEnabled();
 
     await user.click(screen.getByRole('button', { name: 'Clone First' }));
