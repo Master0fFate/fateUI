@@ -5,7 +5,7 @@ import { Children, createContext, isValidElement, memo, useCallback, useContext,
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { normalizeBrowserWebUrl } from '../../../shared/contracts/browser';
-import type { RuntimeImage } from '../../../shared/contracts/ipc';
+import type { HistoryImagesInput, RuntimeImage } from '../../../shared/contracts/ipc';
 import { AppTooltip } from '../../components/AppTooltip';
 import { writeClipboardText } from '../../lib/clipboard';
 import { AgentMentionLink, remarkAgentMentions } from './AgentMention';
@@ -357,6 +357,29 @@ function MermaidAwarePre({ children }: { children?: ReactNode }) {
   return <pre>{children}</pre>;
 }
 
+export function useHistoryImages(
+  sessionId: string | null | undefined,
+  kind: HistoryImagesInput['kind'],
+  id: string,
+  images: RuntimeImage[] | undefined,
+  deferredImages: number | undefined,
+  wanted = true,
+): RuntimeImage[] | undefined {
+  const [loaded, setLoaded] = useState<RuntimeImage[]>();
+  const shouldLoad = Boolean(wanted && deferredImages && !images?.length);
+  useEffect(() => {
+    const api = getDesktopApiOptional();
+    if (!shouldLoad || !sessionId || !api) return;
+    let current = true;
+    api.loadHistoryImages({ sessionId, kind, id }).then((result) => { if (current) setLoaded(result); }, () => undefined);
+    return () => {
+      current = false;
+      setLoaded(undefined);
+    };
+  }, [shouldLoad, sessionId, kind, id]);
+  return images?.length ? images : loaded;
+}
+
 export function MessageImages({ images }: { images: RuntimeImage[] }) {
   return <>{images.map((image, index) => (
     <ChatImage
@@ -381,7 +404,7 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({ text, images 
       >
         {text}
       </ReactMarkdown>
-      <MessageImages images={images} />
+      {images.length > 0 ? <div className="chat-image-grid"><MessageImages images={images} /></div> : null}
     </div>
   );
 });

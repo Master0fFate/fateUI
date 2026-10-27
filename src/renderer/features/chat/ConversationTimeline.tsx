@@ -1,4 +1,4 @@
-import { getFateApi, getFateApiOptional } from '../../platform/api';
+import { getDesktopApiOptional, getFateApi, getFateApiOptional } from '../../platform/api';
 import { Brain, Check, CircleAlert, Copy, GitFork, PackageCheck, PackageOpen, Plug, RotateCcw } from 'lucide-react';
 import { useLearningStore } from '../learning/learningStore';
 import { memo, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -7,10 +7,10 @@ import { useShallow } from 'zustand/react/shallow';
 import { AppTooltip } from '../../components/AppTooltip';
 import { writeClipboardText } from '../../lib/clipboard';
 import { useAgentLabel } from '../../stores/agentsStore';
-import { type TimelineEntity, type ToolExecution, useRuntimeStore } from '../../stores/runtimeStore';
+import { findHistoryBoundary, type TimelineEntity, type ToolExecution, useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { MentionText } from './AgentMention';
-import { AssistantMarkdown, ConversationImageViewerProvider } from './RichMessageContent';
+import { AssistantMarkdown, ConversationImageViewerProvider, useHistoryImages } from './RichMessageContent';
 import { ToolCard } from './ToolCard';
 import { type DetailExpansionCommand, detailSessionKey, useDetailExpansion } from './detailExpansion';
 import { useSkinComponents } from '../../skins/SkinProvider';
@@ -68,8 +68,9 @@ export function forkEntryForMessage(messageId: string, messageOrder: readonly st
 
 export const MessageRow = memo(function MessageRow({ messageId }: { messageId: string }) {
   const { ActionContent, MessageHeading } = useSkinComponents();
-  const { message, streaming, streamingThisMessage, modelName, agentId, forkPoints, forkMessageOrder, forkCapable, sessionOperation } = useRuntimeStore(useShallow((state) => ({
+  const { message, sessionId, streaming, streamingThisMessage, modelName, agentId, forkPoints, forkMessageOrder, forkCapable, sessionOperation } = useRuntimeStore(useShallow((state) => ({
     message: state.messagesById[messageId],
+    sessionId: state.runtime.sessionId,
     streaming: state.runtime.streaming,
     streamingThisMessage: state.runtime.streaming && state.messageOrder.at(-1) === messageId,
     modelName: state.runtime.model?.name ?? 'Assistant',
@@ -83,8 +84,9 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
   const [forking, setForking] = useState(false);
-  if (!message || (message.role === 'assistant' && !message.text && !message.images?.length)) return null;
-  const richContent = message.role === 'assistant' || message.role === 'system' || Boolean(message.images?.length);
+  const images = useHistoryImages(sessionId, 'message', messageId, message?.images, message?.deferredImages);
+  if (!message || (message.role === 'assistant' && !message.text && !message.images?.length && !message.deferredImages)) return null;
+  const richContent = message.role === 'assistant' || message.role === 'system' || Boolean(message.images?.length || message.deferredImages);
   const forkEntryId = forkEntryForMessage(messageId, forkMessageOrder, useRuntimeStore.getState().messagesById, forkPoints);
   const canFork = Boolean(forkEntryId && forkCapable && !streaming && !sessionOperation);
   const label = message.role === 'user' ? 'You' : message.role === 'assistant' ? agentName ?? modelName : message.role === 'system' ? 'System' : 'Tool result';
@@ -146,8 +148,8 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
     <div className={`chat-message-row chat-message-row--${message.role}`}>
       <article className={`chat-message chat-message--${message.role}${message.error ? ' chat-message--error' : ''}`}>
         <MessageHeading role={message.role} label={label} />
-        {richContent && !(message.role === 'assistant' && streamingThisMessage && !message.images?.length)
-          ? <AssistantMarkdown text={message.text} images={message.images} />
+        {richContent && !(message.role === 'assistant' && streamingThisMessage && !images?.length)
+          ? <AssistantMarkdown text={message.text} images={images} />
           : <p className="message-plain"><MentionText text={message.text} /></p>}
       </article>
       <footer className="message-footer">
@@ -263,6 +265,19 @@ export function coalesceSubagentWaitPolls(
 const scrollerIsAtBottom = (scroller: HTMLElement) =>
   scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= BOTTOM_THRESHOLD_PX;
 
+const FIRST_ITEM_INDEX = 1_000_000_000;
+
+function headShift(previous: readonly string[], next: readonly string[], isHeader: (id: string) => boolean): number {
+  const anchorIndex = previous.findIndex((id) => !isHeader(id));
+  if (anchorIndex >= 0 && next[anchorIndex] === previous[anchorIndex]) return 0;
+  const nextIndexById = new Map(next.map((id, index) => [id, index]));
+  for (let index = 0; index < previous.length; index += 1) {
+    const nextIndex = nextIndexById.get(previous[index]!);
+    if (nextIndex !== undefined && !isHeader(previous[index]!)) return nextIndex - index;
+  }
+  return 0;
+}
+
 const TimelineRow = memo(function TimelineRow({ id, waitPollCount, expansionCommand }: { id: string; waitPollCount?: number | undefined; expansionCommand: DetailExpansionCommand }) {
   const entry = useRuntimeStore((state) => state.timelineById[id]);
   if (!entry) return null;
@@ -324,6 +339,22 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
   const expansionCommand = requestedExpansion?.sessionKey === timelineSessionKey
     ? requestedExpansion
     : { sessionKey: timelineSessionKey, revision: 0, expanded: false };
+  const headRef = useRef({ sessionKey: timelineSessionKey, order: displayOrder, firstItemIndex: FIRST_ITEM_INDEX });
+  if (headRef.current.order !== displayOrder || headRef.current.sessionKey !== timelineSessionKey) {
+    const previous = headRef.current;
+    const { messagesById } = useRuntimeStore.getState();
+    const isHeader = (id: string) => {
+      const entry = timelineById[id];
+      return entry?.kind === 'message' && (messagesById[entry.messageId]?.timelinePosition ?? 0) < 0;
+    };
+    headRef.current = {
+      sessionKey: timelineSessionKey,
+      order: displayOrder,
+      firstItemIndex: previous.sessionKey === timelineSessionKey ? previous.firstItemIndex - headShift(previous.order, displayOrder, isHeader) : FIRST_ITEM_INDEX,
+    };
+  }
+  const { firstItemIndex } = headRef.current;
+  const historyRequestRef = useRef(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const positionedSessionRef = useRef<string | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
@@ -409,6 +440,23 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
     // Virtuoso and browser scroll anchoring both emit native scroll events while
     // a growing row is measured. Only explicit input may unpin the conversation.
     if (atBottom || userScrollIntentRef.current) pinnedToBottomRef.current = atBottom;
+  }, []);
+
+  const handleAtBottomChange = useCallback((atBottom: boolean) => {
+    updatePinnedState();
+    if (atBottom) useRuntimeStore.getState().releaseHistory();
+  }, [updatePinnedState]);
+
+  const loadOlderHistory = useCallback(() => {
+    const { runtime, messagesById } = useRuntimeStore.getState();
+    const sessionId = runtime.sessionId;
+    const before = findHistoryBoundary(messagesById)?.historyOmitted;
+    const api = getDesktopApiOptional();
+    if (!sessionId || before === undefined || !api || historyRequestRef.current) return;
+    historyRequestRef.current = true;
+    void api.loadHistoryPage({ sessionId, before })
+      .then((page) => useRuntimeStore.getState().prependHistory(sessionId, before, page), () => undefined)
+      .finally(() => { historyRequestRef.current = false; });
   }, []);
 
   const bindScroller = useCallback((target: HTMLElement | Window | null) => {
@@ -595,14 +643,17 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
         ref={virtuosoRef}
         className="conversation-virtuoso"
         data={displayOrder}
+        firstItemIndex={firstItemIndex}
         computeItemKey={(_index, id) => id}
         itemContent={(index, id) => {
-          const previousEntry = index > 0 ? timelineById[displayOrder[index - 1] ?? ''] : undefined;
+          const position = index - firstItemIndex;
+          const previousEntry = position > 0 ? timelineById[displayOrder[position - 1] ?? ''] : undefined;
           return <div className="timeline-row" data-entry-kind={timelineById[id]?.kind} data-follows-message={followsMessage(previousEntry) || undefined}><TimelineRow id={id} waitPollCount={waitPollCountById[id]} expansionCommand={expansionCommand} /></div>;
         }}
         components={{ Footer: ConversationFooter }}
         scrollerRef={bindScroller}
-        atBottomStateChange={updatePinnedState}
+        atBottomStateChange={handleAtBottomChange}
+        startReached={loadOlderHistory}
         totalListHeightChanged={handleListHeightChange}
         atBottomThreshold={BOTTOM_THRESHOLD_PX}
         initialTopMostItemIndex={hasHistoricalTimeline && visibleOrder.length > 0 ? { index: 'LAST', align: 'end', behavior: 'auto' } : undefined}

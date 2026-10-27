@@ -4,7 +4,7 @@ import type { RuntimeTool, SubagentRun } from '../../../shared/contracts/ipc';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useSkinComponents } from '../../skins/SkinProvider';
-import { MessageImages } from './RichMessageContent';
+import { MessageImages, useHistoryImages } from './RichMessageContent';
 import { previewHotPathText, shouldAutoShowRunningOutput } from './hotPathBudgets';
 import { type DetailExpansionCommand, useDetailExpansion } from './detailExpansion';
 
@@ -46,6 +46,8 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
     card.focus({ preventScroll: true });
     if (document.activeElement === card) clearFlightDeckJump(jump.nonce);
   }, [clearFlightDeckJump, focused, jump]);
+  const showImages = expanded || tool?.name === 'generate_image';
+  const loadedImages = useHistoryImages(sessionId, 'tool', toolCallId, tool?.images, tool?.deferredImages, showImages);
   if (!tool) return null;
   const isSubagentTool = /^subagent(?:_|$)/u.test(tool.name);
   const presentedStatus = isSubagentTool
@@ -58,7 +60,7 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
   const ariaStatus = isSubagentTool && presentedStatus === 'succeeded' ? 'completed' : presentedStatus;
   const childIds = [...new Set(tool.subagentRunIds ?? [])];
   const hasChildLink = childIds.length > 0 || tool.name === 'agent_workflow';
-  const images = tool.images?.length && (expanded || tool.name === 'generate_image') ? tool.images : null;
+  const images = showImages && loadedImages?.length ? loadedImages : null;
 
   return (
     <article ref={cardRef} tabIndex={-1} data-flight-focus={focused || undefined} className={`tool-card tool-card--${presentedStatus}${images ? ' tool-card--with-images' : ''}${compact ? ' tool-card--compact' : ''}`} aria-label={`${tool.name} tool ${ariaStatus}`}>

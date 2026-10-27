@@ -54,7 +54,7 @@ export class WorkspaceSnapshotService {
     let clippedItems = 0;
     for (const message of state.messages.slice(-5_000)) {
       const clipped = clipUtf8(message.text);
-      const hasMedia = Boolean(message.images?.length);
+      const hasMedia = Boolean(message.images?.length || message.deferredImages);
       media ||= hasMedia;
       clippedItems += Number(clipped.clipped || Boolean(message.reasoning) || hasMedia);
       items.push({ kind: 'message', id: text(message.id, 500), role: message.role === 'tool' ? 'system' : message.role,
@@ -63,7 +63,7 @@ export class WorkspaceSnapshotService {
     }
     for (const tool of (state.tools ?? []).slice(-5_000)) {
       const clipped = clipUtf8(tool.output);
-      const hasMedia = Boolean(tool.images?.length);
+      const hasMedia = Boolean(tool.images?.length || tool.deferredImages);
       media ||= hasMedia;
       clippedItems += Number(clipped.clipped || tool.outputTruncated || hasMedia);
       items.push({ kind: 'tool', id: text(tool.id, 500), name: text(tool.name), status: tool.status,

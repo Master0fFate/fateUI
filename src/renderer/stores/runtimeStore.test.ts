@@ -312,7 +312,7 @@ describe('runtimeStore event reducer', () => {
       { type: 'message.completed', messageId: 'newer-image', role: 'assistant', text: '', images: [{ data: 'b', mimeType: 'image/png' }], timestamp: 2 },
     ]);
     expect(useRuntimeStore.getState().messagesById['older-image']?.images).toBeUndefined();
-    expect(useRuntimeStore.getState().messagesById['older-image']?.text).toMatch(/omitted/i);
+    expect(useRuntimeStore.getState().messagesById['older-image']?.deferredImages).toBe(1);
     expect(useRuntimeStore.getState().messagesById['newer-image']?.images).toHaveLength(1);
   });
 
@@ -330,7 +330,7 @@ describe('runtimeStore event reducer', () => {
 
     const state = useRuntimeStore.getState();
     expectImagePayloadAbsent(olderPayload);
-    expect(olderKind === 'message' ? state.messagesById.older?.text : state.toolsById.older?.output).toMatch(/omitted/i);
+    expect((olderKind === 'message' ? state.messagesById.older : state.toolsById.older)?.deferredImages).toBe(1);
     expect((newerKind === 'message' ? state.messagesById.newer : state.toolsById.newer)?.images?.[0]?.data).toBe('b');
     expectRuntimeHistoryReferences();
   });

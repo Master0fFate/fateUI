@@ -164,13 +164,16 @@ interface WorkspaceStore {
   resolveReviewPath: () => Promise<void>;
 }
 
+const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']+': (?:Error: )?/u;
+
 export function messageOf(error: unknown): string {
   if (!(error instanceof Error)) return 'The project operation failed.';
+  const message = error.message.replace(REMOTE_ERROR_PREFIX, '');
   try {
-    const parsed = JSON.parse(error.message) as { message?: string };
-    return parsed.message ?? error.message;
+    const parsed = JSON.parse(message) as { message?: string };
+    return parsed.message ?? message;
   } catch {
-    return error.message;
+    return message;
   }
 }
 

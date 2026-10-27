@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppError, PiEvent, RuntimeMessage, RuntimeState, RuntimeTool, SubagentRun } from '../../shared/contracts/ipc';
+import type { AppError, HistoryPage, PiEvent, RuntimeMessage, RuntimeState, RuntimeTool, SubagentRun } from '../../shared/contracts/ipc';
 import type { AgentTeam, AgentTeamEnvelope, AgentTeamNode, AgentTeamTask } from '../../shared/contracts/multiAgent';
 import { applySubagentChildEvent, boundSubagentRun, boundSubagentRuns } from '../../shared/subagents';
 import type { Capability, WireResultOf } from '../../shared/protocol/methods';
@@ -172,6 +172,7 @@ interface RuntimeStore extends WorkspaceViewState {
   timelineOrder: string[];
   visibleTimelineOrder: string[];
   visibleTimelineIds: Set<string>;
+  historyExpanded: boolean;
   messagesVersion: number;
   reasoningVersion: number;
   toolsVersion: number;
@@ -193,6 +194,8 @@ interface RuntimeStore extends WorkspaceViewState {
   completeSessionSwitch: (generation: number, state: RuntimeState) => boolean;
   cancelSessionSwitch: (generation: number, state: RuntimeState) => boolean;
   applyEvents: (events: PiEvent[]) => void;
+  prependHistory: (sessionId: string, before: number, page: HistoryPage) => void;
+  releaseHistory: () => void;
 }
 
 function boundOutput(output: string): { output: string; outputTruncated: boolean } {
@@ -263,8 +266,8 @@ function enforceLiveImageBudget(
         retainedCharacters += characters;
       } else {
         if (messagesById === messages) messagesById = { ...messagesById };
-        const { images: _images, ...withoutImages } = message;
-        messagesById[messageId] = { ...withoutImages, text: message.text || '[Image omitted from older live history to keep memory bounded.]' };
+        const { images, ...withoutImages } = message;
+        messagesById[messageId] = { ...withoutImages, deferredImages: images!.length };
       }
     } else if (id.startsWith('tool:')) {
       const toolId = id.slice('tool:'.length);
@@ -277,8 +280,8 @@ function enforceLiveImageBudget(
         retainedCharacters += characters;
       } else {
         if (toolsById === tools) toolsById = { ...toolsById };
-        const { images: _images, ...withoutImages } = tool;
-        toolsById[toolId] = { ...withoutImages, output: tool.output || '[Image omitted from older live history to keep memory bounded.]' };
+        const { images, ...withoutImages } = tool;
+        toolsById[toolId] = { ...withoutImages, deferredImages: images!.length };
       }
     }
   }
@@ -303,10 +306,102 @@ function indexedAgentTeams(teams: AgentTeam[] = []) {
   };
 }
 
+interface TimelineIndexes {
+  messagesById: Record<string, RuntimeMessage>;
+  messageOrder: string[];
+  reasoningByMessageId: Record<string, string>;
+  toolsById: Record<string, ToolExecution>;
+  toolOrder: string[];
+  timelineById: Record<string, TimelineEntity>;
+  timelineOrder: string[];
+}
+
+function historyBoundaryMessage(id: string, omittedEntries: number): RuntimeMessage {
+  return {
+    id,
+    role: 'system',
+    text: `${omittedEntries.toLocaleString()} earlier history entries. Scroll up to load them.`,
+    timestamp: 0,
+    timelinePosition: -1,
+    historyOmitted: omittedEntries,
+  };
+}
+
+export function findHistoryBoundary(messagesById: Record<string, RuntimeMessage>): RuntimeMessage | undefined {
+  return Object.values(messagesById).find((message) => message.historyOmitted !== undefined);
+}
+
+function evictOldestTimeline(view: TimelineIndexes): Pick<TimelineIndexes, 'messageOrder' | 'toolOrder' | 'timelineOrder'> {
+  const { messagesById, reasoningByMessageId, toolsById, timelineById, timelineOrder } = view;
+  const firstEntry = timelineById[timelineOrder[0]!];
+  const firstMessage = firstEntry?.kind === 'message' ? messagesById[firstEntry.messageId] : undefined;
+  const conventionalBoundary = messagesById['history-boundary-renderer'];
+  const existingBoundary = firstMessage?.historyOmitted !== undefined
+    ? firstMessage
+    : conventionalBoundary?.historyOmitted !== undefined
+      ? conventionalBoundary
+      : findHistoryBoundary(messagesById);
+  const boundaryMessageId = existingBoundary?.id ?? 'history-boundary-renderer';
+  const boundaryTimelineId = `message:${boundaryMessageId}`;
+  let candidates: string[];
+  if (timelineOrder[0] === boundaryTimelineId) candidates = timelineOrder.slice(1);
+  else if (existingBoundary) candidates = timelineOrder.filter((id) => id !== boundaryTimelineId);
+  else candidates = timelineOrder;
+  const position = (id: string) => {
+    const entry = timelineById[id];
+    if (entry?.kind === 'tool') return toolsById[entry.toolCallId]?.timelinePosition;
+    return entry?.kind === 'message' || entry?.kind === 'reasoning' ? messagesById[entry.messageId]?.timelinePosition : undefined;
+  };
+  let evictedCount = Math.max(0, candidates.length - (MAX_LIVE_TIMELINE_ENTITIES - 1));
+  const lastEvicted = evictedCount > 0 ? position(candidates[evictedCount - 1]!) : undefined;
+  if (lastEvicted !== undefined) {
+    while (evictedCount < candidates.length && Math.floor(position(candidates[evictedCount]!) ?? Infinity) <= Math.floor(lastEvicted)) evictedCount += 1;
+  }
+  const evictedIds = candidates.slice(0, evictedCount);
+  let cursor = existingBoundary?.historyOmitted ?? 0;
+  let unplaced = 0;
+  for (const id of evictedIds) {
+    const evictedPosition = position(id);
+    if (evictedPosition === undefined) unplaced += 1;
+    else cursor = Math.max(cursor, Math.floor(evictedPosition) + 1);
+  }
+  messagesById[boundaryMessageId] = historyBoundaryMessage(boundaryMessageId, cursor + unplaced);
+  timelineById[boundaryTimelineId] = { id: boundaryTimelineId, kind: 'message', messageId: boundaryMessageId, timestamp: 0 };
+
+  const removedMessageIds = new Set<string>();
+  const removedToolIds = new Set<string>();
+  for (const id of evictedIds) {
+    const entry = timelineById[id];
+    if (!entry) continue;
+    delete timelineById[id];
+    if (entry.kind === 'message' || entry.kind === 'reasoning') removedMessageIds.add(entry.messageId);
+    else if (entry.kind === 'tool') removedToolIds.add(entry.toolCallId);
+  }
+  for (const id of removedMessageIds) {
+    const messageRetained = Boolean(timelineById[`message:${id}`] || timelineById[`reasoning:${id}`]);
+    if (!messageRetained) delete messagesById[id];
+    if (!timelineById[`reasoning:${id}`]) delete reasoningByMessageId[id];
+  }
+  for (const id of removedToolIds) {
+    if (!timelineById[`tool:${id}`]) delete toolsById[id];
+  }
+  const messageOrder = view.messageOrder.includes(boundaryMessageId) ? view.messageOrder : [boundaryMessageId, ...view.messageOrder];
+  return {
+    messageOrder: messageOrder.filter((id) => Boolean(messagesById[id])),
+    toolOrder: view.toolOrder.filter((id) => Boolean(toolsById[id])),
+    timelineOrder: [boundaryTimelineId, ...candidates.slice(evictedCount)],
+  };
+}
+
+function visibleAfterEviction(timelineOrder: readonly string[], visibleTimelineIds: ReadonlySet<string>) {
+  const visibleTimelineOrder = timelineOrder.filter((id, index) => index === 0 || visibleTimelineIds.has(id));
+  return { visibleTimelineOrder, visibleTimelineIds: new Set(visibleTimelineOrder) };
+}
+
 function indexed(messages: RuntimeMessage[], tools: RuntimeTool[] = []) {
   let messagesById = Object.fromEntries(messages.map((message) => [message.id, message]));
   let messageOrder = messages.map((message) => message.id);
-  let reasoningByMessageId = Object.fromEntries(
+  const reasoningByMessageId = Object.fromEntries(
     messages.flatMap((message) => message.reasoning ? [[message.id, message.reasoning]] : []),
   );
   let toolsById = Object.fromEntries(tools.map((tool) => [tool.id, tool]));
@@ -332,48 +427,7 @@ function indexed(messages: RuntimeMessage[], tools: RuntimeTool[] = []) {
   ordered.sort((left, right) => left.position - right.position || left.rank - right.rank);
   let timelineOrder = ordered.map((item) => item.id);
   if (timelineOrder.length > MAX_LIVE_TIMELINE_ENTITIES) {
-    const existingBoundary = messages.find((message) => message.historyOmitted !== undefined);
-    const boundaryMessageId = existingBoundary?.id ?? 'history-boundary-renderer';
-    const boundaryTimelineId = `message:${boundaryMessageId}`;
-    const recent = timelineOrder.filter((id) => id !== boundaryTimelineId).slice(-(MAX_LIVE_TIMELINE_ENTITIES - 1));
-    const retainedTimeline = new Set([boundaryTimelineId, ...recent]);
-    const newlyOmitted = timelineOrder.reduce((total, id) => {
-      const entry = timelineById[id];
-      return total + (id !== boundaryTimelineId && entry && !retainedTimeline.has(id) ? 1 : 0);
-    }, 0);
-    const omitted = (existingBoundary?.historyOmitted ?? 0) + newlyOmitted;
-    if (omitted > 0) {
-      const boundary: RuntimeMessage = {
-        id: boundaryMessageId,
-        role: 'system',
-        text: `${omitted.toLocaleString()} earlier conversation items were omitted from this view to keep Fate UI responsive.`,
-        timestamp: 0,
-        timelinePosition: -1,
-        historyOmitted: omitted,
-      };
-      messagesById[boundaryMessageId] = boundary;
-      if (!messageOrder.includes(boundaryMessageId)) messageOrder.unshift(boundaryMessageId);
-      timelineById[boundaryTimelineId] = { id: boundaryTimelineId, kind: 'message', messageId: boundaryMessageId, timestamp: 0 };
-      timelineOrder = [boundaryTimelineId, ...recent];
-    } else {
-      timelineOrder = timelineOrder.slice(-MAX_LIVE_TIMELINE_ENTITIES);
-      retainedTimeline.clear();
-      for (const id of timelineOrder) retainedTimeline.add(id);
-    }
-    for (const id of Object.keys(timelineById)) if (!retainedTimeline.has(id)) delete timelineById[id];
-    const retainedMessages = new Set<string>();
-    const retainedReasoning = new Set<string>();
-    const retainedTools = new Set<string>();
-    for (const entry of Object.values(timelineById)) {
-      if (entry.kind === 'message') retainedMessages.add(entry.messageId);
-      else if (entry.kind === 'reasoning') { retainedMessages.add(entry.messageId); retainedReasoning.add(entry.messageId); }
-      else if (entry.kind === 'tool') retainedTools.add(entry.toolCallId);
-    }
-    messageOrder = messageOrder.filter((id) => retainedMessages.has(id));
-    messagesById = Object.fromEntries(messageOrder.flatMap((id) => messagesById[id] ? [[id, messagesById[id]!]] : []));
-    reasoningByMessageId = Object.fromEntries(Object.entries(reasoningByMessageId).filter(([id]) => retainedReasoning.has(id)));
-    toolOrder = toolOrder.filter((id) => retainedTools.has(id));
-    toolsById = Object.fromEntries(toolOrder.flatMap((id) => toolsById[id] ? [[id, toolsById[id]!]] : []));
+    ({ messageOrder, toolOrder, timelineOrder } = evictOldestTimeline({ messagesById, messageOrder, reasoningByMessageId, toolsById, toolOrder, timelineById, timelineOrder }));
   }
   ({ messagesById, toolsById } = enforceLiveImageBudget(messagesById, toolsById, timelineOrder));
   const visibleTimelineOrder = timelineOrder.filter((id) => {
@@ -381,12 +435,12 @@ function indexed(messages: RuntimeMessage[], tools: RuntimeTool[] = []) {
     if (!entry) return false;
     if (entry.kind === 'message') {
       const message = messagesById[entry.messageId];
-      return Boolean(message && (message.role !== 'assistant' || message.text || message.images?.length));
+      return Boolean(message && (message.role !== 'assistant' || message.text || message.images?.length || message.deferredImages));
     }
     if (entry.kind === 'reasoning') return Boolean(reasoningByMessageId[entry.messageId]);
     return true;
   });
-  return { messagesById, messageOrder, reasoningByMessageId, toolsById, toolOrder, timelineById, timelineOrder, visibleTimelineOrder, visibleTimelineIds: new Set(visibleTimelineOrder) };
+  return { messagesById, messageOrder, reasoningByMessageId, toolsById, toolOrder, timelineById, timelineOrder, visibleTimelineOrder, visibleTimelineIds: new Set(visibleTimelineOrder), historyExpanded: false };
 }
 
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
@@ -820,6 +874,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     let timelineOrder = current.timelineOrder;
     let visibleTimelineOrder = current.visibleTimelineOrder;
     let visibleTimelineIds = current.visibleTimelineIds;
+    let historyExpanded = current.historyExpanded;
     let queue = current.queue;
     let lastError = current.lastError;
     let sequence = current.sequence;
@@ -944,7 +999,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
           && (runtime.sessionId === null ? messageOrder.length > 0 || toolOrder.length > 0 : runtime.sessionId === event.state.sessionId);
         if (event.messagesIncluded || !sameSession) {
           runtime = event.state;
-          ({ messagesById, messageOrder, reasoningByMessageId, toolsById, toolOrder, timelineById, timelineOrder, visibleTimelineOrder, visibleTimelineIds } = indexed(event.state.messages, event.state.tools));
+          ({ messagesById, messageOrder, reasoningByMessageId, toolsById, toolOrder, timelineById, timelineOrder, visibleTimelineOrder, visibleTimelineIds, historyExpanded } = indexed(event.state.messages, event.state.tools));
           runtimeHistoryChanged = true;
           messagesChanged = true;
           reasoningChanged = true;
@@ -1167,65 +1222,15 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       messagesChanged = true;
       toolsChanged = true;
     }
-    if (timelineOrder.length > MAX_LIVE_TIMELINE_ENTITIES) {
+    if (!historyExpanded && timelineOrder.length > MAX_LIVE_TIMELINE_ENTITIES) {
       runtimeHistoryChanged = true;
       messagesChanged = true;
       reasoningChanged = true;
       toolsChanged = true;
       timelineChanged = true;
       waitPollChanged = true;
-      const firstEntry = timelineById[timelineOrder[0]!];
-      const firstMessage = firstEntry?.kind === 'message' ? messagesById[firstEntry.messageId] : undefined;
-      const conventionalBoundary = messagesById['history-boundary-renderer'];
-      const existingBoundary = firstMessage?.historyOmitted !== undefined
-        ? firstMessage
-        : conventionalBoundary?.historyOmitted !== undefined
-          ? conventionalBoundary
-          : Object.values(messagesById).find((message) => message.historyOmitted !== undefined);
-      const boundaryMessageId = existingBoundary?.id ?? 'history-boundary-renderer';
-      const boundaryTimelineId = `message:${boundaryMessageId}`;
-      let candidates: string[];
-      if (timelineOrder[0] === boundaryTimelineId) candidates = timelineOrder.slice(1);
-      else if (existingBoundary) candidates = timelineOrder.filter((id) => id !== boundaryTimelineId);
-      else candidates = timelineOrder;
-      const evictedCount = Math.max(0, candidates.length - (MAX_LIVE_TIMELINE_ENTITIES - 1));
-      const evictedIds = candidates.slice(0, evictedCount);
-      const recent = candidates.slice(evictedCount);
-      const omitted = (existingBoundary?.historyOmitted ?? 0) + evictedIds.length;
-      const boundary: RuntimeMessage = {
-        id: boundaryMessageId,
-        role: 'system',
-        text: `${omitted.toLocaleString()} earlier conversation items were omitted from this view to keep Fate UI responsive.`,
-        timestamp: 0,
-        timelinePosition: -1,
-        historyOmitted: omitted,
-      };
-      setMessage(boundaryMessageId, boundary);
-      if (!messageOrder.includes(boundaryMessageId)) messageOrder = [boundaryMessageId, ...messageOrder];
-      setTimeline({ id: boundaryTimelineId, kind: 'message', messageId: boundaryMessageId, timestamp: 0 });
-      timelineOrder = [boundaryTimelineId, ...recent];
-
-      const removedMessageIds = new Set<string>();
-      const removedToolIds = new Set<string>();
-      for (const id of evictedIds) {
-        const entry = timelineById[id];
-        if (!entry) continue;
-        delete timelineById[id];
-        if (entry.kind === 'message' || entry.kind === 'reasoning') removedMessageIds.add(entry.messageId);
-        else if (entry.kind === 'tool') removedToolIds.add(entry.toolCallId);
-      }
-      for (const id of removedMessageIds) {
-        const messageRetained = Boolean(timelineById[`message:${id}`] || timelineById[`reasoning:${id}`]);
-        if (!messageRetained) delete messagesById[id];
-        if (!timelineById[`reasoning:${id}`]) delete reasoningByMessageId[id];
-      }
-      for (const id of removedToolIds) {
-        if (!timelineById[`tool:${id}`]) delete toolsById[id];
-      }
-      messageOrder = messageOrder.filter((id) => Boolean(messagesById[id]));
-      toolOrder = toolOrder.filter((id) => Boolean(toolsById[id]));
-      visibleTimelineOrder = timelineOrder.filter((id) => id === boundaryTimelineId || visibleTimelineIds.has(id));
-      visibleTimelineIds = new Set(visibleTimelineOrder);
+      ({ messageOrder, toolOrder, timelineOrder } = evictOldestTimeline({ messagesById, messageOrder, reasoningByMessageId, toolsById, toolOrder, timelineById, timelineOrder }));
+      ({ visibleTimelineOrder, visibleTimelineIds } = visibleAfterEviction(timelineOrder, visibleTimelineIds));
     }
 
     // Snapshot arrays must not retain image/history entities removed from the
@@ -1254,7 +1259,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       runtime, messagesById, messageOrder, reasoningByMessageId, toolsById, toolOrder,
       subagentsById, subagentOrder,
       agentTeamsById, agentTeamOrder, agentNodesById, agentTasksById, agentEnvelopesById,
-      timelineById, timelineOrder, visibleTimelineOrder, visibleTimelineIds,
+      timelineById, timelineOrder, visibleTimelineOrder, visibleTimelineIds, historyExpanded,
       messagesVersion: current.messagesVersion + (messagesChanged ? 1 : 0),
       reasoningVersion: current.reasoningVersion + (reasoningChanged ? 1 : 0),
       toolsVersion: current.toolsVersion + (toolsChanged ? 1 : 0),
@@ -1262,6 +1267,73 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       waitPollVersion: current.waitPollVersion + (waitPollChanged ? 1 : 0),
       subagentRecorderVersion: current.subagentRecorderVersion + (subagentRecorderChanged ? 1 : 0),
       queue, lastError, sequence, timelineSequence, activeCompactionId, pendingSessionSwitch,
+    };
+  }),
+  prependHistory: (sessionId, before, page) => set((current) => {
+    const boundary = findHistoryBoundary(current.messagesById);
+    if (current.source === 'network' || current.runtime.sessionId !== sessionId || page.start >= before || !boundary || boundary.historyOmitted !== before) return current;
+    const older = indexed(page.messages.filter((message) => !current.messagesById[message.id]), page.tools);
+    const boundaryTimelineId = `message:${boundary.id}`;
+    const keepBoundary = page.start > 0;
+    const moved = new Set(older.timelineOrder.filter((id) => current.timelineById[id]));
+    const insertAfterBoundary = (order: readonly string[], boundaryId: string, inserted: readonly string[]) => {
+      const at = order.indexOf(boundaryId);
+      return [...order.slice(0, at + Number(keepBoundary)), ...inserted, ...order.slice(at + 1).filter((id) => !moved.has(id))];
+    };
+    const messagesById = { ...current.messagesById, ...older.messagesById };
+    const timelineById = { ...current.timelineById, ...older.timelineById };
+    const toolsById = { ...current.toolsById };
+    for (const tool of Object.values(older.toolsById)) {
+      const existing = toolsById[tool.id];
+      toolsById[tool.id] = existing
+        ? { ...tool, ...existing, input: existing.input || tool.input, startedAt: tool.startedAt, timelinePosition: tool.timelinePosition }
+        : tool;
+    }
+    if (keepBoundary) messagesById[boundary.id] = historyBoundaryMessage(boundary.id, page.start);
+    else {
+      delete messagesById[boundary.id];
+      delete timelineById[boundaryTimelineId];
+    }
+    const messageOrder = insertAfterBoundary(current.messageOrder, boundary.id, older.messageOrder);
+    const toolOrder = [...older.toolOrder.filter((id) => !current.toolsById[id]), ...current.toolOrder];
+    const timelineOrder = insertAfterBoundary(current.timelineOrder, boundaryTimelineId, older.timelineOrder);
+    const visibleTimelineOrder = insertAfterBoundary(current.visibleTimelineOrder, boundaryTimelineId, older.visibleTimelineOrder);
+    return {
+      runtime: {
+        ...current.runtime,
+        messages: messageOrder.flatMap((id) => messagesById[id] ? [messagesById[id]!] : []),
+        tools: toolOrder.flatMap((id) => toolsById[id] ? [toolsById[id]!] : []),
+      },
+      messagesById, messageOrder, toolsById, toolOrder, timelineById, timelineOrder, visibleTimelineOrder,
+      reasoningByMessageId: { ...current.reasoningByMessageId, ...older.reasoningByMessageId },
+      visibleTimelineIds: new Set(visibleTimelineOrder),
+      historyExpanded: true,
+      messagesVersion: current.messagesVersion + 1,
+      reasoningVersion: current.reasoningVersion + 1,
+      toolsVersion: current.toolsVersion + 1,
+      timelineVersion: current.timelineVersion + 1,
+      waitPollVersion: current.waitPollVersion + 1,
+    };
+  }),
+  releaseHistory: () => set((current) => {
+    if (!current.historyExpanded) return current;
+    if (current.timelineOrder.length <= MAX_LIVE_TIMELINE_ENTITIES) return { historyExpanded: false };
+    const { messagesById, toolsById } = current;
+    const { messageOrder, toolOrder, timelineOrder } = evictOldestTimeline(current);
+    return {
+      runtime: {
+        ...current.runtime,
+        messages: messageOrder.flatMap((id) => messagesById[id] ? [messagesById[id]!] : []),
+        tools: toolOrder.flatMap((id) => toolsById[id] ? [toolsById[id]!] : []),
+      },
+      messageOrder, toolOrder, timelineOrder,
+      ...visibleAfterEviction(timelineOrder, current.visibleTimelineIds),
+      historyExpanded: false,
+      messagesVersion: current.messagesVersion + 1,
+      reasoningVersion: current.reasoningVersion + 1,
+      toolsVersion: current.toolsVersion + 1,
+      timelineVersion: current.timelineVersion + 1,
+      waitPollVersion: current.waitPollVersion + 1,
     };
   }),
 }));
