@@ -19,8 +19,8 @@ import { assertPrivateWindowsAcl } from '../../src/core/storage/WindowsPrivateAc
 import { linkFileOrJunction } from './helpers/platformLinks';
 import { setOtherLocalUsersRead } from './helpers/windowsAcl';
 
-const Identity = defineDoc({ kind: 'fate.workflow.identity', scope: 'session', version: 1, initial: () => ({ workflowId: '', parentSessionId: '', cwd: '' }) });
-const Fence = defineDoc<{ state: 'idle' | 'active' | 'UNKNOWN' }>({ kind: 'fate.execution.fence', scope: 'session', version: 1, initial: () => ({ state: 'idle' }) });
+const Identity = defineDoc({ kind: 'fate.workflow.identity', scope: 'session', version: 1, initial: () => ({ workflowId: '', parentSessionId: '', cwd: '' }), checkpointWhen: () => false });
+const Fence = defineDoc<{ state: 'idle' | 'active' | 'UNKNOWN' }>({ kind: 'fate.execution.fence', scope: 'session', version: 1, initial: () => ({ state: 'idle' }), checkpointWhen: () => false });
 const NeverRun = defineTask<null, { phase: 'pending' }, null>({ name: 'review.never-run', version: 1, initial: () => ({ phase: 'pending' }),
   phases: { pending: async () => { throw new Error('Review must never execute a task.'); } }, abort: async () => { throw new Error('Review must never abort a task.'); } });
 const roots: string[] = [];

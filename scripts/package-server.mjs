@@ -117,14 +117,14 @@ async function walk(directory, prefix = '') {
 
 // The published Pi 1.0 tarballs declare MIT but omit a LICENSE file. Keep the
 // exact tagged upstream terms, not merely their package.json declarations.
-const piLicenseSource = 'https://github.com/earendil-works/pi/blob/71023aec1546d6d677a65669c5665c0927ce0dd0/LICENSE';
+const piLicenseSource = 'https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/LICENSE';
 const piLicenseSha256 = '0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48';
 const piLicenseRoots = ['@earendil-works/chord', '@earendil-works/pi-ai', '@earendil-works/pi-coding-agent', '@earendil-works/pi-durable'];
 
 /** Source-only license closure check; an SDK upgrade must reverify this provenance. */
 export function retainedPiLicenseNotice(sourceNotices, roots) {
   sourceNotices = sourceNotices.replaceAll('\r\n', '\n'); // Windows text checkouts preserve identical terms.
-  for (const name of piLicenseRoots) assert.equal(roots[name], '1.3.0', `Unverified Pi license version: ${name}`);
+  for (const name of piLicenseRoots) assert.equal(roots[name], '1.4.0', `Unverified Pi license version: ${name}`);
   const start = sourceNotices.indexOf('## Pi native runtime\n');
   assert(start >= 0, 'Missing maintained Pi license notice.');
   const next = sourceNotices.indexOf('\n## ', start + 1);
@@ -132,7 +132,7 @@ export function retainedPiLicenseNotice(sourceNotices, roots) {
   assert(section.includes(piLicenseSource), 'Missing exact tagged Pi license provenance.');
   const license = /```text\n([\s\S]*?)\n```/u.exec(section)?.[1]?.trim();
   assert(license && hash(license) === piLicenseSha256, 'Maintained Pi license differs from verified upstream terms.');
-  return `\n## Native Pi 1.3.0 MIT license\n\n${piLicenseRoots.join(', ')}.\n\nVerified upstream source: ${piLicenseSource}\n\nFate's scoped SDK modifications are retained in the accompanying patches.\n\n${license}\n`;
+  return `\n## Native Pi 1.4.0 MIT license\n\n${piLicenseRoots.join(', ')}.\n\nVerified upstream source: ${piLicenseSource}\n\nFate's scoped SDK modifications are retained in the accompanying patches.\n\n${license}\n`;
 }
 
 async function inspectRuntime(stage, projection) {

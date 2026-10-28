@@ -2,9 +2,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Storage } from '@earendil-works/pi-durable';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
+import { CURRENT_SQLITE_SCHEMA_VERSION, SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { OwnerLock, canonicalFuturePath, ownerRecordPath } from '../ownership/OwnerLock';
 import { assertPrivateWindowsAcl, assertPrivateWindowsAcls, withPrivateWindowsAclScope } from '../storage/WindowsPrivateAcl';
+
+export function isSupportedDurableSchemaVersion(version: number | undefined): boolean {
+  return Number.isSafeInteger(version) && version! >= 1 && version! <= CURRENT_SQLITE_SCHEMA_VERSION;
+}
 
 export interface OwnedDurableStorageOptions {
   readonly dataRoot: string;
@@ -179,7 +183,7 @@ async function openOwnedDurableStorageWithinScope(options: OwnedDurableStorageOp
       const expected = new Set(['durable_schema', 'durable_metadata', 'record_ids', 'conversations', 'entries', 'tasks', 'submissions', 'documents', 'document_revisions']);
       if (tables.length !== expected.size || tables.some((table) => !expected.has(table.name))) throw new Error('Native durable SQLite schema mismatch; no migration was performed.');
       const schema = await database.get<{ version: number }>('SELECT version FROM durable_schema WHERE singleton = 1');
-      if (schema?.version !== 1) throw new Error('Native durable SQLite schema version is unsupported; no migration was performed.');
+      if (!isSupportedDurableSchemaVersion(schema?.version)) throw new Error('Native durable SQLite schema version is unsupported; no migration was performed.');
       const metadata = await database.all<{ next_id: string; next_seq: number }>('SELECT next_id, next_seq FROM durable_metadata');
       const nextId = Number(metadata[0]?.next_id);
       const nextSeq = metadata[0]?.next_seq;

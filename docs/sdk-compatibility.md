@@ -2,9 +2,9 @@
 
 ## Current release pin
 
-Fate UI uses matching, exact `1.3.0` pins for `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord`.
+Fate UI uses matching, exact `1.4.0` pins for `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord`.
 
-The upstream source authority is [Pi v1.3.0](https://github.com/earendil-works/pi/releases/tag/v1.3.0), dated **2026-10-15**, at commit [`71023aec1546d6d677a65669c5665c0927ce0dd0`](https://github.com/earendil-works/pi/commit/71023aec1546d6d677a65669c5665c0927ce0dd0). The exact published npm distributions were inspected and their integrity hashes are retained in `pnpm-lock.yaml`. The lockfile also fixes transitive Pi packages to the matching release. Registry `latest` and unreleased source are not version authorities.
+The upstream source authority is [Pi v1.4.0](https://github.com/earendil-works/pi/releases/tag/v1.4.0), dated **2026-10-21**, at commit [`4a080252f06caf63a525d7873c5d94d3c23887e0`](https://github.com/earendil-works/pi/commit/4a080252f06caf63a525d7873c5d94d3c23887e0). The exact published npm distributions were inspected and their integrity hashes are retained in `pnpm-lock.yaml`. The lockfile also fixes transitive Pi packages to the matching release. Registry `latest` and unreleased source are not version authorities.
 
 All four native packages declare MIT. Their published tarballs omit separate license files; the complete upstream license from this exact commit is retained in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). The server notice writer retains these full terms and verifies their source-commit link, exact license-content hash, and package pins before generating notices. Separately, the [fixed-viewport adaptation](v2/fixed-viewport-scroll.md) removes `react-remove-scroll-bar@2.3.8` from the current source dependency graph without substituting unsupported license text or a dependency downgrade. Its attribution remains unresolved for older artifacts that include it; strict web notice and package validation remain required for each candidate.
 
@@ -23,9 +23,13 @@ All four native packages declare MIT. Their published tarballs omit separate lic
 
 Pi 1.0 supports OpenAI ChatGPT sign-in as well as API keys. Offline wire tests use an explicitly fake `sk-`-prefixed API key when checking the native 30-minute long-cache payload, because token-authenticated requests intentionally omit fields unsupported by ChatGPT. OpenRouter payload tests select the `openai-completions` API explicitly; OpenRouter also has native Anthropic-API models now.
 
+## Pi 1.4 compatibility boundary
+
+Pi Durable 1.4 adds a `sleeping` task status and migrates native SQLite storage to schema version 2 when it opens it. Fate accepts every schema version from 1 up to the SDK's own `CURRENT_SQLITE_SCHEMA_VERSION`, both when it opens storage and when it inspects workflow history read-only, and still refuses newer versions. A migrated database cannot be opened by Fate builds on Pi 1.3.0 or earlier, so native-Durable profiles cannot be downgraded past this pin. Fate's own documents state `checkpointWhen` explicitly, as 1.4 requires; the small workflow identity and execution fence documents keep the earlier delta behavior. Native workflow diagnostics log the `ReportInfo` type Durable now passes with each report.
+
 ## Carried patches
 
-Both patches remain necessary against the exact 1.3.0 distribution:
+Both patches remain necessary against the exact 1.4.0 distribution:
 
 1. `pi-coding-agent`: `includeHomeAgentSkills: false` prevents discovery of `HOME/.agents/skills` and ancestors above the registered project before filesystem enumeration. There is no equivalent native option. Server profiles pass it to both package-manager extension preflight and resource loaders; desktop discovery retains upstream defaults. Project trust still gates local resources. Post-load filtering is not an adequate replacement
 2. `pi-ai`: OpenRouter omits reasoning when the off mapping is absent or null, while preserving explicit off mappings. Upstream still invents `effort: "none"` for an undefined mapping

@@ -6,7 +6,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
 import {
   Harness, createRegistry, defineDoc, defineExtension, defineTask,
-  type JsonObject, type Storage, type TaskId, type TaskOutcome,
+  type JsonObject, type ReportInfo, type Storage, type TaskId, type TaskOutcome,
 } from '@earendil-works/pi-durable';
 import { openOwnedDurableStorage, DurableStorageCloseUncertainError, type OwnedDurableStorageOptions } from '../../../core/durable/OwnedDurableStorage';
 import { NativeExecutionFence, NativeExecutionUnknownError, NativeEffectNotStartedError, inspectNativeExecutionBeforeOpen } from './NativeExecutionFence';
@@ -32,14 +32,14 @@ export type NativeWorkflowSchedulerFactory = (input: NativeWorkflowSchedulerInpu
 export interface NativeWorkflowSchedulerOptions extends NativeWorkflowSchedulerInput {
   readonly storage: Storage | (() => Promise<Storage>);
   readonly assertOwnership: () => Promise<void>;
-  readonly onReport?: (error: unknown) => void;
+  readonly onReport?: (error: unknown, info?: ReportInfo) => void;
   readonly onFailure?: (error: unknown) => void;
   readonly onUnsafeFailure?: (error: NativeExecutionUnknownError | DurableStorageCloseUncertainError) => void;
   readonly onCloseUncertain?: (error: DurableStorageCloseUncertainError) => void;
   readonly onClosed?: () => void;
 }
 
-export const NativeWorkflowIdentityDoc = defineDoc({ kind: 'fate.workflow.identity', scope: 'session', version: 1, initial: () => ({ workflowId: '', parentSessionId: '', cwd: '' }) });
+export const NativeWorkflowIdentityDoc = defineDoc({ kind: 'fate.workflow.identity', scope: 'session', version: 1, initial: () => ({ workflowId: '', parentSessionId: '', cwd: '' }), checkpointWhen: () => false });
 
 type NodeInput = { id: string; dependencies: Record<string, NativeWorkflowNodeResult>; skipReason?: string };
 type NodeCheckpoint = { phase: 'start' } | { phase: 'effect' };
@@ -92,7 +92,7 @@ export class NativeWorkflowScheduler {
     if (this.#used || this.#closed) throw new Error('A native workflow scheduler is single-use.');
     this.#used = true;
     const fence = this.#fence;
-    const report = (error: unknown): void => { try { this.options.onReport?.(error); } catch { /* Diagnostics never schedule. */ } };
+    const report = (error: unknown, info?: ReportInfo): void => { try { this.options.onReport?.(error, info); } catch { /* Diagnostics never schedule. */ } };
     const project = (publish: () => void): void => { try { publish(); } catch (error) { report(error); } };
     let removeAbort = () => {};
     try {

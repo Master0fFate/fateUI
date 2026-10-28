@@ -11,7 +11,7 @@ import { openOwnedDurableStorage } from '../../src/core/durable/OwnedDurableStor
 import { inspectOwnedNativeWorkflowRecovery } from '../../src/core/recovery/NativeWorkflowRecovery';
 import { linkFileOrJunction } from './helpers/platformLinks';
 
-const Identity = defineDoc({ kind: 'fate.workflow.identity', scope: 'session', version: 1, initial: () => ({ workflowId: '', parentSessionId: '', cwd: '' }) });
+const Identity = defineDoc({ kind: 'fate.workflow.identity', scope: 'session', version: 1, initial: () => ({ workflowId: '', parentSessionId: '', cwd: '' }), checkpointWhen: () => false });
 const Fence = defineDoc<{ state: 'idle' | 'active' | 'UNKNOWN' }>({ kind: 'fate.execution.fence', scope: 'session', version: 1, initial: () => ({ state: 'idle' }), checkpointWhen: () => false });
 const NeverRun = defineTask<{ id: string }, { phase: 'pending' }, null>({ name: 'fixture.never-run', version: 1, initial: () => ({ phase: 'pending' }), phases: { pending: async () => { throw new Error('The recovery scanner must never invoke a task.'); } }, abort: async () => { throw new Error('The recovery scanner must never abort a task.'); } });
 const cleanups: Array<() => Promise<void>> = [];
@@ -152,7 +152,7 @@ describe('read-only owned workflow startup recovery', () => {
     const f = await fixture(); const saved = await f.create();
     let db = new DatabaseSync(saved.filename); db.exec('UPDATE durable_metadata SET next_seq=1'); db.close();
     let before = await f.fingerprints(); expect((await f.inspect()).blocked[0]?.reason).toMatch(/allocation metadata/u); expect(await f.fingerprints()).toEqual(before);
-    db = new DatabaseSync(saved.filename); db.exec('UPDATE durable_schema SET version=2'); db.close();
+    db = new DatabaseSync(saved.filename); db.exec('UPDATE durable_schema SET version=900'); db.close();
     before = await f.fingerprints(); expect((await f.inspect()).blocked[0]?.reason).toMatch(/schema version/u); expect(await f.fingerprints()).toEqual(before);
     await f.create(); expect((await f.inspect(1)).blocked[0]?.reason).toMatch(/inventory exceeds its quota/u);
   });

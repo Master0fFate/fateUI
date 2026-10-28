@@ -6,7 +6,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { apply, assertValidOp, type Op } from '@earendil-works/chord/delta';
 import { z } from 'zod';
 import { OwnerLock, canonicalFuturePath, ownerRecordPath } from '../ownership/OwnerLock';
-import { DurableStorageCloseUncertainError } from '../durable/OwnedDurableStorage';
+import { DurableStorageCloseUncertainError, isSupportedDurableSchemaVersion } from '../durable/OwnedDurableStorage';
 import { assertPrivateWindowsAcl } from '../storage/WindowsPrivateAcl';
 
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
@@ -42,7 +42,7 @@ function validateSqlite(db: DatabaseSync): void {
   const expected = new Set(['durable_schema', 'durable_metadata', 'record_ids', 'conversations', 'entries', 'tasks', 'submissions', 'documents', 'document_revisions']);
   const tables = rows<{ name: string }>(db, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
   if (tables.length !== expected.size || tables.some((row) => !expected.has(row.name))) throw new Error('Native workflow schema is unsupported.');
-  if (one<{ version: number }>(db, 'SELECT version FROM durable_schema WHERE singleton=1').version !== 1) throw new Error('Native workflow schema version is unsupported.');
+  if (!isSupportedDurableSchemaVersion(one<{ version: number }>(db, 'SELECT version FROM durable_schema WHERE singleton=1').version)) throw new Error('Native workflow schema version is unsupported.');
   const integrity = rows<{ quick_check: string }>(db, 'SELECT * FROM pragma_quick_check');
   if (integrity.length !== 1 || integrity[0]?.quick_check !== 'ok') throw new Error('Native workflow database integrity is uncertain.');
   const metadata = one<{ next_id: string; next_seq: number }>(db, 'SELECT next_id,next_seq FROM durable_metadata');
@@ -92,7 +92,7 @@ function executionReason(db: DatabaseSync): string | null {
   let reason: string | null = null;
   const tasks = rows<{ id: number; conversation_id: number; status: string; record: string }>(db, 'SELECT id,conversation_id,status,record FROM tasks ORDER BY id LIMIT ?', MAX_ROWS + 1);
   for (const row of tasks) {
-    const task = z.object({ id: z.number().int().positive().safe(), conversationId: z.number().int().positive().safe(), state: z.object({ status: z.enum(['pending', 'running', 'waiting', 'completing', 'terminal']), outcome: z.unknown().optional() }).passthrough() }).passthrough().parse(JSON.parse(row.record));
+    const task = z.object({ id: z.number().int().positive().safe(), conversationId: z.number().int().positive().safe(), state: z.object({ status: z.enum(['pending', 'running', 'waiting', 'sleeping', 'completing', 'terminal']), outcome: z.unknown().optional() }).passthrough() }).passthrough().parse(JSON.parse(row.record));
     if (task.id !== row.id || task.conversationId !== row.conversation_id || task.state.status !== row.status) throw new Error('Native workflow task indexes disagree with committed records.');
     if (task.state.status !== 'terminal') reason ??= 'Native workflow has nonterminal tasks; automatic continuation is prohibited.';
     else z.object({ status: z.enum(['completed', 'failed', 'aborted', 'orphaned', 'faulted']) }).passthrough().parse(task.state.outcome);

@@ -148,7 +148,7 @@ describe('native acquisition cleanup after synthetic ACL scope-finalization fail
       expect(f.databases.size).toBe(1);
       const database = [...f.databases][0]!;
       expect(database.isOpen).toBe(true);
-      expect(database.prepare('SELECT version FROM durable_schema WHERE singleton = 1').all()[0]?.version).toBe(1);
+      expect(database.prepare('SELECT version FROM durable_schema WHERE singleton = 1').all()[0]?.version).toBe(2);
       expect(f.nativeClose).not.toHaveBeenCalled();
       expect(f.acquire).toHaveBeenCalledTimes(1);
       expect(f.release).not.toHaveBeenCalled();
@@ -222,7 +222,7 @@ describe('native acquisition cleanup after synthetic ACL scope-finalization fail
       expect(f.databases.size).toBe(1);
       const database = [...f.databases][0]!;
       expect(database.isOpen).toBe(true);
-      expect(database.prepare('SELECT version FROM durable_schema WHERE singleton = 1').all()[0]?.version).toBe(1);
+      expect(database.prepare('SELECT version FROM durable_schema WHERE singleton = 1').all()[0]?.version).toBe(2);
       expect(startup.settled()).toBe(false);
       expect(f.nativeClose).not.toHaveBeenCalled();
       expect(f.release).not.toHaveBeenCalled();

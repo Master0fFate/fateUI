@@ -11,7 +11,7 @@ export type NativeExecutionFenceState = {
   submissionIds?: number[];
 };
 export const NativeExecutionFenceDoc = defineDoc<NativeExecutionFenceState>({
-  kind: 'fate.execution.fence', scope: 'session', version: 1, initial: () => ({ state: 'idle' }),
+  kind: 'fate.execution.fence', scope: 'session', version: 1, initial: () => ({ state: 'idle' }), checkpointWhen: () => false,
 });
 
 export class NativeExecutionUnknownError extends Error {

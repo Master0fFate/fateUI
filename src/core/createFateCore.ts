@@ -278,7 +278,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
       },
       onCloseUncertain: (error) => { storageCloseUncertain(); fenceUnsafeWorkflow(error); },
       onUnsafeFailure: fenceUnsafeWorkflow,
-      onReport: () => logs.write('warn', 'durable', 'Native workflow reported an execution diagnostic; inspect its retained workflow state.'),
+      onReport: (_error, info) => logs.write('warn', 'durable', `Native workflow reported an execution diagnostic${info ? ` (${info.type})` : ''}; inspect its retained workflow state.`),
     }) : undefined;
     const dependencies: MultiProjectPiRuntimeDeps = {
       adapter: options.adapter ?? createPiSdkAdapter(paths, { codemode: () => settings.get().piCodemode, dailyBudgetUsd: () => settings.get().dailyBudgetUsd,
