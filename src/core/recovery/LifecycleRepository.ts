@@ -202,12 +202,12 @@ export class LifecycleRepository {
       const bytes = Buffer.byteLength(line);
       if (bytes > MAX_LINE) throw new Error('STORAGE_UNAVAILABLE: lifecycle record exceeds its limit.');
       const current = await this.inspect();
-      if (current.health !== 'ok' || current.records.length >= this.maxRecords) throw new Error(`STORAGE_UNAVAILABLE: lifecycle ${current.health === 'ok' ? 'quota' : current.health}.`);
+      if (current.health !== 'ok') throw new Error(`STORAGE_UNAVAILABLE: lifecycle ${current.health}.`);
       const existing = current.records.findLast((item) => item.reference.projectPath === reference.projectPath && item.reference.sessionId === reference.sessionId
         && item.reference.runId === reference.runId && item.reference.teamId === reference.teamId && item.reference.taskId === reference.taskId && item.reference.requestId === reference.requestId);
       if (existing && ['completed', 'failed'].includes(existing.status) && status === 'running') throw new Error('A settled lifecycle reference cannot restart; use a new execution identity.');
       const stat = await fs.stat(this.file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error; });
-      if ((stat?.size ?? 0) + bytes > this.maxBytes) throw new Error('STORAGE_UNAVAILABLE: lifecycle quota.');
+      if (current.records.length >= this.maxRecords || (stat?.size ?? 0) + bytes > this.maxBytes) await this.compact(current.records, bytes);
       try {
         await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
         const handle = await fs.open(this.file, 'a', 0o600);
@@ -219,4 +219,35 @@ export class LifecycleRepository {
     this.tail = result.then(() => undefined, () => undefined);
     return result;
   }
+  private async compact(records: readonly LifecycleRecord[], incoming: number): Promise<void> {
+    const kept = compactRecords(records, Math.floor(this.maxRecords / 2));
+    const text = kept.map((record) => `${JSON.stringify(record)}\n`).join('');
+    if (kept.length >= this.maxRecords || Buffer.byteLength(text) + incoming > this.maxBytes) throw new Error('STORAGE_UNAVAILABLE: lifecycle quota.');
+    const temporary = `${this.file}.${randomUUID()}.tmp`;
+    try {
+      const handle = await fs.open(temporary, 'wx', 0o600);
+      try { await handle.writeFile(text, 'utf8'); await handle.sync(); } finally { await handle.close(); }
+      await fs.rename(temporary, this.file);
+    } catch { throw new Error('STORAGE_UNAVAILABLE: lifecycle compaction failed; prior records retained.'); }
+    finally { await fs.rm(temporary, { force: true }).catch(() => undefined); }
+  }
+}
+
+function compactRecords(records: readonly LifecycleRecord[], target: number): LifecycleRecord[] {
+  const latest = new Map<string, LifecycleRecord>();
+  for (const record of records) {
+    const ref = record.reference;
+    latest.set(JSON.stringify([ref.projectPath, ref.sessionId, ref.runId, ref.teamId, ref.nodeId, ref.goalId, ref.taskId, ref.requestId]), record);
+  }
+  const kept = [...latest.values()].sort((left, right) => left.at - right.at);
+  let surplus = kept.length - target;
+  return surplus <= 0 ? kept : kept.filter((record) => {
+    if (surplus <= 0 || !disposable(record.reference)) return true;
+    surplus -= 1;
+    return false;
+  });
+}
+
+function disposable(ref: LifecycleReference): boolean {
+  return !ref.teamId && !ref.nodeId && !ref.goalId && !ref.taskId && !ref.requestId && !ref.worktree;
 }

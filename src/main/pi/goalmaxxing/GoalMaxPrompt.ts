@@ -58,7 +58,15 @@ export function goalMaxCapsule(goal: GoalMaxState, recovery?: GoalMaxRecovery): 
     : recovery?.instruction ?? 'Perform the highest-value concrete action that advances an unsatisfied criterion.', 2 * 1_024);
   const tokenLimit = goal.budget.tokenLimit === null ? 'none' : goal.budget.tokenLimit.toLocaleString('en-US');
   const timeLimit = goal.budget.timeLimitMs === null ? 'none' : `${Math.ceil(goal.budget.timeLimitMs / 60_000)}m`;
-  const agentPolicy = goal.agentStrategy === 'off' ? 'root only' : goal.agentStrategy === 'read-only' ? 'read-only delegation' : 'bounded delegation when useful';
+  const delegated = goal.agentStrategy === 'auto';
+  const agentPolicy = goal.agentStrategy === 'off' ? 'root only' : goal.agentStrategy === 'read-only' ? 'read-only delegation' : 'delegated implementation (root plans, delegates, verifies)';
+  const gates = [
+    'PLAN GATE: write, edit, bash (other than read-only inspection), computer and delegation tools are rejected until the execution task plan is captured via goalmax_report (outcome "progress", phase "planning", taskPlan 2-12 tasks).',
+    'SYNC GATE: call goalmax_status or goalmax_report before the first workspace change or delegation of every turn; the task list is the single source of truth.',
+    ...(delegated ? ['DELEGATION GATE: the root agent plans, delegates, verifies and reports; it never edits files itself. Delegate each implementation task with spawn_agent or agent_workflow, wait for it, check the result with read-only tools and bash, then record evidence. Root write and edit calls are rejected.'] : []),
+    'CLOSE GATE: mark each finished task satisfied with current evidence via goalmax_report.criterionUpdates before moving on; only goalmax_complete finishes the goal.',
+    'Respect user messages delivered through the session: process steering now and follow-ups when delivered. Reconcile changed scope into the task plan before completing the goal.',
+  ];
   const taskPlanCaptured = hasGoalMaxTaskPlan(goal);
   const needsTaskPlan = !taskPlanCaptured && goal.status !== 'completed' && goal.status !== 'cancelled';
   const planningContract = needsTaskPlan ? [
@@ -89,12 +97,9 @@ export function goalMaxCapsule(goal: GoalMaxState, recovery?: GoalMaxRecovery): 
     `BLOCKERS\n${blockers}`,
     '',
     ...planningContract,
-    'GATEWAY CONTRACT (STRICT)',
-    'The control plane is a hard gateway, not advice. Violations block the goal immediately:',
-    '1. PLAN GATE: no implementation tool or workspace change is allowed before the execution task plan is captured via goalmax_report (outcome "progress", phase "planning", taskPlan 2-12 tasks).',
-    '2. SYNC GATE: every turn that changes the workspace or produces meaningful evidence must first call goalmax_status or goalmax_report in that same turn, so the task list stays the single source of truth.',
-    '3. CLOSE GATE: mark each finished task satisfied with current evidence via goalmax_report.criterionUpdates before moving on; only goalmax_complete finishes the goal.',
-    '4. Respect user messages delivered through the session: process steering now and follow-ups when delivered. Reconcile changed scope into the task plan before completing the goal.',
+    'GATEWAY CONTRACT (ENFORCED)',
+    'The control plane enforces these gates when a tool is called: a violating call is rejected before it runs, and a turn that still slips through blocks the goal.',
+    ...gates.map((gate, index) => `${index + 1}. ${gate}`),
     '',
     'NEXT-TURN CONTRACT',
     instruction,

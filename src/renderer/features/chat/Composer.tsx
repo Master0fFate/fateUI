@@ -2939,7 +2939,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                           <div className="permission-cu-divider" />
                           <label className="permission-cu-row">
                             <span><strong>Computer use</strong><small>{computerUse.issue ?? 'Relaunches elevated'}</small></span>
-                            <input type="checkbox" checked={computerUse.on} disabled={computerUse.busy} onChange={(e) => {
+                            <input type="checkbox" checked={computerUse.on} disabled={computerUse.busy || activeSessionRunning} onChange={(e) => {
                               const next = e.target.checked;
                               void computerUse.toggle(next).then(() => { if (next && permissionLevel !== 'full-access') void changePermissionLevel('full-access'); });
                             }} />

@@ -94,7 +94,7 @@ Optional local voice transcription, image generation, and ambient audio. Reviewe
 
 ### Let the agent use your computer
 
-Turn on computer use for a Full access session and the agent can see your screen and use the mouse and keyboard. An overlay shows when it acts, and Alt+Shift+Esc stops it from anywhere. It is off by default and relaunches Fate UI elevated.
+Turn on computer use for a Full access session and the agent can see your screen and use the mouse and keyboard. An overlay shows only while it acts and goes away when it is done; its Stop button or Alt+Shift+Esc stops Pi from anywhere. It is off by default and relaunches Fate UI elevated.
 
 [Computer use →](docs/features.md#computer-use)
 
@@ -214,7 +214,7 @@ Projects, session history, settings, and credentials are stored locally. **Promp
 | Read only | Fate's governed project-write and shell tools are unavailable. |
 | Edit files | Default for new trusted sessions. Agent file operations remain project-confined. |
 | Full access | Explicitly unsandboxed access with your account’s permissions. Use deliberately. |
-| Computer use | Off by default. Needs Full access, relaunches Fate UI elevated, and lets the agent see the screen and use the mouse and keyboard until you stop it. |
+| Computer use | Off by default. Needs Full access, relaunches Fate UI elevated, and lets the agent see the screen and use the mouse and keyboard. The overlay shows only while the agent acts; its Stop button stops the session. |
 | Agent worktrees | Isolated Git checkouts, **not security sandboxes**. Integration is a separate action. |
 | Local credentials | Fate’s provider store is separate from Pi Terminal’s; existing credentials copy on first run, and missing entries can be imported later without replacing Fate values. |
 

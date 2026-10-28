@@ -91,7 +91,7 @@ The `computer` tool lets the agent take screenshots and use the mouse and keyboa
 
 - It is off until you turn it on in the permission menu of the composer or in **Settings → Workspace**, and it only works in a Full access session. Agent runs started from an Agent chat do not get it.
 - Turning it on relaunches Fate UI elevated: a UAC prompt on Windows, an administrator prompt on macOS, `pkexec` on Linux. The app and everything it starts then run with administrator rights. On Windows the UAC secure desktop prompt is switched off while computer use is on and restored when it is turned off.
-- An overlay shows when the agent is acting. Its Stop button, or **Alt+Shift+Esc** (**⌥⇧Esc** on macOS), turns computer use off. It also turns off when the last window closes.
+- An overlay shows only while the agent is acting and disappears when the turn ends. Its Stop button, or **Alt+Shift+Esc** (**⌥⇧Esc** on macOS), stops the session like the composer's Stop; computer use stays on. The switch is locked while a session is running, and computer use turns off when the last window closes.
 - macOS needs Accessibility and Screen Recording permission. Linux needs an X11 or XWayland display.
 - Everything on screen is untrusted input. The agent is told not to enter secrets or take irreversible actions without asking, but that is guidance, not a sandbox.
 

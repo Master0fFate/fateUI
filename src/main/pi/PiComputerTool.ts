@@ -7,7 +7,7 @@ export const COMPUTER_TOOL_NAME = 'computer';
 
 const point = Type.Tuple([Type.Number({ minimum: 0 }), Type.Number({ minimum: 0 })]);
 
-export function createComputerTool(host: ComputerUsePort, permissionFor: (sessionId: string) => PermissionLevel | null): ToolDefinition {
+export function createComputerTool(host: ComputerUsePort, permissionFor: (sessionId: string) => PermissionLevel | null, stopSession: (sessionId: string) => Promise<unknown>): ToolDefinition {
   return defineTool({
     name: COMPUTER_TOOL_NAME,
     label: 'Use computer',
@@ -49,7 +49,8 @@ export function createComputerTool(host: ComputerUsePort, permissionFor: (sessio
     executionMode: 'sequential',
     async execute(_toolCallId, params, signal, _onUpdate, context) {
       if (signal?.aborted) throw new Error('Computer use was cancelled.');
-      if (permissionFor(context.sessionManager.getSessionId()) !== 'full-access') {
+      const sessionId = context.sessionManager.getSessionId();
+      if (permissionFor(sessionId) !== 'full-access') {
         throw new Error('Computer use needs Full access for this session. Ask the user to switch the permission level.');
       }
       if (!host.isEnabled()) throw new Error('Computer use is off. Ask the user to turn it on from the composer.');
@@ -63,7 +64,7 @@ export function createComputerTool(host: ComputerUsePort, permissionFor: (sessio
         ...(params.scroll_amount === undefined ? {} : { scrollAmount: params.scroll_amount }),
         ...(params.duration === undefined ? {} : { duration: params.duration }),
         ...(params.display === undefined ? {} : { display: params.display }),
-      }, signal);
+      }, signal, { sessionId, stop: () => stopSession(sessionId) });
       return {
         content: [
           { type: 'text' as const, text: output.text },

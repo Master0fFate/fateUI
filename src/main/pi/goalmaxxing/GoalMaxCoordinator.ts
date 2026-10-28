@@ -23,7 +23,7 @@ import {
 } from '../../../shared/contracts/goalmaxxing';
 import type { ModelInfo, PermissionLevel, ThinkingLevel } from '../../../shared/contracts/ipc';
 import { createGoalMaxTools, type GoalMaxCompletionInput, type GoalMaxReportInput } from './GoalMaxTools';
-import { GoalMaxProgressEngine, classifyGoalMaxTool, type ToolObservation, type WorkspaceSnapshot } from './GoalMaxProgressEngine';
+import { GoalMaxProgressEngine, classifyGoalMaxTool, readOnlyInvestigationCommand, type ToolObservation, type WorkspaceSnapshot } from './GoalMaxProgressEngine';
 import { goalMaxCapsule, goalMaxDiagnosticPrompt, goalMaxVerificationPrompt } from './GoalMaxPrompt';
 import { InMemoryGoalMaxRepository, type GoalMaxPersistence } from './GoalMaxRepository';
 import { GoalMaxScheduler } from './GoalMaxScheduler';
@@ -151,6 +151,9 @@ export interface GoalMaxUpdateRejection {
 const activeGoalStatuses = new Set<GoalMaxState['status']>(['normalising', 'active', 'verifying']);
 const MAX_BUFFERED_OBSERVATIONS = 64;
 const MAX_TRACKED_TOOL_STARTS = 128;
+const GATED_WORKSPACE_TOOLS: ReadonlySet<string> = new Set(['write', 'edit', 'pdf_fill', 'pdf_create', 'bash', 'computer']);
+const GATED_DELEGATION_TOOLS: ReadonlySet<string> = new Set(['spawn_agent', 'agent_workflow', 'followup_task']);
+const ROOT_FILE_TOOLS: ReadonlySet<string> = new Set(['write', 'edit', 'pdf_fill', 'pdf_create']);
 
 export class GoalMaxCoordinator {
   private readonly states = new Map<string, GoalMaxState>();
@@ -1066,6 +1069,19 @@ export class GoalMaxCoordinator {
           ? 'Goal progress recorded.'
           : `Satisfaction was not recorded for ${rejections.length} ${rejections.length === 1 ? 'criterion' : 'criteria'}:\n${rejectionLines}`.slice(0, 8_000);
     return { text, details: structuredClone(updated), rejections };
+  }
+
+  gateToolCall(sessionId: string, toolName: string, args: unknown): string | null {
+    const goal = this.stateForSession(sessionId);
+    if (!goal || isGoalMaxTerminal(goal.status) || goal.status === 'verifying') return null;
+    if (!GATED_WORKSPACE_TOOLS.has(toolName) && !GATED_DELEGATION_TOOLS.has(toolName)) return null;
+    const command = toolName === 'bash' && args && typeof args === 'object' ? (args as { command?: unknown }).command : undefined;
+    if (typeof command === 'string' && readOnlyInvestigationCommand(command)) return null;
+    if (!hasGoalMaxTaskPlan(goal)) return `PLAN GATE: ${toolName} is rejected until the execution task plan exists. Call goalmax_report with outcome "progress", phase "planning" and a taskPlan of 2-12 concrete tasks, then retry.`;
+    const marker = this.turnMarkers.get(sessionId);
+    if (marker && marker.statusCalls + marker.reportCalls + marker.completeCalls === 0) return `SYNC GATE: ${toolName} is rejected because this turn has not consulted the goal plane yet. Call goalmax_status or goalmax_report first, then retry.`;
+    if (goal.agentStrategy === 'auto' && ROOT_FILE_TOOLS.has(toolName)) return `DELEGATION GATE: ${toolName} is rejected for the root agent while agents are on. Delegate this implementation task with spawn_agent or agent_workflow, wait for it, verify the result and record evidence. Root-only editing needs the goal agent strategy set to off.`;
+    return null;
   }
 
   observeSessionEvent(sessionId: string, event: AgentSessionEvent): void {

@@ -26,10 +26,10 @@ function load() {
   const desktop = getDesktopApiOptional();
   if (loaded || typeof desktop?.getSettings !== 'function' || typeof desktop.getComputerUseState !== 'function') return;
   loaded = true;
-  void Promise.all([desktop.getSettings(), desktop.getComputerUseState()]).then(([settings, live]) => {
-    publish({ supported: live.supported, on: settings.computerUseElevated, issue: live.issue });
+  void desktop.getComputerUseState().then((live) => {
+    publish({ supported: live.supported, on: live.enabled, issue: live.issue });
   }).catch(() => { loaded = false; });
-  desktop.onComputerUseState((live) => publish({ supported: live.supported, issue: live.issue }));
+  desktop.onComputerUseState((live) => publish({ supported: live.supported, on: live.enabled, issue: live.issue }));
 }
 
 async function change(next: boolean) {
@@ -37,8 +37,11 @@ async function change(next: boolean) {
   if (!desktop || state.busy) return;
   publish({ busy: true, issue: null });
   try {
-    const saved = await desktop.setSettings({ ...await desktop.getSettings(), computerUseElevated: next });
-    publish({ on: saved.computerUseElevated });
+    const settings = await desktop.getSettings();
+    if (settings.computerUseElevated === next) {
+      const live = await desktop.setComputerUseEnabled(next);
+      publish({ on: live.enabled, issue: live.issue });
+    } else await desktop.setSettings({ ...settings, computerUseElevated: next });
   } catch (error) {
     publish({ issue: error instanceof Error ? error.message : 'Computer use could not be changed.' });
   } finally {

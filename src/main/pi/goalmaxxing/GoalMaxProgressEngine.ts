@@ -177,7 +177,7 @@ function commandTitle(command: string, kind: ToolObservation['kind']): string {
   return `${label}: ${compact.length <= 120 ? compact : `${compact.slice(0, 117).trimEnd()}…`}`;
 }
 
-function readOnlyInvestigationCommand(command: string): boolean {
+export function readOnlyInvestigationCommand(command: string): boolean {
   const segments = command.toLocaleLowerCase().split(/(?:&&|\|\||\||;|\r?\n)/u).map((part) => part.trim()).filter(Boolean);
   return segments.length > 0 && segments.every((segment) => /^(?:git\s+(?:status|diff|show|log|grep|ls-files)\b|rg\b|grep\b|find\b|ls\b|pwd\b|wc\b|head\b|tail\b|type\s+[^>]+$)/u.test(segment));
 }

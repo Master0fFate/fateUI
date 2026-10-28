@@ -1,5 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, screen, systemPreferences } from 'electron';
-import type { ComputerActionInput, ComputerActionOutput, ComputerUsePort, LogPort } from '../../core/ports';
+import type { ComputerActionInput, ComputerActionOutput, ComputerUseOwner, ComputerUsePort, LogPort } from '../../core/ports';
 import type { ComputerUseState } from '../../shared/contracts/ipc';
 import { ComputerOverlay } from './ComputerOverlay';
 import { disableSecureDesktop, isElevated, restoreSecureDesktop } from './elevation';
@@ -14,7 +14,7 @@ const STOP_ACCELERATOR = 'Alt+Shift+Escape';
 const STOP_LABEL = process.platform === 'darwin' ? '⌥⇧Esc' : 'Alt+Shift+Esc';
 const SETTLE_MS = 450;
 const POINTER_TRAVEL_MS = 220;
-const IDLE_AFTER_MS = 2_500;
+const IDLE_AFTER_MS = 15_000;
 const TEXT_CHUNK = 200;
 const SUPPORTED = process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux';
 
@@ -34,6 +34,8 @@ export class ComputerUseService implements ComputerUsePort {
   private issue: string | null = null;
   private driver: InputDriver | null = null;
   private overlay: ComputerOverlay | null = null;
+  private showing: Promise<void> = Promise.resolve();
+  private owner: ComputerUseOwner | null = null;
   private stop = new AbortController();
   private actions: Promise<unknown> = Promise.resolve();
   private toggles: Promise<unknown> = Promise.resolve();
@@ -67,10 +69,14 @@ export class ComputerUseService implements ComputerUsePort {
     return next.then(() => this.getState());
   }
 
-  perform(input: ComputerActionInput, signal?: AbortSignal): Promise<ComputerActionOutput> {
-    const next = this.actions.then(() => this.execute(input, signal));
+  perform(input: ComputerActionInput, signal?: AbortSignal, owner?: ComputerUseOwner): Promise<ComputerActionOutput> {
+    const next = this.actions.then(() => this.execute(input, signal, owner));
     this.actions = next.catch(() => undefined);
     return next;
+  }
+
+  release(sessionId: string): void {
+    if (this.owner?.sessionId === sessionId) this.deactivate();
   }
 
   dispose(): void {
@@ -87,26 +93,14 @@ export class ComputerUseService implements ComputerUsePort {
       return this.publish({ issue });
     }
     this.driver = driver;
-    this.stop = new AbortController();
     if (process.platform === 'win32' && isElevated()) disableSecureDesktop();
-    this.overlay = new ComputerOverlay(STOP_LABEL, () => void this.setEnabled(false));
-    try {
-      await this.overlay.show();
-    } catch (error) {
-      this.logs.write('warn', 'computer-use', `The computer use overlay could not be shown: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    if (!globalShortcut.register(STOP_ACCELERATOR, () => void this.setEnabled(false))) {
-      this.logs.write('warn', 'computer-use', `${STOP_ACCELERATOR} is taken by another app; use the Stop button instead.`);
-    }
     this.enabled = true;
     this.publish({ issue: null });
   }
 
   private async turnOff(): Promise<void> {
     if (!this.enabled) return;
-    const held = this.heldButton;
-    this.heldButton = null;
-    if (held) await this.driver?.run([{ op: 'button', button: held, down: false, clicks: 1 }]).catch(() => undefined);
+    await this.releaseHeldButton();
     this.shutdown();
     this.publish({ issue: null });
   }
@@ -114,14 +108,9 @@ export class ComputerUseService implements ComputerUsePort {
   private shutdown(): void {
     this.enabled = false;
     this.stop.abort();
-    if (globalShortcut.isRegistered(STOP_ACCELERATOR)) globalShortcut.unregister(STOP_ACCELERATOR);
-    this.overlay?.hide();
-    this.overlay = null;
+    this.deactivate();
     this.driver?.dispose();
     this.driver = null;
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
-    this.active = false;
     restoreSecureDesktop();
   }
 
@@ -131,27 +120,67 @@ export class ComputerUseService implements ComputerUsePort {
     for (const listener of this.listeners) listener(state);
   }
 
-  private setActive(active: boolean): void {
+  private activate(owner: ComputerUseOwner | null): Promise<void> {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
-    if (this.active === active) return;
-    this.active = active;
-    this.overlay?.setActive(active);
+    this.owner = owner;
+    if (this.active) return this.showing;
+    this.active = true;
+    const overlay = new ComputerOverlay(STOP_LABEL, () => this.interrupt());
+    this.overlay = overlay;
+    this.showing = overlay.show().catch((error) => {
+      this.logs.write('warn', 'computer-use', `The computer use overlay could not be shown: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    if (!globalShortcut.register(STOP_ACCELERATOR, () => this.interrupt())) {
+      this.logs.write('warn', 'computer-use', `${STOP_ACCELERATOR} is taken by another app; use the Stop button instead.`);
+    }
+    this.publish({ issue: this.issue });
+    return this.showing;
+  }
+
+  private deactivate(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    this.owner = null;
+    if (!this.active) return;
+    this.active = false;
+    if (globalShortcut.isRegistered(STOP_ACCELERATOR)) globalShortcut.unregister(STOP_ACCELERATOR);
+    this.overlay?.hide();
+    this.overlay = null;
     this.publish({ issue: this.issue });
   }
 
-  private async execute(input: ComputerActionInput, outer?: AbortSignal): Promise<ComputerActionOutput> {
+  private interrupt(): void {
+    const owner = this.owner;
+    this.stop.abort();
+    this.deactivate();
+    void this.releaseHeldButton();
+    void owner?.stop().catch((error) => {
+      this.logs.write('warn', 'computer-use', `The session could not be stopped from the overlay: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  private async releaseHeldButton(): Promise<void> {
+    const held = this.heldButton;
+    this.heldButton = null;
+    if (held) await this.driver?.run([{ op: 'button', button: held, down: false, clicks: 1 }]).catch(() => undefined);
+  }
+
+  private async execute(input: ComputerActionInput, outer?: AbortSignal, owner?: ComputerUseOwner): Promise<ComputerActionOutput> {
     const driver = this.driver;
     if (!this.enabled || !driver) throw new Error('Computer use is off. Ask the user to turn it on from the composer.');
-    const signal = outer ? AbortSignal.any([outer, this.stop.signal]) : this.stop.signal;
-    this.setActive(true);
+    if (outer?.aborted) throw new Error('Computer use was cancelled.');
+    if (this.stop.signal.aborted) this.stop = new AbortController();
+    const stop = this.stop;
+    const signal = outer ? AbortSignal.any([outer, stop.signal]) : stop.signal;
+    await this.activate(owner ?? null);
     try {
       return await this.dispatch(driver, input, signal);
     } catch (error) {
-      if (this.stop.signal.aborted) throw new Error('The user stopped computer use. Do not continue the task on screen.');
+      if (stop.signal.aborted) throw new Error('The user stopped computer use. Do not continue the task on screen.');
       throw error;
     } finally {
-      if (this.enabled) this.idleTimer = setTimeout(() => this.setActive(false), IDLE_AFTER_MS);
+      if (this.active) this.idleTimer = setTimeout(() => this.deactivate(), IDLE_AFTER_MS);
     }
   }
 

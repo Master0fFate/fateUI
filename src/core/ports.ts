@@ -103,9 +103,15 @@ export interface ComputerActionOutput {
   readonly image?: { readonly data: string; readonly mimeType: string };
 }
 
+export interface ComputerUseOwner {
+  readonly sessionId: string;
+  readonly stop: () => Promise<unknown>;
+}
+
 export interface ComputerUsePort {
   isEnabled(): boolean;
-  perform(input: ComputerActionInput, signal?: AbortSignal): Promise<ComputerActionOutput>;
+  perform(input: ComputerActionInput, signal?: AbortSignal, owner?: ComputerUseOwner): Promise<ComputerActionOutput>;
+  release(sessionId: string): void;
 }
 
 export class UnsupportedHostCapabilityError extends Error {

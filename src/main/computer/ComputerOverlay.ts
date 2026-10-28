@@ -55,8 +55,8 @@ body { display: flex; align-items: center; justify-content: center; }
 body[data-active] .dot { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.8); } }
 kbd { color: rgba(236, 235, 247, .55); font: 500 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif; }
-button { height: 22px; padding: 0 10px; border: 0; border-radius: 999px; color: #fff; background: rgba(255, 255, 255, .12);
-  font: inherit; cursor: pointer; transition: background-color 120ms ease-out; }
+button { display: inline-flex; align-items: center; justify-content: center; height: 22px; padding: 0 10px; border: 0; border-radius: 999px; color: #fff;
+  background: rgba(255, 255, 255, .12); font: inherit; line-height: 1; cursor: pointer; transition: background-color 120ms ease-out; }
 button:hover { background: #e5484d; }
 button:active { transform: scale(.96); }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

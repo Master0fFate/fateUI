@@ -4564,6 +4564,8 @@ export class PiRuntimeService {
     const guardedBeforeToolCall: NonNullable<typeof agent.beforeToolCall> = async (...args) => {
       if (!ownsSession()) throw this.replacementSuperseded();
       this.assertPermissionAdmission(slot);
+      const gate = this.goalMax.gateToolCall(session.sessionId, args[0].toolCall.name, args[0].args);
+      if (gate) return { block: true, reason: gate };
       const result = await originalBeforeToolCall?.(...args);
       if (!ownsSession()) throw this.replacementSuperseded();
       this.assertPermissionAdmission(slot);
@@ -4747,8 +4749,10 @@ export class PiRuntimeService {
     if (event.type === 'agent_start') {
       slot.sessionTurnPhase = 'active';
       if (!slot.disabledModelsForTurn) slot.disabledModelsForTurn = [...this.disabledModelsSource()];
-    } else if (event.type === 'agent_end') slot.sessionTurnPhase = 'ending';
-    else if (event.type === 'agent_settled') {
+    } else if (event.type === 'agent_end') {
+      slot.sessionTurnPhase = 'ending';
+      this.computerUse?.release(session.sessionId);
+    } else if (event.type === 'agent_settled') {
       slot.learningContext?.settle();
       slot.sessionMessageTargets.clear();
       slot.disabledModelsForTurn = null;
@@ -5636,6 +5640,10 @@ export class PiRuntimeService {
     if (slot.runtime.session.isStreaming) await slot.runtime.session.sendCustomMessage(message, { deliverAs: 'steer' });
   }
 
+  private stopSession(sessionId: string): Promise<unknown> {
+    return this.selectedSlot?.runtime.session.sessionId === sessionId ? this.abort() : this.abortGoalSession(sessionId);
+  }
+
   private async abortGoalSession(sessionId: string): Promise<void> {
     const slot = this.findLiveSlot(sessionId);
     if (!slot || slot.disposed) return;
@@ -5800,7 +5808,7 @@ export class PiRuntimeService {
     const workflow = this.agentWorkflows.createTool(modelRuntime);
     const catalog = this.subagents.createCatalogTool(modelRuntime);
     const browser = this.browserIntegration?.createTools() ?? [];
-    const computer = this.computerUse ? [createComputerTool(this.computerUse, (sessionId) => this.findLiveSlot(sessionId)?.permissionLevel ?? null)] : [];
+    const computer = this.computerUse ? [createComputerTool(this.computerUse, (sessionId) => this.findLiveSlot(sessionId)?.permissionLevel ?? null, (sessionId) => this.stopSession(sessionId))] : [];
     const taskTools = createTaskTools(this.tasks, (sessionId) => {
       const project = this.project;
       const slot = this.findLiveSlot(sessionId);

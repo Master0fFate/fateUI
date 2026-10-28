@@ -168,6 +168,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
   const setSpeech = useUiStore((state) => state.setSpeech);
   const models = useRuntimeStore((state) => state.runtime.models);
   const modelsDevManaged = useRuntimeStore((state) => state.runtime.modelsDevManaged);
+  const sessionRunning = useRuntimeStore((state) => state.runtime.streaming || Boolean(state.runtime.activeSessionRunning));
   const managedProviders = useMemo(() => modelsDevManaged ?? [], [modelsDevManaged]);
   const managedById = useMemo(() => new Map(managedProviders.map((provider) => [provider.id, provider])), [managedProviders]);
   // Managed providers keep their models.dev display name instead of the
@@ -959,7 +960,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   <div className="settings-title"><div><h3>Project trust</h3></div></div>
                   <div className="settings-notice"><ShieldCheck size={14} /><div><strong>Project-confined by default</strong><p>Read only and Edit files stay inside the trusted project. Full access explicitly unlocks host files and shell execution, is saved per session, and is not sandboxed.</p></div></div>
                   {computerUse.supported && <div className="settings-group">
-                    <label className="settings-toggle"><div><strong>Computer use</strong><small>{computerUse.issue ?? 'Pi sees your screen and controls the mouse and keyboard. Launches elevated for full OS control.'}</small></div><input type="checkbox" checked={computerUse.on} disabled={computerUse.busy} onChange={(event) => { void computerUse.toggle(event.target.checked); }} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Computer use</strong><small>{computerUse.issue ?? (sessionRunning ? 'Stop Pi to change this.' : 'Pi sees your screen and controls the mouse and keyboard. Launches elevated for full OS control.')}</small></div><input type="checkbox" checked={computerUse.on} disabled={computerUse.busy || sessionRunning} onChange={(event) => { void computerUse.toggle(event.target.checked); }} /><span aria-hidden="true" /></label>
                   </div>}
                   <div className="settings-title settings-title--spaced"><div><h3>Terminal</h3></div></div>
                   <label className="settings-input-row"><span>Shell executable</span><input value={settings.terminalShell ?? ''} onChange={(event) => setSettings({ ...settings, terminalShell: event.target.value || null })} placeholder="System default" /></label>
