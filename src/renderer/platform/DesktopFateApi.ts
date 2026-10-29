@@ -20,6 +20,7 @@ export function selectDesktopMethods(bridge: DesktopOnlyApi): DesktopOnlyApi {
     activateBrowserTab: bridge.activateBrowserTab,
     addModelsDevProvider: bridge.addModelsDevProvider,
     answerQuestion: bridge.answerQuestion,
+    previousQuestion: bridge.previousQuestion,
     cancelAgentRun: bridge.cancelAgentRun,
     cancelLearning: bridge.cancelLearning,
     cancelProviderLogin: bridge.cancelProviderLogin,

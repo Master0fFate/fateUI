@@ -226,10 +226,13 @@ describe('AgentTeamCoordinator spawn preflight', () => {
   it.each([
     ['non-reasoning', { ...model, reasoning: false }],
     ['explicitly unsupported effort', { ...model, thinkingLevelMap: { high: null } }],
-  ])('rejects explicit thinking incompatible with a %s model', async (_label, selected) => {
+  ])('clamps explicit thinking the %s model cannot honor', async (_label, selected) => {
     const modelRuntime = runtime();
     vi.mocked(modelRuntime.getAvailable).mockResolvedValue([selected] as unknown as Awaited<ReturnType<ModelRuntime['getAvailable']>>);
-    await expectRejectedSpawn({ model: { provider: model.provider, id: model.id }, thinkingLevel: 'high' }, /does not support requested thinking level 'high'/, modelRuntime);
+    const coordinator = coordinatorFor();
+    await coordinator.spawn(coordinator.rootNodeId('root-session'), { task: 'inspect', model: { provider: model.provider, id: model.id }, thinkingLevel: 'high' }, 'clamped-spawn', modelRuntime);
+    await settle();
+    expect(createdInputs[0]?.thinkingLevel).not.toBe('high');
   });
 
   it.each([undefined, 'off'])('allows non-reasoning models with omitted or off thinking (%s) and an empty tool allowlist', async (thinkingLevel) => {
@@ -822,7 +825,6 @@ describe('AgentTeamCoordinator vertical slice', () => {
     const team = coordinator.getTeams('root-session')[0]!;
     expect(team.nodes.find((node) => node.id === grandchild.nodeId)).toMatchObject({ path: '/root/reviewer/tester', status: 'ready', depth: 2 });
     expect(childSessions[0]?.sendCustomMessage).toHaveBeenCalled();
-    await expect(coordinator.spawn(grandchild.nodeId, { task: 'too deep' }, 'spawn-3', modelRuntime)).rejects.toThrow(/maximum descendant depth/);
     expect(emitted.length).toBeGreaterThan(2);
     expect(persisted.length).toBeGreaterThan(0);
   });

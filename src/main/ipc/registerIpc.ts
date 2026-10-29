@@ -108,6 +108,7 @@ import {
   providerLoginStartInputSchema,
   providerLoginRespondInputSchema,
   questionnaireAnswerInputSchema,
+  questionnaireBackInputSchema,
   providerLogoutInputSchema,
   terminalAckInputSchema,
   terminalCloseInputSchema,
@@ -1057,6 +1058,9 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     ? coreAdapter(event).abort(input) : runtimeHandlers.abort(input));
   handle(ipcChannels.runtimeAnswerQuestion, (_event, input) => runRuntimeMutation('answering a question', () => (
     runtimeStateSchema.parse(runtime.answerQuestion(questionnaireAnswerInputSchema.parse(input)))
+  )));
+  handle(ipcChannels.runtimePreviousQuestion, (_event, input) => runRuntimeMutation('going back a question', () => (
+    runtimeStateSchema.parse(runtime.previousQuestion(questionnaireBackInputSchema.parse(input)))
   )));
   handle(ipcChannels.runtimeControlSubagent, async (event, input) => runRuntimeMutation('controlling a child agent', () => scoped(event,
     () => agentHandlers.controlSubagent(input), ({ handle: workspace, authorize, command }) => {

@@ -15,7 +15,7 @@ import { scheduleLongTimeout, type CancelableTimer } from '../SubagentTimer';
 import { createToolProvenance } from '../ToolProvenance';
 import { discoverSubagentProfiles, resolveSubagentProfile } from '../SubagentProfiles';
 import { assertSkillTools, selectSubagentSkills } from '../SubagentSkills';
-import { childToolNames, modelInfo, modelThinkingLevels, permissions, thinkingLevels, type ChildToolName, type ParentModel } from '../SubagentProtocol';
+import { childToolNames, clampThinkingLevel, modelInfo, permissions, thinkingLevels, type ChildToolName, type ParentModel } from '../SubagentProtocol';
 import { NativeEffectNotStartedError } from '../durable/NativeExecutionFence';
 import { disabledModelMessage, isModelDisabled, visibleModels } from '../../../shared/modelVisibility';
 import { createAgentCollaborationTools } from './AgentCollaborationTools';
@@ -712,13 +712,30 @@ export class AgentTeamCoordinator {
     });
   }
 
+  latestResult(callerNodeId: string, target: string): { taskId: string; status: AgentTeamTask['status']; text: string } | undefined {
+    const runtime = this.runtimeForCaller(callerNodeId);
+    const caller = this.requireNode(runtime, callerNodeId);
+    const node = this.resolveTarget(runtime, target);
+    if (!node.path.startsWith(`${caller.path}/`)) return undefined;
+    let latest: AgentTeamTask | undefined;
+    for (const task of runtime.tasks.values()) {
+      if (task.assigneeNodeId === node.id && settledTaskStatuses.has(task.status) && (!latest || task.createdAt >= latest.createdAt)) latest = task;
+    }
+    if (!latest) return undefined;
+    const envelope = latest.resultEnvelopeId ? runtime.envelopes.get(latest.resultEnvelopeId) : undefined;
+    const text = envelope?.content ?? latest.error;
+    return text === undefined ? undefined : { taskId: latest.id, status: latest.status, text };
+  }
+
   inspectNode(callerNodeId: string, target: string) {
     const runtime = this.runtimeForCaller(callerNodeId);
     const node = this.resolveTarget(runtime, target);
     const resources = runtime.nodeRuntime.get(node.id);
+    const latestResult = this.latestResult(callerNodeId, target);
     return {
       teamId: runtime.state.id,
       node: structuredClone(node),
+      ...(latestResult ? { latestResult } : {}),
       resources: {
         sessionLoaded: Boolean(resources?.session),
         streaming: Boolean(resources?.session?.isStreaming),
@@ -1579,9 +1596,6 @@ export class AgentTeamCoordinator {
         throw new Error(disabledModelMessage(selected.provider, selected.id));
       }
     }
-    if (request.thinkingLevel !== undefined && !modelThinkingLevels(selected).includes(request.thinkingLevel)) {
-      throw new Error(`Model ${selected.provider}/${selected.id} does not support requested thinking level '${request.thinkingLevel}'. Supported levels: ${modelThinkingLevels(selected).join(', ')}.`);
-    }
     const permitted = childToolsForPermission(permission);
     const callerCap = caller.depth === 0 ? new Set(permitted) : new Set(caller.enabledTools);
     const requested = request.tools ? new Set(request.tools) : null;
@@ -1607,7 +1621,7 @@ export class AgentTeamCoordinator {
     const skillMode = request.skillMode ?? 'all';
     const selectedSkills = await selectSubagentSkills(root.session, request.skills ?? [], skillMode, request.preloadSkills ?? true);
     assertSkillTools(selectedSkills, tools);
-    const desiredThinking = selected.reasoning ? request.thinkingLevel ?? caller.thinkingLevel : 'off';
+    const desiredThinking = clampThinkingLevel(selected, request.thinkingLevel ?? caller.thinkingLevel);
     return {
       ...request,
       role: request.role || profile.role || 'agent',

@@ -103,6 +103,7 @@ export function hydrateTeamRuntime(value: unknown, fallbackProjectPath = 'unknow
   const parsed = agentTeamSchema.safeParse(migrated);
   if (!parsed.success) return null;
   const state = structuredClone(parsed.data);
+  state.limits = { ...DEFAULT_AGENT_TEAM_LIMITS };
   for (const node of state.nodes) {
     if (node.depth > 0 && (node.status === 'active' || node.status === 'creating')) {
       node.status = 'interrupted';

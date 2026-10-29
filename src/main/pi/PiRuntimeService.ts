@@ -54,6 +54,7 @@ import type {
   ModelsDevProviderDetail,
   PermissionLevel,
   QuestionnaireAnswerInput,
+  QuestionnaireBackInput,
   PiEvent,
   ProjectState,
   ProviderLoginRespondInput,
@@ -971,10 +972,13 @@ function tokenUsageMetrics(usage: unknown, deriveTotal = false): TokenUsageMetri
   };
 }
 
-function tokenUsageSample(usage: unknown, timestamp: unknown, deriveTotal = false): RuntimeTokenTelemetry['history'][number] | null {
+function tokenUsageSample(usage: unknown, timestamp: unknown, deriveTotal = false, completedAt?: unknown): RuntimeTokenTelemetry['history'][number] | null {
   if (!validTokenCount(timestamp)) return null;
   const metrics = tokenUsageMetrics(usage, deriveTotal);
-  return metrics ? { ...metrics, timestamp } : null;
+  if (!metrics) return null;
+  const completed = typeof completedAt === 'string' ? Date.parse(completedAt) : Number.NaN;
+  const durationMs = completed - timestamp;
+  return Number.isSafeInteger(durationMs) && durationMs > 0 ? { ...metrics, timestamp, durationMs } : { ...metrics, timestamp };
 }
 
 function sessionTokenTelemetry(session: AgentSession): RuntimeTokenTelemetry | undefined {
@@ -1023,6 +1027,8 @@ function sessionTokenTelemetry(session: AgentSession): RuntimeTokenTelemetry | u
     const sample = tokenUsageSample(
       assistant.usage,
       validTokenCount(assistant.timestamp) ? assistant.timestamp : persistedTimestamp,
+      false,
+      entry.timestamp,
     );
     if (sample) history.push(sample);
   }
@@ -1083,7 +1089,7 @@ function persistedSessionTokenTelemetry(entries: readonly Record<string, unknown
     const message = entry.message as { role?: unknown; timestamp?: unknown; usage?: unknown };
     if (message.role !== 'assistant') continue;
     const timestamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : undefined;
-    const sample = tokenUsageSample(message.usage, validTokenCount(message.timestamp) ? message.timestamp : timestamp, true);
+    const sample = tokenUsageSample(message.usage, validTokenCount(message.timestamp) ? message.timestamp : timestamp, true, entry.timestamp);
     if (sample) history.push(sample);
   }
   history.sort((left, right) => left.timestamp - right.timestamp);
@@ -2816,6 +2822,12 @@ export class PiRuntimeService {
   answerQuestion(input: QuestionnaireAnswerInput): RuntimeState {
     const session = this.requireSession();
     this.questionnaires.respond(session.sessionId, input);
+    return this.getState(false);
+  }
+
+  previousQuestion(input: QuestionnaireBackInput): RuntimeState {
+    const session = this.requireSession();
+    this.questionnaires.back(session.sessionId, input);
     return this.getState(false);
   }
 

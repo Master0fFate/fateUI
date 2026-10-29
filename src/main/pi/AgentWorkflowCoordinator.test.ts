@@ -566,7 +566,7 @@ describe('AgentWorkflowCoordinator', () => {
     }
   });
 
-  it('preserves default workflow concurrency four with no team active-turn ceiling', async () => {
+  it('runs every ready workflow node in parallel by default with no team active-turn ceiling', async () => {
     let releasePrompts!: () => void;
     const promptGate = new Promise<void>((resolve) => { releasePrompts = resolve; });
     const run = await realTeamHarness(async () => { await promptGate; return 'done'; });
@@ -575,13 +575,13 @@ describe('AgentWorkflowCoordinator', () => {
         action: 'start',
         nodes: Array.from({ length: 6 }, (_, index) => ({ id: `parallel-${index}`, task: `Parallel ${index}`, mailboxTtlSeconds: 0 })),
       } as never, undefined, undefined, run.context);
-      expect(run.coordinator.getWorkflowViews('parent-1').find((workflow) => workflow.id === (started.details as { workflowIds: string[] }).workflowIds[0])?.maxConcurrency).toBe(4);
-      await vi.waitFor(() => expect(run.children).toHaveLength(4));
-      expect(run.maximumActivePrompts()).toBe(4);
+      expect(run.coordinator.getWorkflowViews('parent-1').find((workflow) => workflow.id === (started.details as { workflowIds: string[] }).workflowIds[0])?.maxConcurrency).toBe(256);
+      await vi.waitFor(() => expect(run.children).toHaveLength(6));
+      expect(run.maximumActivePrompts()).toBe(6);
       releasePrompts();
       await vi.waitFor(() => expect(run.coordinator.getWorkflowViews('parent-1')[0]?.status).toBe('completed'));
       expect(run.children).toHaveLength(6);
-      expect(run.maximumActivePrompts()).toBe(4);
+      expect(run.maximumActivePrompts()).toBe(6);
     } finally {
       releasePrompts();
       await run.cleanup();

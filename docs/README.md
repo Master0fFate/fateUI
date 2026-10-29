@@ -39,4 +39,4 @@ This directory holds the focused guides referenced by the [project README](../RE
 
 ## Conventions
 
-Fate UI uses numeric `major.minor.patch` versions with an optional display name. The source tree is prepared for **V2.2.3**; see Releases for the latest published version. Update ordering and artifact names use the version, not the name. Installers remain unsigned; verify downloads against `SHA256SUMS` and review platform trust warnings. Keep important work backed up. See the README's [trust boundaries](../README.md#local-first-with-explicit-boundaries) and [Architecture and security](architecture.md).
+Fate UI uses numeric `major.minor.patch` versions with an optional display name. The source tree is prepared for **V2.2.4**; see Releases for the latest published version. Update ordering and artifact names use the version, not the name. Installers remain unsigned; verify downloads against `SHA256SUMS` and review platform trust warnings. Keep important work backed up. See the README's [trust boundaries](../README.md#local-first-with-explicit-boundaries) and [Architecture and security](architecture.md).

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { toolProvenanceSchema } from './provenance';
 
-export const AGENT_TEAM_MAX_DEPTH = 2;
+export const AGENT_TEAM_MAX_DEPTH = 16;
 // Legacy limit fields remain in the persisted contract, but agent count, active
 // turns, message count, and retained node history have no product-imposed cap.
 export const AGENT_TEAM_MAX_NODES = Number.MAX_SAFE_INTEGER;

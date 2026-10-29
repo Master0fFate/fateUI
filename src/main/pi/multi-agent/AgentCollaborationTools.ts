@@ -34,6 +34,12 @@ const spawnParameters = Type.Object({
   workspace: Type.Optional(workspace),
 }, { additionalProperties: false });
 
+const MAX_RESULT_CHARACTERS = 16_000;
+
+function clipResult(value: string): string {
+  return value.length > MAX_RESULT_CHARACTERS ? `${value.slice(0, MAX_RESULT_CHARACTERS)}\n[truncated; ${value.length - MAX_RESULT_CHARACTERS} more characters]` : value;
+}
+
 function text(content: string, details: unknown) {
   return { content: [{ type: 'text' as const, text: content }], details };
 }
@@ -149,7 +155,7 @@ export function createAgentCollaborationTools(
     }),
     defineTool({
       name: 'wait_agent', label: 'Wait for agents', promptSnippet: 'Wait for bounded team activity',
-      description: 'Wait for mailbox activity or direct-child state changes. It returns changed paths; message content is delivered separately as typed context.',
+      description: 'Wait for mailbox activity or direct-child state changes. It returns changed paths together with the latest final answer of each settled child, so results survive release and a notifyParent of never.',
       parameters: Type.Object({
         teamId,
         targets: Type.Array(target, { minItems: 1, maxItems: 16 }),
@@ -157,7 +163,14 @@ export function createAgentCollaborationTools(
       }, { additionalProperties: false }), executionMode: 'sequential',
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
         const result = await coordinator.wait(caller(ctx.sessionManager.getSessionId(), params.teamId), params.targets, (params.timeoutSeconds ?? 30) * 1_000, signal);
-        return text(result.changed.length ? `Changed agents:\n${result.changed.map((item) => `- ${item.path}: ${item.reason}`).join('\n')}` : 'No matching agent activity before timeout.', result);
+        const ownerId = caller(ctx.sessionManager.getSessionId(), params.teamId);
+        const results = result.changed.flatMap((item) => {
+          const latest = coordinator.latestResult(ownerId, item.path);
+          return latest ? [{ path: item.path, ...latest }] : [];
+        });
+        const changed = result.changed.map((item) => `- ${item.path}: ${item.reason}`).join('\n');
+        const answers = results.map((item) => `\n\n## ${item.path} (${item.status})\n${clipResult(item.text)}`).join('');
+        return text(result.changed.length ? `Changed agents:\n${changed}${answers}` : 'No matching agent activity before timeout.', { ...result, results });
       },
     }),
     defineTool({
@@ -171,11 +184,11 @@ export function createAgentCollaborationTools(
     }),
     defineTool({
       name: 'inspect_agent', label: 'Inspect agent', promptSnippet: 'Inspect node lifecycle and runtime resources',
-      description: 'Inspect a same-team node lifecycle plus its loaded session, streaming turn, lease, timer, listener, wait-edge, and index resource state.',
+      description: 'Inspect a same-team node lifecycle, its latest final answer when it has settled (also after release), plus its loaded session, streaming turn, lease, timer, listener, wait-edge, and index resource state.',
       parameters: Type.Object({ teamId, target }, { additionalProperties: false }), executionMode: 'parallel',
       execute: async (_id, params, _signal, _update, ctx) => {
         const result = coordinator.inspectNode(caller(ctx.sessionManager.getSessionId(), params.teamId), params.target);
-        return text(`${result.node.path} is ${result.node.status}.`, result);
+        return text(`${result.node.path} is ${result.node.status}.${result.latestResult ? `\n\nLatest result (${result.latestResult.status}):\n${clipResult(result.latestResult.text)}` : ''}`, result);
       },
     }),
     defineTool({

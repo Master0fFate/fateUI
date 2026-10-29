@@ -167,6 +167,21 @@ function dependencyContext(workflow: SubagentWorkflow, node: SubagentWorkflowNod
   return `${node.request.task}\n\n${boundary}\n\n${sections.join('\n\n')}`;
 }
 
+const WORKFLOW_NOTIFICATION_NODE_CHARACTERS = 6_000;
+const WORKFLOW_NOTIFICATION_TOTAL_CHARACTERS = 24_000;
+
+function workflowResultsText(workflow: SubagentWorkflow): string {
+  const nodes = workflow.nodes.filter((node) => node.request.notification === 'never' && (node.result || node.error));
+  if (!nodes.length) return '';
+  const budget = Math.min(WORKFLOW_NOTIFICATION_NODE_CHARACTERS, Math.floor(WORKFLOW_NOTIFICATION_TOTAL_CHARACTERS / nodes.length));
+  const sections = nodes.map((node) => {
+    const output = node.result || node.error || '';
+    const clipped = output.length > budget ? `${output.slice(0, budget)}\n[truncated; ${output.length - budget} more characters]` : output;
+    return `## ${node.displayName ?? node.id} (${node.status})\n${clipped}`;
+  });
+  return `\n\nResults of nodes without their own notifyParent:\n\n${sections.join('\n\n')}`;
+}
+
 export class SubagentWorkflowEngine {
   private readonly workflowsByParent = new Map<string, Map<string, SubagentWorkflow>>();
   private readonly active = new Map<string, ActiveWorkflow>();
@@ -703,7 +718,7 @@ export class SubagentWorkflowEngine {
     await this.host.notify(
       workflow.parentSessionId,
       workflow.notification,
-      `Subagent workflow ${workflow.id} settled as ${workflow.status}. ${workflow.nodes.filter((node) => node.status === 'completed').length}/${workflow.nodes.length} nodes completed.`,
+      `Subagent workflow ${workflow.id} settled as ${workflow.status}. ${workflow.nodes.filter((node) => node.status === 'completed').length}/${workflow.nodes.length} nodes completed.${workflowResultsText(workflow)}`,
       runIds,
       workflow.id,
     ).catch(() => undefined);

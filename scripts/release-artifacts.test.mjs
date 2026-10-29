@@ -78,15 +78,15 @@ describe('release artifact verification', () => {
 
   it('reports a clean tag, exact titled release, and stable classification', async () => {
     const metadata = async (field) => (await execFileAsync(process.execPath, [script, 'metadata', '--field', field], { cwd: root })).stdout.trim();
-    await expect(metadata('version')).resolves.toBe('2.2.3');
-    await expect(metadata('tag')).resolves.toBe('v2.2.3');
-    await expect(metadata('display-version')).resolves.toBe('V2.2.3');
+    await expect(metadata('version')).resolves.toBe('2.2.4');
+    await expect(metadata('tag')).resolves.toBe('v2.2.4');
+    await expect(metadata('display-version')).resolves.toBe('V2.2.4');
     await expect(metadata('is-prerelease')).resolves.toBe('false');
-    await expect(execFileAsync(process.execPath, [script, 'validate-tag', '--tag', 'v2.2.3'], { cwd: root })).resolves.toMatchObject({
-      stdout: expect.stringContaining('title V2.2.3'),
+    await expect(execFileAsync(process.execPath, [script, 'validate-tag', '--tag', 'v2.2.4'], { cwd: root })).resolves.toMatchObject({
+      stdout: expect.stringContaining('title V2.2.4'),
     });
     await expect(execFileAsync(process.execPath, [script, 'validate-tag', '--tag', 'V1.1.0 - Modulo'], { cwd: root }))
-      .rejects.toMatchObject({ stderr: expect.stringContaining('does not match package version 2.2.3') });
+      .rejects.toMatchObject({ stderr: expect.stringContaining('does not match package version 2.2.4') });
   });
 
   it('prints a safe gh latest flag from the current package and published tag', async () => {
@@ -99,7 +99,8 @@ describe('release artifact verification', () => {
     await expect(policy('--published-tag', 'v1.1.1')).resolves.toBe('--latest');
     await expect(policy('--published-tag', 'v2.2.0-beta')).resolves.toBe('--latest');
     await expect(policy('--published-tag', 'v2.2.2')).resolves.toBe('--latest');
-    await expect(policy('--published-tag', 'v2.2.3')).resolves.toBe('--latest=false');
+    await expect(policy('--published-tag', 'v2.2.3')).resolves.toBe('--latest');
+    await expect(policy('--published-tag', 'v2.2.4')).resolves.toBe('--latest=false');
     await expect(policy('--published-tag', 'v2.3.0-beta1')).resolves.toBe('--latest=false');
     await expect(policy('--published-tag', 'V1.0.0 - Old Title')).rejects.toMatchObject({
       stderr: expect.stringContaining('Published release tag is invalid'),

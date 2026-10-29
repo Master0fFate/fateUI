@@ -58,7 +58,7 @@ describe('SubagentHistory', () => {
     expect(result.content[0]).toMatchObject({ type: 'text', text: expect.stringMatching(/alternate\/glm[\s\S]*Capability contract/u) });
     const contract = result.content[0]?.type === 'text' ? result.content[0].text : '';
     expect(contract).toMatch(/One canonical agent system:[\s\S]*spawn_agent fields:[\s\S]*agent_workflow-only controls:/u);
-    expect(contract).toMatch(/16 live unreleased[\s\S]*3 active turns[\s\S]*512 nodes\/tasks\/receipts[\s\S]*256 message envelopes[\s\S]*32 KiB/u);
+    expect(contract).toMatch(/no cap on agent count[\s\S]*32 KiB[\s\S]*stays readable after it is released[\s\S]*clamped/u);
     expect(contract).toMatch(/send_message[\s\S]*non-executable[\s\S]*followup_task[\s\S]*executable/u);
     expect(contract).toMatch(/isolated worktree files never transfer or integrate automatically[\s\S]*result-unavailable[\s\S]*never replayed/u);
     expect(contract).not.toMatch(/Agent Teams V2|legacy subagents|retarget|uncapped|subagent_start|subagent_manage|subagent_workflow/iu);

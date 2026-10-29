@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import type { PendingQuestionnaire, QuestionnaireAnswerInput } from '../../shared/contracts/ipc';
+import type { PendingQuestionnaire, QuestionnaireAnswerInput, QuestionnaireBackInput } from '../../shared/contracts/ipc';
 
 const MAX_QUESTIONS = 8;
 const MAX_ANSWER_LENGTH = 2_000;
@@ -10,7 +10,7 @@ type Question = { question: string; options: Array<{ label: string; description?
 type Answer = { index: number; question: string; answer: string; source: 'option' | 'custom' };
 type Pending = {
   view: PendingQuestionnaire;
-  resolve: (answer: Answer | null) => void;
+  resolve: (answer: Answer | 'back' | null) => void;
 };
 
 /** One outstanding question per root session. Results retain the original question order. */
@@ -47,23 +47,36 @@ export class QuestionnaireCoordinator {
     this.changed(sessionId);
   }
 
+  back(sessionId: string, input: QuestionnaireBackInput): void {
+    const current = this.pending.get(sessionId);
+    if (!current || current.view.id !== input.id || current.view.index !== input.index) {
+      throw new Error('That question is no longer active.');
+    }
+    if (input.index === 0) throw new Error('This is the first question.');
+    this.pending.delete(sessionId);
+    current.resolve('back');
+    this.changed(sessionId);
+  }
+
   async ask(sessionId: string, question: Question, isCurrent: () => boolean, signal: AbortSignal): Promise<Answer | null> {
     if (this.pending.has(sessionId)) throw new Error('Another question is waiting for the user. Try again after it is answered.');
     const abort = () => this.cancel(sessionId);
     signal.addEventListener('abort', abort, { once: true });
     try {
-      return await this.wait(sessionId, question, 0, 1, isCurrent, signal);
+      const result = await this.wait(sessionId, question, 0, 1, undefined, isCurrent, signal);
+      return result === 'back' ? null : result;
     } finally {
       signal.removeEventListener('abort', abort);
       this.cancel(sessionId);
     }
   }
 
-  private wait(sessionId: string, question: Question, index: number, total: number, isCurrent: () => boolean, signal: AbortSignal | undefined): Promise<Answer | null> {
-    return new Promise<Answer | null>((resolve) => {
+  private wait(sessionId: string, question: Question, index: number, total: number, given: Answer | undefined, isCurrent: () => boolean, signal: AbortSignal | undefined): Promise<Answer | 'back' | null> {
+    return new Promise<Answer | 'back' | null>((resolve) => {
       const view: PendingQuestionnaire = {
         id: randomUUID(), sessionId, index, total,
         question: question.question, options: question.options,
+        ...(given ? { given: { answer: given.answer, source: given.source } } : {}),
       };
       this.pending.set(sessionId, { view, resolve });
       this.changed(sessionId);
@@ -102,20 +115,26 @@ export class QuestionnaireCoordinator {
         }
         if (!isCurrent(sessionId) || this.pending.has(sessionId)) throw new Error('A live root session with no active question is required.');
         const answers: Answer[] = [];
+        let index = 0;
         const abort = () => this.cancel(sessionId);
         signal?.addEventListener('abort', abort, { once: true });
         try {
-          for (const [index, question] of questions.entries()) {
+          while (index < questions.length) {
             if (signal?.aborted || !isCurrent(sessionId)) break;
-            const answer = await this.wait(sessionId, question, index, questions.length, () => isCurrent(sessionId), signal);
+            const answer = await this.wait(sessionId, questions[index]!, index, questions.length, answers[index], () => isCurrent(sessionId), signal);
             if (!answer) break;
-            answers.push(answer);
+            if (answer === 'back') {
+              index -= 1;
+              continue;
+            }
+            answers[index] = answer;
+            index += 1;
           }
         } finally {
           signal?.removeEventListener('abort', abort);
           this.cancel(sessionId);
         }
-        const result = answers.length === questions.length
+        const result = index === questions.length
           ? { status: 'answered' as const, answers }
           : { status: 'cancelled' as const, answers: [] as Answer[] };
         return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], details: result };

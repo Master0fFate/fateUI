@@ -2622,6 +2622,9 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         <QuestionCard questionnaire={runtime.questionnaire} onAnswer={async (input) => {
           if (typeof getDesktopApiOptional()?.answerQuestion !== 'function') throw new Error('Restart Fate UI to answer questions.');
           await getDesktopApi().answerQuestion(input);
+        }} onBack={async (input) => {
+          if (typeof getDesktopApiOptional()?.previousQuestion !== 'function') throw new Error('Restart Fate UI to change answers.');
+          await getDesktopApi().previousQuestion(input);
         }} />
       )}
       {goalUpdates.length > 0 && (

@@ -154,6 +154,7 @@ export const ipcChannels = {
   runtimeOptimizePrompt: 'runtime:optimize-prompt',
   runtimeAbort: 'runtime:abort',
   runtimeAnswerQuestion: 'runtime:answer-question',
+  runtimePreviousQuestion: 'runtime:previous-question',
   runtimeControlSubagent: 'runtime:control-subagent',
   runtimeControlAgentTeam: 'runtime:control-agent-team',
   runtimeSendSessionMessage: 'runtime:send-session-message',
@@ -723,6 +724,7 @@ export const tokenMetricsSchema = z.object(tokenMetricsShape).strict().superRefi
 export const tokenUsageSampleSchema = z.object({
   ...tokenMetricsShape,
   timestamp: z.number().int().nonnegative().safe(),
+  durationMs: z.number().int().positive().safe().optional(),
 }).strict().superRefine(requireReasoningSubset);
 export const sessionTokenTotalsSchema = z.object({
   ...tokenMetricsShape,
@@ -1054,6 +1056,10 @@ export const pendingQuestionnaireSchema = z.object({
     label: z.string().min(1).max(100),
     description: z.string().max(160).optional(),
   }).strict()).min(2).max(4),
+  given: z.object({
+    answer: z.string().min(1).max(2_000),
+    source: z.enum(['option', 'custom']),
+  }).strict().optional(),
 }).strict();
 export const questionnaireAnswerInputSchema = z.object({
   id: z.string().uuid(),
@@ -1061,6 +1067,7 @@ export const questionnaireAnswerInputSchema = z.object({
   answer: z.string().trim().min(1).max(2_000),
   source: z.enum(['option', 'custom']),
 }).strict();
+export const questionnaireBackInputSchema = questionnaireAnswerInputSchema.pick({ id: true, index: true }).strict();
 
 export const extensionUiStateSchema = z.object({
   statuses: z.array(z.object({
@@ -1608,6 +1615,7 @@ export type SubagentChildEvent = z.infer<typeof subagentChildEventSchema>;
 export type ExtensionUiState = z.infer<typeof extensionUiStateSchema>;
 export type PendingQuestionnaire = z.infer<typeof pendingQuestionnaireSchema>;
 export type QuestionnaireAnswerInput = z.infer<typeof questionnaireAnswerInputSchema>;
+export type QuestionnaireBackInput = z.infer<typeof questionnaireBackInputSchema>;
 export type SessionAttention = z.infer<typeof sessionAttentionSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 export type SessionReference = z.infer<typeof sessionReferenceSchema>;
@@ -1722,6 +1730,7 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   optimizePrompt: (text: string, options?: PromptOptimizationOptions) => Promise<PromptOptimizationResult>;
   abort: () => Promise<{ aborted: boolean }>;
   answerQuestion: (input: QuestionnaireAnswerInput) => Promise<RuntimeState>;
+  previousQuestion: (input: QuestionnaireBackInput) => Promise<RuntimeState>;
   controlSubagent: (input: SubagentControlInput) => Promise<RuntimeState>;
   controlAgentTeam: (input: AgentTeamControlInput) => Promise<RuntimeState>;
   setModel: (provider: string, id: string) => Promise<RuntimeState>;

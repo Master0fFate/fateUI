@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
+import { clampThinkingLevel as clampSupportedThinkingLevel, getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import type {
@@ -13,7 +13,7 @@ import type {
 } from '../../shared/contracts/ipc';
 import type { AgentWorkspaceRequest } from '../../shared/contracts/multiAgent';
 
-export const DEFAULT_RUNNING_CONCURRENCY = 4;
+export const DEFAULT_RUNNING_CONCURRENCY = 256;
 export const DEFAULT_TIMEOUT_SECONDS = 0;
 export const DEFAULT_MAILBOX_TTL_SECONDS = 5 * 60;
 
@@ -116,7 +116,7 @@ export const taskOptions = {
   timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: 'Optional advisory runtime threshold, including retries. Crossing it records inspector telemetry and the child continues.' })),
   idleTimeoutSeconds: Type.Optional(Type.Number({ minimum: 0, description: 'Optional advisory no-observable-activity threshold. Crossing it records inspector telemetry and the child continues.' })),
   mailboxTtlSeconds: Type.Optional(Type.Number({ minimum: 0, description: 'Keep a successful managed child session available for follow-ups. Managed launches default softly to 300 seconds when omitted; workflow nodes are opt-in. Zero disables retention and any positive duration is accepted.' })),
-  notifyParent: Type.Optional(stringEnum(notificationModes, 'Completion delivery: never sends nothing; next-turn queues model-visible context; immediate also triggers or queues a parent turn.', 'never')),
+  notifyParent: Type.Optional(stringEnum(notificationModes, 'Completion delivery: never sends nothing per node (results still come back in the workflow notification and through wait_agent or inspect_agent); next-turn queues model-visible context; immediate also triggers or queues a parent turn.', 'never')),
   budget: Type.Optional(budgetSchema),
   routing: Type.Optional(routingSchema),
   workspace: Type.Optional(Type.Object({
@@ -139,7 +139,7 @@ export const workflowParameters = Type.Object({
   action: stringEnum(['start', 'list', 'status', 'cancel', 'resume'] as const, 'Workflow operation. start requires nodes; status/cancel/resume require workflowId.'),
   nodes: Type.Optional(Type.Array(workflowNodeSchema, { minItems: 1, description: 'Required when action is start.' })),
   maxConcurrency: Type.Optional(Type.Integer({ minimum: 1, default: DEFAULT_RUNNING_CONCURRENCY })),
-  notifyParent: Type.Optional(stringEnum(notificationModes, 'Workflow-level notification after all nodes settle.', 'never')),
+  notifyParent: Type.Optional(stringEnum(notificationModes, 'Workflow-level notification after all nodes settle. The message includes the result text of every node whose own notifyParent is never; next-turn queues it as context and immediate also wakes the parent.', 'never')),
   budget: Type.Optional(budgetSchema),
   workflowId: Type.Optional(Type.String({ minLength: 1, maxLength: 100, description: 'Required when action is status, cancel, or resume.' })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: 'Optional cancellation reason when action is cancel.' })),
@@ -378,6 +378,10 @@ export function modelInfo(model: ParentModel): ModelInfo {
 
 export function modelKey(model: Pick<ParentModel, 'provider' | 'id'>): string {
   return `${model.provider}\0${model.id}`;
+}
+
+export function clampThinkingLevel(model: ParentModel, level: ThinkingLevel): ThinkingLevel {
+  return clampSupportedThinkingLevel(model, level);
 }
 
 export function modelThinkingLevels(model: ParentModel): ThinkingLevel[] {

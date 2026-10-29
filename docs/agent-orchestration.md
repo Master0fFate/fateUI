@@ -31,7 +31,13 @@ A small dependency workflow looks like this:
 
 `includeDependencyResults` transfers bounded result **text** as untrusted evidence; it does not copy files or integrate an isolated worktree. Files written in a shared checkout are already shared, while worktree changes require explicit review and integration as described below. Positive runtime and idle thresholds are advisory inspector checkpoints, not termination clocks. A positive workflow mailbox TTL keeps a successfully settled Team node available for `followup_task`; Team owns expiry and resets the idle deadline after an accepted follow-up. Zero disables retention and releases capacity after safe settlement.
 
-Teams limit depth to 2, concurrent non-root turns to 3, and **live, unreleased** non-root nodes to 16 per team. The 16-node limit is live Team capacity, not a limit of 16 logical DAG steps; settled nodes can be released before later workflow steps are admitted. Writer leases are **per checkout**: shared-checkout writers serialize, while agents in separate worktrees can write concurrently. Descendant permissions and ordinary tools can only narrow the direct caller's authority.
+Teams nest agents up to depth 16. There is no cap on agent count or concurrent turns per team, and `agent_workflow` runs every ready node in parallel unless `maxConcurrency` says otherwise. Writer leases are **per checkout**: shared-checkout writers serialize, while agents in separate worktrees can write concurrently. Descendant permissions and ordinary tools can only narrow the direct caller's authority.
+
+### Getting results back
+
+A settled agent's final answer stays readable after the agent is released. `wait_agent` returns the latest answer of each child that changed, and `inspect_agent` returns it for any owned descendant, so results never depend on a notification having been delivered. In `agent_workflow`, the graph-level `notifyParent` sends one message when the graph settles and includes the result text of every node that has no `notifyParent` of its own; a node-level `notifyParent` delivers that node's answer separately as it settles. `read_monitor_dashboard` stays lifecycle metadata only.
+
+A `thinkingLevel` the selected model does not support is clamped to the nearest supported level instead of rejecting the launch.
 
 ### Global workspace preference
 

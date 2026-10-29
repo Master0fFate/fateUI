@@ -63,6 +63,15 @@ function formatPercent(value: number | null): string {
   return `${value.toFixed(1)}%`;
 }
 
+function outputSpeed(sample: TokenUsageSample | null | undefined): number | null {
+  return sample?.durationMs ? sample.output / (sample.durationMs / 1_000) : null;
+}
+
+function formatSpeed(value: number | null): string {
+  if (value === null) return '—';
+  return value < 100 ? value.toFixed(1) : integerFormatter.format(value);
+}
+
 function boundedPercent(value: number | null | undefined): number {
   return Math.min(100, Math.max(0, value ?? 0));
 }
@@ -288,6 +297,11 @@ export function ContextPanel({ runtime }: { runtime: ContextPanelRuntime }) {
           <span>Session cost</span>
           <strong>{session ? formatCost(session.cost) : '—'}</strong>
           {session?.cost ? null : <small>pricing unavailable</small>}
+        </div>
+        <div>
+          <span>Latest t/s</span>
+          <strong title={latest?.durationMs ? `${exactTokens(latest.output)} output in ${(latest.durationMs / 1_000).toFixed(1)}s, including time to first token` : undefined}>{formatSpeed(outputSpeed(latest))}</strong>
+          <small>{latest ? 'output tokens/s' : 'no response yet'}</small>
         </div>
       </section>
 

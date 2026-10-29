@@ -3965,7 +3965,7 @@ describe('PiRuntimeService', () => {
       input: 20, output: 11, cacheRead: 16, cacheWrite: 2, totalTokens: 49, cost: 3.875, turns: 2,
     });
     expect(state.tokenTelemetry?.history).toEqual([
-      { input: 2, output: 3, cacheRead: 5, cacheWrite: 0, totalTokens: 10, cost: 0.125, timestamp: 2 },
+      { input: 2, output: 3, cacheRead: 5, cacheWrite: 0, totalTokens: 10, cost: 0.125, timestamp: 2, durationMs: expect.any(Number) },
     ]);
     await service.dispose();
   });
@@ -4524,10 +4524,10 @@ describe('PiRuntimeService', () => {
     expect(fake.session.getSessionStats).toHaveBeenCalled();
     expect(state.tokenTelemetry).toEqual({
       session: { input: 177, output: 55, cacheRead: 684, cacheWrite: 26, totalTokens: 942, cost: 0.037, turns: 4 },
-      latest: { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000 },
+      latest: { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000, durationMs: expect.any(Number) },
       history: [
-        { input: 100, output: 30, cacheRead: 500, cacheWrite: 20, reasoning: 12, totalTokens: 650, cost: 0.02, timestamp: 2_000 },
-        { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000 },
+        { input: 100, output: 30, cacheRead: 500, cacheWrite: 20, reasoning: 12, totalTokens: 650, cost: 0.02, timestamp: 2_000, durationMs: expect.any(Number) },
+        { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000, durationMs: expect.any(Number) },
       ],
     });
     await service.dispose();

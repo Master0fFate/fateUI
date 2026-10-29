@@ -1,9 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { PendingQuestionnaire, QuestionnaireAnswerInput } from '../../../shared/contracts/ipc';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import type { PendingQuestionnaire, QuestionnaireAnswerInput, QuestionnaireBackInput } from '../../../shared/contracts/ipc';
 
 export interface QuestionCardProps {
   questionnaire: PendingQuestionnaire;
   onAnswer: (input: QuestionnaireAnswerInput) => Promise<unknown>;
+  onBack: (input: QuestionnaireBackInput) => Promise<unknown>;
 }
 
 export function QuestionCard(props: QuestionCardProps) {
@@ -11,7 +13,7 @@ export function QuestionCard(props: QuestionCardProps) {
   return <CurrentQuestion key={JSON.stringify([sessionId, id, index])} {...props} />;
 }
 
-function CurrentQuestion({ questionnaire, onAnswer }: QuestionCardProps) {
+function CurrentQuestion({ questionnaire, onAnswer, onBack }: QuestionCardProps) {
   const headingId = useId();
   const progressId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -19,7 +21,9 @@ function CurrentQuestion({ questionnaire, onAnswer }: QuestionCardProps) {
   const locked = useRef(false);
   const mounted = useRef(true);
   const [busy, setBusy] = useState(false);
-  const [draft, setDraft] = useState('');
+  const { given } = questionnaire;
+  const [draft, setDraft] = useState(given?.source === 'custom' ? given.answer : '');
+  const selected = given?.source === 'option' ? given.answer : null;
   const [error, setError] = useState(false);
 
   useLayoutEffect(() => {
@@ -54,15 +58,35 @@ function CurrentQuestion({ questionnaire, onAnswer }: QuestionCardProps) {
     return () => { mounted.current = false; };
   }, []);
 
-  async function answer(value: string, source: 'option' | 'custom') {
+  const isFirst = questionnaire.index === 0;
+  const isLast = questionnaire.index === questionnaire.total - 1;
+  const forward = draft.trim()
+    ? { text: draft.trim(), source: 'custom' as const }
+    : selected ? { text: selected, source: 'option' as const } : null;
+  const canGoForward = !isLast && forward !== null;
+
+  function answer(value: string, source: 'option' | 'custom') {
     const text = source === 'custom' ? value.trim() : value;
-    if (locked.current || !text.trim()) return;
+    if (!text.trim()) return;
+    void send(() => onAnswer({ id: questionnaire.id, index: questionnaire.index, answer: text, source }));
+  }
+
+  function goBack() {
+    if (isFirst) return;
+    void send(() => onBack({ id: questionnaire.id, index: questionnaire.index }));
+  }
+
+  function goForward() {
+    if (canGoForward) answer(forward.text, forward.source);
+  }
+
+  async function send(request: () => Promise<unknown>) {
+    if (locked.current) return;
     locked.current = true;
     setBusy(true);
     setError(false);
     try {
-      await onAnswer({ id: questionnaire.id, index: questionnaire.index, answer: text, source });
-      // Stay locked until the parent advances or removes this question.
+      await request();
     } catch {
       if (!mounted.current) return;
       locked.current = false;
@@ -73,11 +97,21 @@ function CurrentQuestion({ questionnaire, onAnswer }: QuestionCardProps) {
 
   return (
     <section ref={card} className="question-card" aria-labelledby={headingId} aria-describedby={progressId} aria-busy={busy}>
-      <p className="question-card-progress" id={progressId}>Question {questionnaire.index + 1} / {questionnaire.total}</p>
+      <div className="question-card-header">
+        <p className="question-card-progress" id={progressId}>Question {questionnaire.index + 1} / {questionnaire.total}</p>
+        <div className="question-card-nav">
+          <button className="question-card-nav-button" type="button" aria-label="Previous question" title="Previous question" disabled={busy || isFirst} onClick={goBack}>
+            <ChevronLeft size={14} aria-hidden="true" />
+          </button>
+          <button className="question-card-nav-button" type="button" aria-label="Next question" title={canGoForward ? 'Next question' : isLast ? 'Last question' : 'Answer to continue'} disabled={busy || !canGoForward} onClick={goForward}>
+            <ChevronRight size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
       <h3 className="question-card-question" id={headingId} ref={heading} tabIndex={-1}>{questionnaire.question}</h3>
       <div className="question-card-options">
         {questionnaire.options.map((option, index) => (
-          <button className="question-card-option" type="button" key={index} disabled={busy} onClick={() => void answer(option.label, 'option')}>
+          <button className="question-card-option" type="button" key={index} aria-pressed={option.label === selected} disabled={busy} onClick={() => answer(option.label, 'option')}>
             <span>{option.label}</span>
             {option.description && <small>{option.description}</small>}
           </button>
@@ -94,7 +128,7 @@ function CurrentQuestion({ questionnaire, onAnswer }: QuestionCardProps) {
             if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
             event.preventDefault();
             event.stopPropagation();
-            void answer(draft, 'custom');
+            answer(draft, 'custom');
           }}
         />
       </div>
