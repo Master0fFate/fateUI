@@ -933,6 +933,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   }, [updateForkNoticeForKey]);
   const updateVoiceState = useCallback((next: VoiceState) => {
     voiceStateRef.current = next;
+    useUiStore.getState().setVoiceCapturing(next === 'recording');
     if (mounted.current) setVoiceState(next);
   }, []);
   const isCurrentVoiceAttempt = useCallback((attempt: number) => mounted.current && voiceAttempt.current === attempt, []);
@@ -1225,6 +1226,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       mounted.current = false;
       voiceAttempt.current += 1;
       voiceStateRef.current = 'idle';
+      useUiStore.getState().setVoiceCapturing(false);
       resizeCleanup.current?.();
       submittingRef.current = false;
       queueBusyRef.current = false;

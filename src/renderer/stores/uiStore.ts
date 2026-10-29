@@ -70,6 +70,7 @@ interface UiState {
   browserPaneWidth: number;
   musicPlayerEnabled: boolean;
   musicPlaying: boolean;
+  voiceCapturing: boolean;
   sendMessageWithModifier: boolean;
   compactMode: boolean;
   compactSessions: boolean;
@@ -103,6 +104,7 @@ interface UiState {
   setBrowserPaneWidth: (width: number) => void;
   setMusicPlayerEnabled: (enabled: boolean) => void;
   setMusicPlaying: (playing: boolean) => void;
+  setVoiceCapturing: (capturing: boolean) => void;
   setSendMessageWithModifier: (enabled: boolean) => void;
   setCompactMode: (enabled: boolean) => void;
   setCompactSessions: (enabled: boolean) => void;
@@ -182,6 +184,7 @@ export const useUiStore = create<UiState>()(
       browserPaneWidth: 520,
       musicPlayerEnabled: false,
       musicPlaying: false,
+      voiceCapturing: false,
       sendMessageWithModifier: false,
       compactMode: false,
       compactSessions: false,
@@ -215,6 +218,7 @@ export const useUiStore = create<UiState>()(
       setBrowserPaneWidth: (browserPaneWidth) => set({ browserPaneWidth: clamp(browserPaneWidth, BROWSER_PANE_MIN, BROWSER_PANE_MAX) }),
       setMusicPlayerEnabled: (musicPlayerEnabled) => set({ musicPlayerEnabled }),
       setMusicPlaying: (musicPlaying) => set({ musicPlaying }),
+      setVoiceCapturing: (voiceCapturing) => set({ voiceCapturing }),
       setSendMessageWithModifier: (sendMessageWithModifier) => set({ sendMessageWithModifier }),
       setCompactMode: (compactMode) => set({ compactMode }),
       setCompactSessions: (compactSessions) => set({ compactSessions }),

@@ -67,6 +67,7 @@ export function MusicPlayerDock() {
   const [browserInset, setBrowserInset] = useState(0);
   const playing = useUiStore((state) => state.musicPlaying);
   const setPlaying = useUiStore((state) => state.setMusicPlaying);
+  const voiceCapturing = useUiStore((state) => state.voiceCapturing);
   const [open, setOpen] = useState(false);
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -97,6 +98,7 @@ export function MusicPlayerDock() {
   const lastAudibleVolume = useRef(1);
   const autoAdvanceRef = useRef(false);
   const autoSkipBudget = useRef(MAX_AUTO_SKIPS);
+  const resumeAfterVoice = useRef(false);
 
   const clearLocalAudio = useCallback(() => {
     for (const local of localStreamsRef.current.values()) URL.revokeObjectURL(local.url);
@@ -240,6 +242,20 @@ export function MusicPlayerDock() {
     audio.volume = volume;
     audio.muted = muted;
   }, [muted, volume]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (voiceCapturing) {
+      if (audio.paused) return;
+      resumeAfterVoice.current = true;
+      audio.pause();
+      return;
+    }
+    if (!resumeAfterVoice.current) return;
+    resumeAfterVoice.current = false;
+    void audio.play().catch(() => setPlaying(false));
+  }, [setPlaying, voiceCapturing]);
 
   const prepareTrack = useCallback(async (track: MusicTrack, index: number, autoPlay: boolean, autoAdvance = false) => {
     const currentRequest = ++requestId.current;
@@ -710,6 +726,10 @@ export function MusicPlayerDock() {
         onCanPlay={() => {
           if (!playWhenReady.current || !audioRef.current) return;
           playWhenReady.current = false;
+          if (useUiStore.getState().voiceCapturing) {
+            resumeAfterVoice.current = true;
+            return;
+          }
           void audioRef.current.play().then(() => setPlaying(true)).catch(() => setError('Press play to start this track.'));
         }}
         onPlay={() => setPlaying(true)}
