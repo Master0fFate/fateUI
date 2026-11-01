@@ -20,7 +20,7 @@ import { useSkinComponents } from '../../skins/SkinProvider';
 import { SelectControl } from '../../components/SelectControl';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
-import { saveAgentPermission } from '../../stores/agentsStore';
+import { saveAgentPermission, useAgentsStore } from '../../stores/agentsStore';
 import { useGoalMaxStore } from '../../stores/goalMaxStore';
 import { useBrowserStore } from '../../stores/browserStore';
 import { GoalMaxRail } from '../goalmaxxing/GoalMaxRail';
@@ -756,6 +756,9 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const isLiveModel = speech.enabled && speech.liveTranscription
     && Boolean(speechStatus?.models.find((model) => model.id === speech.modelId)?.streaming);
   const connected = runtime.status === 'ready';
+  const currentAgentId = runtime.project?.agentId ?? null;
+  const currentAgentEnabled = useAgentsStore((state) => currentAgentId ? state.library.agents.find((agent) => agent.id === currentAgentId)?.enabled ?? true : true);
+  const agentTurnedOff = currentAgentId !== null && !currentAgentEnabled;
   const nextModel = runtime.pendingModel ?? runtime.model;
   const nextThinkingLevel = thinkingDraft ?? runtime.pendingThinkingLevel ?? runtime.thinkingLevel;
   const imageCapable = connected && nextModel?.supportsImages === true;
@@ -2757,12 +2760,12 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
             if (optimizingPromptRef.current) { event.preventDefault(); return; }
             pasteImages(event);
           },
-          placeholder: connected ? runtime.streaming ? 'Ask for follow-up changes…' : 'Ask Pi about your project…' : runtime.status === 'auth-required' ? 'Type /login to connect a provider…' : 'Open and trust a project to begin…',
-          rows: 2, disabled: !connected && runtime.status !== 'auth-required',
+          placeholder: agentTurnedOff ? 'This Agent is turned off. Turn it back on to continue the conversation…' : connected ? runtime.streaming ? 'Ask for follow-up changes…' : 'Ask Pi about your project…' : runtime.status === 'auth-required' ? 'Type /login to connect a provider…' : 'Open and trust a project to begin…',
+          rows: 2, disabled: agentTurnedOff || (!connected && runtime.status !== 'auth-required'),
         }}
         action={{
           label: liveAgentMessageTarget ? 'Send message to live agent' : sendButtonStops ? goalCancelable ? 'Cancel goal' : 'Stop Pi' : runtime.streaming || runtime.activeSessionRunning ? 'Queue follow-up message' : 'Send message',
-          disabled: (!connected && runtime.status !== 'auth-required') || liveAgentBusy || (!runtime.streaming && submitting) || (!liveAgentMessageTarget && !runtime.streaming && !activeSessionRunning && !goalCancelable && !childWorkActive && !hasPendingPrompt),
+          disabled: agentTurnedOff || (!connected && runtime.status !== 'auth-required') || liveAgentBusy || (!runtime.streaming && submitting) || (!liveAgentMessageTarget && !runtime.streaming && !activeSessionRunning && !goalCancelable && !childWorkActive && !hasPendingPrompt),
           attributes: { className: 'send-button', 'data-mode': sendButtonStops ? 'stop' : 'send',
             'aria-describedby': sendButtonStops ? 'streaming-send-instructions' : undefined, 'aria-busy': submitting || liveAgentBusy },
           content: <ActionContent text={submitting && !runtime.streaming ? 'sending' : liveAgentMessageTarget ? 'send' : sendButtonStops ? 'stop' : activeSessionRunning ? 'queue' : 'send'}>{submitting && !runtime.streaming ? <LoaderCircle className="tool-spinner" size={16} /> : sendButtonStops ? <Square size={16} strokeWidth={2.5} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}</ActionContent>,

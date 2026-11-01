@@ -11,6 +11,7 @@ export function agentHostFixture(runtime: FakePiRuntimeService, project: Project
     }),
     deliverAgentMessage: async () => undefined,
     refreshAgentSession: async () => undefined,
+    stopAgentSession: async () => undefined,
   };
   return {
     workspace: async () => workspace,

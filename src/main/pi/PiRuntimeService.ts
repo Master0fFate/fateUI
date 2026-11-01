@@ -522,8 +522,9 @@ const DEFERRED_TOOLS = new Set<string>([
 function agentHomePrompt(homePath: string, permission: PermissionLevel, webSearch: boolean): string {
   return [
     `This chat runs in your own folder, ${homePath}, which holds your notes and scratch files.${permission === 'full-access' ? '' : ' Your file tools reach only that folder.'}`,
-    'For anything in the user\'s projects, call run_in_project with the project folder name or absolute path and a self-contained request, then tell the user the run started.',
-    'The run\'s result arrives in this chat as a message. Report it to the user in your own words.',
+    'You are the orchestrator of this chat: delegate every task instead of doing it yourself, so you always answer fast and can juggle several unrelated requests at once.',
+    'Work in the user\'s projects goes through run_in_project with the project folder name or absolute path and a self-contained request. Anything else, including work in your own folder, goes to a child agent with spawn_agent. Omit model and thinkingLevel so the child inherits your own model and effort; set them only when the user asks. Spawn one child per task, and spawn several at once when the requests are unrelated.',
+    'When you delegate, reply immediately with one short line, for example "Let me get that task started for you." Never wait for a child before replying unless the user needs its result in the same reply; then use wait_agent and report the result in your own words. Child replies and run results arrive as messages in this chat; report them to the user in your own words.',
     `For quick lookups, ${webSearch ? 'use web_search to find pages and web_fetch to read one' : 'use web_fetch to read a public URL'} instead of the browser. Open the browser only for pages that need clicks or sign-in.`,
     'Fate UI also has Gmail and Google Calendar, memory, MCP servers, a shell, PDFs, images and scheduled Routines and Watches, some of which the user may not have turned on yet. When the user asks what you can do, or wants something you lack, call fate_capabilities. It lists what is on right now and the exact setup steps for the rest; walk the user through them one step at a time instead of saying you cannot.',
   ].join('\n');
@@ -660,6 +661,7 @@ export interface PiSdkAdapterOptions {
   codemode?: () => boolean;
   dailyBudgetUsd?: () => number | null;
   currentAgentPreset?: (preset: SavedAgentSession) => Promise<SavedAgentSession>;
+  assertAgentSession?: (agentId: string) => Promise<void> | void;
   webSearch?: () => boolean;
 }
 
@@ -676,6 +678,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
       // the same trusted state and project settings/resources follow Pi semantics.
       const saved = readAgentSessionPreset(sessionManager);
       const preset = saved && !saved.runId && options.currentAgentPreset ? await options.currentAgentPreset(saved) : saved;
+      if (preset && !preset.runId && options.assertAgentSession) await options.assertAgentSession(preset.agentId);
       if (preset && (projectTrusted !== true || path.resolve(preset.projectPath) !== path.resolve(effectiveCwd))) throw new Error('Saved Agent session requires its original trusted project.');
       const settingsManager = SettingsManager.create(effectiveCwd, agentDir, { projectTrusted: projectTrusted === true });
       const resolvedResources = await new DefaultPackageManager({
@@ -1359,6 +1362,7 @@ export class PiRuntimeService {
   private monitorRunsSource: ((projectPath: string) => Promise<MonitorRunsSource>) | null = null;
   private computerUse: ComputerUsePort | null = null;
   private agentRunStarter: AgentRunStarter | null = null;
+  private agentSessionGate: ((agentId: string) => Promise<void>) | null = null;
   private googleAccount: GoogleAccount | null = null;
   private readonly monitorEvents = new Map<string, Array<{ id: string; title: string; detail: string; state: 'normal' | 'attention'; timestamp: number }>>();
   private readonly disconnectedNormalizer = new PiEventNormalizer(() => null);
@@ -2339,6 +2343,7 @@ export class PiRuntimeService {
     const agentPreset = getAgentSessionPreset(session);
     const workspacePolicy = this.agentWorkspacePolicySource();
     if (agentPreset && (agentPreset.defaults.workspace !== 'shared' || workspacePolicy.strict && workspacePolicy.preferredMode !== 'shared')) throw new Error('This saved Agent conversation requires a currently permitted shared workspace. No workspace fallback was used.');
+    if (agentPreset && !agentPreset.runId && this.agentSessionGate) await this.agentSessionGate(agentPreset.agentId);
     const targeted = () => options.pinned === true || this.selectedSlot === slot;
     const promptEpoch = slot.promptEpoch;
     const draftText = replayedMessage?.text ?? input.text;
@@ -3703,6 +3708,14 @@ export class PiRuntimeService {
     this.emitState();
   }
 
+  async stopAgentSession(sessionId: string): Promise<void> {
+    const slot = this.findLiveSlot(sessionId);
+    if (!slot || slot.disposed) return;
+    const selected = this.selectedSlot === slot;
+    await this.disposeSlot(slot, true);
+    if (selected) await this.switchSession(sessionId);
+  }
+
   async refreshAgentSession(sessionId: string): Promise<void> {
     const cold = this.coldSession;
     if (cold?.snapshot.summary.id === sessionId && this.project) {
@@ -3721,6 +3734,7 @@ export class PiRuntimeService {
   }
 
   setAgentRunStarter(starter: AgentRunStarter | null): void { this.agentRunStarter = starter; }
+  setAgentSessionGate(gate: ((agentId: string) => Promise<void>) | null): void { this.agentSessionGate = gate; }
   setGoogleAccount(account: GoogleAccount | null): void { this.googleAccount = account; }
 
   private settleAgentRun(slot: RuntimeSlot): void {

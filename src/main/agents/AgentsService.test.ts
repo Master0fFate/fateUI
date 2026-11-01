@@ -28,6 +28,7 @@ async function fixture() {
     }),
     deliverAgentMessage: vi.fn(async (_path: string, _id: string, message: AgentMessage) => { delivered.push(message); }),
     refreshAgentSession: vi.fn(async () => undefined),
+    stopAgentSession: vi.fn(async () => undefined),
   };
   const host: AgentsHost = {
     workspace: vi.fn(async () => workspace), liveWorkspace: () => workspace, trustedProjects: async () => [projectPath],

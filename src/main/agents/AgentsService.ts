@@ -19,7 +19,7 @@ import { PageWatches } from './PageWatches';
 import { RoutineLedger } from './RoutineLedger';
 import { effectivePermission } from './RoutinePolicy';
 
-export type AgentWorkspace = Pick<PiRuntimeService, 'startAgentRun' | 'deliverAgentMessage' | 'refreshAgentSession'>;
+export type AgentWorkspace = Pick<PiRuntimeService, 'startAgentRun' | 'deliverAgentMessage' | 'refreshAgentSession' | 'stopAgentSession'>;
 export interface AgentHome { path: string; name: string; agentId: string; sessionId: string; file: string }
 export interface AgentsHost {
   workspace(project: { path: string; name: string; agentId?: string }): Promise<AgentWorkspace>;
@@ -185,8 +185,12 @@ export class AgentsService {
     if (!agent.enabled) await this.cancelMatching((active) => active.agent.id === agent.id);
     const state = await this.repository.state(agent.id);
     if (state?.homeProjectPath && state.homeSessionId) {
-      await this.host.homePermission?.(state.homeProjectPath, state.homeSessionId, agent.defaults.permission);
-      await this.host.liveWorkspace(state.homeProjectPath)?.refreshAgentSession(state.homeSessionId);
+      if (agent.enabled) {
+        await this.host.homePermission?.(state.homeProjectPath, state.homeSessionId, agent.defaults.permission);
+        await this.host.liveWorkspace(state.homeProjectPath)?.refreshAgentSession(state.homeSessionId);
+      } else {
+        await this.host.liveWorkspace(state.homeProjectPath)?.stopAgentSession(state.homeSessionId).catch(() => undefined);
+      }
     }
     this.changed({ agentId: agent.id });
     this.wake();
@@ -217,6 +221,8 @@ export class AgentsService {
         await this.repository.saveRoutine({ id: routine.id, expected: library.revisions[`routine:${routine.id}`]!, value: { name, agentId, message, intervalMinutes, timeZone, notify, osNotify, enabled: false } });
       }
       await this.cancelMatching((active) => active.agent.id === input.id);
+      const state = await this.repository.state(input.id);
+      if (state?.homeProjectPath && state.homeSessionId) await this.host.liveWorkspace(state.homeProjectPath)?.stopAgentSession(state.homeSessionId).catch(() => undefined);
     }
     await this.repository.remove(input.kind, input.id, input.expected);
     this.changed({});
@@ -227,6 +233,11 @@ export class AgentsService {
   }
   private schedule(routine: RoutineDefinition, anchor: number) {
     return { anchor: anchor + routine.intervalMinutes * 60_000, intervalMs: routine.intervalMinutes * 60_000, timeZone: routine.timeZone };
+  }
+
+  async assertHomeChatOpen(agentId: string): Promise<void> {
+    const { item } = await this.repository.getAgent(agentId);
+    if (!item.enabled) throw new Error('This Agent is turned off. Turn it back on to continue its chat.');
   }
 
   async currentPreset(preset: SavedAgentSession): Promise<SavedAgentSession> {
@@ -272,6 +283,8 @@ export class AgentsService {
     return { path: homePath, name: agent.name, agentId: agent.id, sessionId: home.sessionId, file: home.file };
   }
   private async deliver(agent: AgentDefinition, message: AgentMessage): Promise<string> {
+    const current = await this.repository.getAgent(agent.id).catch(() => null);
+    if (!current?.item.enabled) throw new Error(`Agent ${agent.name} is turned off; its chat did not receive this message.`);
     const home = await this.homeFor(agent);
     this.host.assertAdmission?.(home.path, home.sessionId);
     const workspace = await this.host.workspace({ path: home.path, name: home.name, agentId: home.agentId });

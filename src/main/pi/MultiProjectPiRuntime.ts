@@ -131,6 +131,7 @@ export interface MultiProjectPiRuntimeDeps {
   monitorRuns?: (projectPath: string) => Promise<MonitorRunsSource>;
   computerUse?: ComputerUsePort | null;
   agentRunStarter?: AgentRunStarter;
+  agentSessionGate?: (agentId: string) => Promise<void>;
   google?: GoogleAccount;
   defaults: () => Promise<SessionDefaults>;
   getDisabledModels?: () => readonly string[];
@@ -577,6 +578,7 @@ export class MultiProjectPiRuntime {
     if (this.deps.monitorRuns) service.setMonitorRunsSource(this.deps.monitorRuns);
     if (this.deps.computerUse) service.setComputerUse(this.deps.computerUse);
     if (this.deps.agentRunStarter) service.setAgentRunStarter(this.deps.agentRunStarter);
+    if (this.deps.agentSessionGate) service.setAgentSessionGate(this.deps.agentSessionGate);
     if (this.deps.google) service.setGoogleAccount(this.deps.google);
     service.setSessionSettledListener(() => this.deps.notifySessionSettled?.());
     if (this.deps.getDisabledModels) service.setDisabledModelsSource(this.deps.getDisabledModels);

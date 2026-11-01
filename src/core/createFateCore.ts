@@ -282,7 +282,9 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
     }) : undefined;
     const dependencies: MultiProjectPiRuntimeDeps = {
       adapter: options.adapter ?? createPiSdkAdapter(paths, { codemode: () => settings.get().piCodemode, dailyBudgetUsd: () => settings.get().dailyBudgetUsd,
-        currentAgentPreset: async (preset) => savedAgents ? savedAgents.currentPreset(preset) : preset, webSearch: () => settings.get().webSearchEnabled }),
+        currentAgentPreset: async (preset) => savedAgents ? savedAgents.currentPreset(preset) : preset,
+        assertAgentSession: (agentId) => savedAgents ? savedAgents.assertHomeChatOpen(agentId) : undefined,
+        webSearch: () => settings.get().webSearchEnabled }),
       ...(nativeWorkflowSchedulerFactory ? { nativeWorkflowSchedulerFactory } : {}),
       requireFreshExecutionIntent: explicitWorkOnly,
       paths,
@@ -308,6 +310,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
         if (!savedAgents) throw new Error('Agents are unavailable.');
         return savedAgents.startProjectRun(home, input);
       },
+      agentSessionGate: (agentId) => savedAgents ? savedAgents.assertHomeChatOpen(agentId) : Promise.resolve(),
       ...(options.google ? { google: options.google } : {}),
       ...(options.providerAuthUrlPresenter ? { providerAuthUrlPresenter: options.providerAuthUrlPresenter } : {}),
       ...(options.attention ? { notifySessionSettled: () => options.attention!.sessionSettled() } : {}),

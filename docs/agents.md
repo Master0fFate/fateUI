@@ -6,7 +6,7 @@ An **Agent** is a saved persona with exactly one ongoing conversation of its own
 
 1. Select **Agents** in the sidebar and **+** to create one. The editor opens in **Settings → Agent → Saved agents**: name, avatar, model, thinking level, permission, tone, Skills and instructions. Select **Save agent**.
 2. Click the Agent in the sidebar. Its conversation opens in the main pane and the sidebar stays on **Agents**. There is one conversation per Agent; it is not listed under any project.
-3. Ask for work in a project, for example “check why the build fails in fateUI”. The Agent starts a **run** with the `run_in_project` tool and answers right away. When the run finishes, its result is posted into the Agent's conversation and the Agent continues from there.
+3. Ask for work in a project, for example “check why the build fails in fateUI”. The Agent starts a **run** with the `run_in_project` tool and answers right away. When the run finishes, its result is posted into the Agent's conversation and the Agent continues from there. The Agent is an orchestrator: it delegates every task, either to a run in your project or to a spawned child agent with its own model and effort, replies immediately with a short line such as “Let me get that task started for you”, and reports results when they land.
 
 The dot next to an Agent shows a run in progress, or unread items in its inbox (red when one of them failed). The **Monitor** in the inspector lists an Agent's runs while its conversation is open, and a project's Agent runs while that project is open. **Open run** shows the run's own conversation.
 
@@ -76,6 +76,7 @@ An Agent can read your Gmail and your primary Google Calendar, and send mail or 
 - The Agent's conversation and its runs have `web_search` and `web_fetch` at every permission level, and the Agent uses them before the browser for simple lookups. Search queries go to Parallel; **Settings → Agent → Web search** turns search off. See [Web search and fetch](features.md#web-search-and-fetch).
 - User-installed Pi extensions and project-local code are not loaded into Agent conversations or runs.
 - A run stops after 30 minutes. At most four runs are active at once, and a project keeps at most four live conversations; when they are full, the run fails instead of closing your work. Interrupted runs are not replayed.
+- **Turn off** on an Agent's row stops its conversation for real: any reply in progress is aborted, the session process ends, its runs are cancelled and nothing can be sent into the chat until you turn it back on. The saved conversation is kept and readable.
 - Editing an Agent applies to its conversation the next time it starts; an idle conversation restarts right away.
 - A Git worktree is a separate checkout, **not** a security sandbox. Check the diff before you integrate or publish it.
 - Runs contact your configured AI provider. The app does not run Routines while closed, offline, or asleep.
