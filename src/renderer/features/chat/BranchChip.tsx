@@ -109,7 +109,7 @@ export function BranchChip({ locked }: { locked: boolean }) {
             <div className="branch-option" key={`${ref.kind}:${ref.name}`}>
               <button className="branch-pick" type="button" data-active={ref.current} disabled={locked || busy || ref.current} onClick={() => void pick(ref)}>
                 <GitBranch size={13} aria-hidden="true" />
-                <span><strong>{ref.name}{ref.kind === 'remote' && <em>remote</em>}{ref.worktreePath && <em>worktree</em>}</strong><small>{ref.worktreePath ?? ref.upstream ?? ''}</small></span>
+                <span><strong><span>{ref.name}</span>{ref.kind === 'remote' && <em>remote</em>}{ref.worktreePath && <em>worktree</em>}</strong><small>{ref.worktreePath ?? ref.upstream ?? ''}</small></span>
                 {ref.current && <Check size={12} aria-hidden="true" />}
               </button>
               {ref.kind === 'local' && !locked && (

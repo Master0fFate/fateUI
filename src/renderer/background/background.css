@@ -9,3 +9,5 @@
 .background-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0; }
 .background-help { color: var(--theme-muted); font-size: 11px; line-height: 1.5; }
 .background-settings .settings-theme-row > div { min-width: 0; overflow-wrap: anywhere; }
+:root[data-compact-mode="true"] .background-actions { padding: 6px 10px; }
+:root[data-compact-mode="true"] .background-help { padding: 0 10px 6px; }

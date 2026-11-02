@@ -1013,7 +1013,7 @@ body.is-resizing-composer { cursor: ns-resize; user-select: none; }
 .settings-theme-row > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .settings-theme-row strong { color: var(--theme-text-soft); font-size: 11px; font-weight: 600; }
 .settings-theme-row small { color: var(--theme-muted); font-size: 10px; line-height: 1.4; }
-.settings-theme-select, .settings-font-select { width: 190px; }
+.settings-theme-select, .settings-font-select { width: 190px; flex-shrink: 0; max-width: 50%; }
 .settings-font-group .settings-theme-row + .settings-theme-row { border-top: 1px solid var(--theme-border); }
 .settings-font-preview { display: flex; min-height: 42px; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; border-top: 1px solid var(--theme-border); color: var(--theme-text-soft); font-size: 11px; }
 .settings-font-preview span { white-space: nowrap; }
@@ -1984,6 +1984,7 @@ body.is-resizing-horizontal-pane { cursor: row-resize; user-select: none; }
 .branch-pick > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .branch-pick strong, .branch-pick small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-pick strong { display: flex; align-items: center; gap: 5px; color: inherit; font-size: 10px; font-weight: 580; }
+.branch-pick strong > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .branch-pick strong em { flex: none; padding: 0 4px; border: 1px solid var(--theme-border-strong); border-radius: 4px; color: var(--theme-subtle); font-size: 7px; font-style: normal; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .branch-pick small { color: var(--theme-subtle); font: 8px var(--font-code); }
 .branch-option { position: relative; }
