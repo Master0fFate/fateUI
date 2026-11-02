@@ -770,7 +770,7 @@ function NetworkAgentProjection() {
   useEffect(() => { if (web && phase === 'observing') void useRuntimeStore.getState().loadNetworkViews(web, 'agents'); }, [web, snapshot, phase]);
   if (!web || !currentNetworkScope() || views.scopeKey !== currentNetworkScope()?.key) return <p role="status">Agents and tasks are not current. Host work may continue.</p>;
   return <section className="subagent-sessions" aria-label="Host agents and tasks"><h2>Teams</h2>
-    <button type="button" disabled={!canMutateNetwork(web, 'agent.control')} onClick={() => void useRuntimeStore.getState().runNetworkMutation(web, 'agent.control', (scope) => web.controlTeam(scope, { action: 'createTeam' }))}>Create Team</button>
+    <button type="button" disabled={!canMutateNetwork(web, 'agent.control')} onClick={() => void useRuntimeStore.getState().runNetworkMutation(web, 'agent.control', (scope) => web.controlTeam(scope, { action: 'createTeam' }))}>Create team</button>
     {views.teams.status === 'ready' ? <>{views.teams.value.truncated && <p>Team list is partial.</p>}{views.teams.value.teams.map((team) => <section key={team.id} className="agent-tree-branch" aria-label={`Team ${team.id}`}>
       <h3>{team.id} · {team.status}{team.selected ? ' · Current' : ''} · {team.activeTurns} active turns</h3><AgentTeamLifecycleControls team={team} />
       {team.nodesTruncated && <p>Node list is partial. Missing rows do not prove work is stopped.</p>}
@@ -805,11 +805,11 @@ function DesktopSubagentSessionsPanel() {
   const order = useRuntimeStore((state) => state.subagentOrder);
   const runStructure = useRuntimeStore(useShallow((state) => state.subagentOrder.map((id) => {
     const run = state.subagentsById[id];
-    return `${id}\0${run?.status ?? ''}\0${run?.parentToolCallId ?? ''}\0${run?.workflowId ?? ''}`;
+    return `${id}\0${run?.status ?? ''}\0${run?.parentToolCallId ?? ''}\0${run?.workflowId ?? ''}\0${state.toolsById[run?.parentToolCallId ?? '']?.status ?? ''}`;
   })));
   const runsById = useRuntimeStore.getState().subagentsById;
-  const toolProjection = useRuntimeStore(useShallow((state) => ({ toolsById: state.toolsById, version: state.toolsVersion })));
-  const toolsById = toolProjection.toolsById;
+  const workflowParentStatus = useRuntimeStore((state) => (state.runtime.subagentWorkflows ?? []).map((workflow) => state.toolsById[workflow.parentToolCallId]?.status ?? '').join('|'));
+  const toolsById = useRuntimeStore.getState().toolsById;
   const selectedAgent = useUiStore((state) => state.selectedAgent);
   const { panelRef, height: previewHeight, minimum, maximum, resize: resizePreview } = usePaneResize(140, 180, 260);
   const goalProjection = useGoalMaxStore(useShallow((state) => ({
@@ -821,6 +821,7 @@ function DesktopSubagentSessionsPanel() {
   const clearFlightDeckJump = useUiStore((state) => state.clearFlightDeckJump);
   const showToast = useUiStore((state) => state.showToast);
   void runStructure;
+  void workflowParentStatus;
   const agentTeams = runtime.agentTeams ?? [];
   const teamNodesById = useMemo(() => {
     const indexed = new Map<string, AgentTeamSelection>();
@@ -861,7 +862,7 @@ function DesktopSubagentSessionsPanel() {
       retained = Boolean(team && nodeId && team.nodes.some((node) => node.id === nodeId));
     } else return;
     if (retained) return;
-    showToast({ kind: 'info', title: 'Activity not retained', message: 'That agent activity is no longer available in the bounded recorder.' });
+    showToast({ kind: 'info', title: 'Activity not retained', message: 'That agent activity is no longer kept.' });
     clearFlightDeckJump(jump.nonce);
   }, [agentTeams, clearFlightDeckJump, jump, order, runtime.project?.path, runtime.sessionId, showToast]);
   const runs = order.flatMap((id) => runsById[id] ? [runsById[id]!] : []).reverse();

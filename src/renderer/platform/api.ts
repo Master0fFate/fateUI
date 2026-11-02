@@ -3,7 +3,7 @@ import { selectFateMethods, type FateApi } from '../../client/FateApi';
 import type { NetworkWorkspaceApi } from '../../client/NetworkWorkspaceApi';
 import type { DesktopConnectionApi, DesktopConnectionState } from '../../shared/contracts/connections';
 import type { RemoteDesktopFateApi } from './RemoteDesktopFateApi';
-import { bootstrapDesktopFateApi, createDesktopFateApi, readDesktopBridge, selectDesktopMethods, type DesktopFateApi, type DesktopOnlyApi } from './DesktopFateApi';
+import { bootstrapDesktopFateApi, createDesktopFateApi, readDesktopBridge, selectDesktopMethods, type DesktopOnlyApi } from './DesktopFateApi';
 import { desktopClientCapabilities, desktopHostCapabilities, type ClientCapabilities, type Feature, type FeatureSupport, type HostCapabilities } from '../../shared/protocol/capabilities';
 import { capabilityAvailable, negotiateCapabilities } from './capabilityPolicy';
 import type { ManualTerminalApi } from '../../shared/contracts/terminal';
@@ -258,6 +258,4 @@ export function getTerminalApiOptional(): ManualTerminalApi | undefined {
   return api.desktop;
 }
 
-export function hasDesktopApi(): boolean { return Boolean(getDesktopApiOptional()); }
-export function createDesktopApi(bridge: PiDesktopApi): DesktopFateApi { return createDesktopFateApi(bridge); }
 export function installDesktopFateApi(): void { installFateApi(bootstrapDesktopFateApi()); }

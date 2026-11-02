@@ -502,6 +502,10 @@ function DesktopInitializer() {
           unavailable('New session unavailable', 'Open a project before creating a session.');
           return;
         }
+        if (runtime.project.agentId) {
+          unavailable('New session unavailable', 'Agent chats keep a single conversation.');
+          return;
+        }
         if (runtime.sessionOperation || sessionReplacementBusy.current) {
           unavailable('Session change in progress', 'Wait for the current session change to finish.');
           return;

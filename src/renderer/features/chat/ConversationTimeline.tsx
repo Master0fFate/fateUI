@@ -82,9 +82,13 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
   })));
   const agentName = useAgentLabel(agentId);
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | null>(null);
   const [copying, setCopying] = useState(false);
   const [forking, setForking] = useState(false);
   const images = useHistoryImages(sessionId, 'message', messageId, message?.images, message?.deferredImages);
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+  }, []);
   if (!message || (message.role === 'assistant' && !message.text && !message.images?.length && !message.deferredImages)) return null;
   const richContent = message.role === 'assistant' || message.role === 'system' || Boolean(message.images?.length || message.deferredImages);
   const forkEntryId = forkEntryForMessage(messageId, forkMessageOrder, useRuntimeStore.getState().messagesById, forkPoints);
@@ -109,7 +113,11 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
       await writeClipboardText(message.text);
       setCopied(true);
       useUiStore.getState().showToast({ kind: 'success', title: 'Message copied', message: 'The message is on your clipboard.' });
-      window.setTimeout(() => setCopied(false), 1_500);
+      if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => {
+        copiedTimer.current = null;
+        setCopied(false);
+      }, 1_500);
     } catch {
       useUiStore.getState().showToast({ kind: 'error', title: 'Copy failed', message: 'The system clipboard is unavailable.' });
     } finally {
@@ -155,7 +163,7 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
       <footer className="message-footer">
         <span className="message-footer-meta">{message.role === 'system' ? <><Plug size={11} aria-hidden="true" /><span className="icon-label">{label} <span aria-hidden="true">·</span> {formatMessageTimestamp(message.timestamp)}</span></> : <>{label} <span aria-hidden="true">·</span> {formatMessageTimestamp(message.timestamp)}</>}</span>
         <span className="message-footer-actions">
-          <AppTooltip content={copied ? 'Copied' : message.text ? 'Copy message' : 'This message has no text to copy'} wrapTrigger><button className="message-action" type="button" aria-label={copied ? 'Message copied' : 'Copy message'} disabled={!message.text || copying} onClick={() => { void copyMessage(); }}><ActionContent text={copied ? 'copied' : 'copy'}>{copied ? <Check size={14} /> : <Copy size={14} />}</ActionContent></button></AppTooltip>
+          <AppTooltip content={copied ? 'Copied' : message.text ? 'Copy message' : 'This message has no text to copy'} wrapTrigger><button className="message-action" type="button" aria-label={copied ? 'Message copied' : 'Copy message'} disabled={!message.text || copying} onClick={() => { void copyMessage(); }}><ActionContent text={copied ? 'done' : 'copy'}>{copied ? <Check size={14} /> : <Copy size={14} />}</ActionContent></button></AppTooltip>
           {message.role === 'user' && <AppTooltip content="Review a correction as learning; no model request is made yet" wrapTrigger><button className="message-action" type="button" aria-label="Learn from this correction" disabled={!message.text} onClick={() => useLearningStore.getState().show(message.text)}><ActionContent text="learn"><Brain size={14} /></ActionContent></button></AppTooltip>}
           {message.role !== 'system' && <AppTooltip content={forkUnavailable ?? 'Fork from this message'} wrapTrigger><button className="message-action" type="button" aria-label="Fork from this message" disabled={!canFork || forking} onClick={() => { void forkMessage(); }}><ActionContent text="fork"><GitFork size={14} /></ActionContent></button></AppTooltip>}
           {message.role === 'assistant' && <AppTooltip content={forkUnavailable ?? 'Try again from this prompt'} wrapTrigger><button className="message-action" type="button" aria-label="Try again" disabled={!canFork || forking} onClick={() => { void forkMessage(true); }}><ActionContent text="retry"><RotateCcw size={14} /></ActionContent></button></AppTooltip>}
@@ -209,6 +217,9 @@ export function getConversationScrollbarMetrics(
 }
 
 const ConversationFooter = () => <div className="conversation-composer-spacer" aria-hidden="true" />;
+
+const timelineComponents = { Footer: ConversationFooter };
+const timelineItemKey = (_index: number, id: string) => id;
 
 export function followsMessage(previousEntry: { kind: string } | undefined): boolean {
   return previousEntry?.kind === 'message';
@@ -336,9 +347,9 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
   const sessionId = useRuntimeStore((state) => state.runtime.sessionId);
   const hasHistoricalTimeline = useRuntimeStore((state) => state.runtime.messages.length > 0 || Boolean(state.runtime.tools?.length));
   const timelineSessionKey = detailSessionKey(projectPath, sessionId);
-  const expansionCommand = requestedExpansion?.sessionKey === timelineSessionKey
+  const expansionCommand = useMemo(() => requestedExpansion?.sessionKey === timelineSessionKey
     ? requestedExpansion
-    : { sessionKey: timelineSessionKey, revision: 0, expanded: false };
+    : { sessionKey: timelineSessionKey, revision: 0, expanded: false }, [requestedExpansion, timelineSessionKey]);
   const headRef = useRef({ sessionKey: timelineSessionKey, order: displayOrder, firstItemIndex: FIRST_ITEM_INDEX });
   if (headRef.current.order !== displayOrder || headRef.current.sessionKey !== timelineSessionKey) {
     const previous = headRef.current;
@@ -383,7 +394,7 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
     if (index >= 0) {
       virtuosoRef.current?.scrollToIndex({ index, align: 'center', behavior: 'auto' });
     } else {
-      showToast({ kind: 'info', title: 'Activity not retained', message: 'That conversation activity is no longer available in the bounded timeline.' });
+      showToast({ kind: 'info', title: 'Activity not retained', message: 'That conversation activity is no longer kept.' });
     }
     clearFlightDeckJump(flightDeckJump.nonce);
   }, [clearFlightDeckJump, displayOrder, flightDeckJump, projectPath, sessionId, showToast]);
@@ -465,11 +476,13 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
     scrollerRef.current?.removeEventListener('scroll', updatePinnedState);
     scrollerRef.current?.removeEventListener('wheel', markUserScrollIntent);
     scrollerRef.current?.removeEventListener('touchmove', markUserScrollIntent);
+    scrollerRef.current?.removeEventListener('keydown', markUserScrollIntent);
     scrollerRef.current = nextScroller;
     setScrollerElement(nextScroller);
     nextScroller?.addEventListener('scroll', updatePinnedState, { passive: true });
     nextScroller?.addEventListener('wheel', markUserScrollIntent, { passive: true });
     nextScroller?.addEventListener('touchmove', markUserScrollIntent, { passive: true });
+    nextScroller?.addEventListener('keydown', markUserScrollIntent);
   }, [markUserScrollIntent, updatePinnedState]);
 
   useLayoutEffect(() => {
@@ -565,6 +578,7 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
       scrollerRef.current?.removeEventListener('scroll', updatePinnedState);
       scrollerRef.current?.removeEventListener('wheel', markUserScrollIntent);
       scrollerRef.current?.removeEventListener('touchmove', markUserScrollIntent);
+      scrollerRef.current?.removeEventListener('keydown', markUserScrollIntent);
     };
   }, [cancelScheduledFollow, markUserScrollIntent, scheduleFollow, scheduleScrollbarRefresh, updatePinnedState]);
 
@@ -635,6 +649,12 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
     refreshScrollbar();
   };
 
+  const renderTimelineItem = useCallback((index: number, id: string) => {
+    const position = index - firstItemIndex;
+    const previousEntry = position > 0 ? timelineById[displayOrder[position - 1] ?? ''] : undefined;
+    return <div className="timeline-row" data-entry-kind={timelineById[id]?.kind} data-follows-message={followsMessage(previousEntry) || undefined}><TimelineRow id={id} waitPollCount={waitPollCountById[id]} expansionCommand={expansionCommand} /></div>;
+  }, [displayOrder, expansionCommand, firstItemIndex, timelineById, waitPollCountById]);
+
   return (
     <ConversationImageViewerProvider>
       <div className="conversation" aria-label="Conversation timeline" aria-live="polite" data-entry-count={order.length} data-visible-entry-count={displayOrder.length}>
@@ -644,13 +664,9 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
         className="conversation-virtuoso"
         data={displayOrder}
         firstItemIndex={firstItemIndex}
-        computeItemKey={(_index, id) => id}
-        itemContent={(index, id) => {
-          const position = index - firstItemIndex;
-          const previousEntry = position > 0 ? timelineById[displayOrder[position - 1] ?? ''] : undefined;
-          return <div className="timeline-row" data-entry-kind={timelineById[id]?.kind} data-follows-message={followsMessage(previousEntry) || undefined}><TimelineRow id={id} waitPollCount={waitPollCountById[id]} expansionCommand={expansionCommand} /></div>;
-        }}
-        components={{ Footer: ConversationFooter }}
+        computeItemKey={timelineItemKey}
+        itemContent={renderTimelineItem}
+        components={timelineComponents}
         scrollerRef={bindScroller}
         atBottomStateChange={handleAtBottomChange}
         startReached={loadOlderHistory}

@@ -542,7 +542,7 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
   const piMigration = new PiMigrationService();
   runtime.setEventSink((events) => {
     if (connections && !connections.isLocal) return;
-    try { recovery?.remember(runtime.getState(false)); } catch { /* Snapshot failures must never drop live events. */ }
+    recovery?.remember(() => runtime.getState(false));
     let batch: unknown;
     try {
       batch = piEventBatchSchema.parse(events);

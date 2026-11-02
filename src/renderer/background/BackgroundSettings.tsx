@@ -14,7 +14,7 @@ const effectOptions: { value: BackgroundEffect; label: string }[] = [
   { value: 'original', label: 'Original' },
 ];
 
-export function BackgroundSettings() {
+export function BackgroundSettings({ compact }: { readonly compact: boolean }) {
   const { record, ready, error: storageError, save } = useBackground();
   const skin = useSyncExternalStore(subscribeSkinChanges, getAppliedSkin, getAppliedSkin);
   const [busy, setBusy] = useState(false);
@@ -42,8 +42,8 @@ export function BackgroundSettings() {
             if (file) void change(async () => { const effect = record?.effect ?? 'color'; const { image, source } = await prepareBackground(file, effect); await save({ image, source, effect, name: file.name.slice(0, 160), opacity: record?.opacity ?? 0.1 }); });
           }} />
         </div>
-        {record && <div className="settings-theme-row"><div><strong>Effect</strong><small>{record.source ? 'Mono inks the image with the theme color. Every other effect keeps the image hues.' : 'Choose the image again to enable effects.'}</small></div><SelectControl label="Background effect" value={record.effect ?? 'mono'} disabled={busy || !record.source} options={effectOptions} onValueChange={(value) => { const source = record.source; if (source && isBackgroundEffect(value)) void change(async () => save({ ...record, effect: value, image: await renderBackgroundEffect(source, value) })); }} /></div>}
-        {record && <div className="settings-theme-row"><div><strong>Image strength</strong><small>Keep the image quiet enough to read over.</small></div><SelectControl label="Background strength" value={String(record.opacity)} disabled={busy} options={[{ value: '0.06', label: 'Subtle · 6%' }, { value: '0.1', label: 'Balanced · 10%' }, { value: '0.16', label: 'Visible · 16%' }]} onValueChange={(value) => void change(() => save({ ...record, opacity: Number(value) }))} /></div>}
+        {record && <div className="settings-theme-row"><div><strong>Effect</strong><small>{record.source ? 'Mono inks the image with the theme color. Every other effect keeps the image hues.' : 'Choose the image again to enable effects.'}</small></div><SelectControl compact={compact} className="settings-theme-select" label="Background effect" value={record.effect ?? 'mono'} disabled={busy || !record.source} options={effectOptions} onValueChange={(value) => { const source = record.source; if (source && isBackgroundEffect(value)) void change(async () => save({ ...record, effect: value, image: await renderBackgroundEffect(source, value) })); }} /></div>}
+        {record && <div className="settings-theme-row"><div><strong>Image strength</strong><small>Keep the image quiet enough to read over.</small></div><SelectControl compact={compact} className="settings-theme-select" label="Background strength" value={String(record.opacity)} disabled={busy} options={[{ value: '0.06', label: 'Subtle · 6%' }, { value: '0.1', label: 'Balanced · 10%' }, { value: '0.16', label: 'Visible · 16%' }]} onValueChange={(value) => void change(() => save({ ...record, opacity: Number(value) }))} /></div>}
         {skin.background && <p className="background-help">This skin supplies a background. A personal image overrides it; removing the personal image restores the pack background.</p>}
         <p className="background-help">Background changes save immediately on this device, separately from the skin and color settings.</p>
         {(error ?? storageError) && <p role="alert" className="settings-error">{error ?? storageError}</p>}

@@ -3,6 +3,7 @@ import { Bell, BellDot, BellOff, BellRing, Bot, MoreHorizontal, Pencil, Plus, Po
 import { useEffect, useMemo, useState } from 'react';
 import type { AgentDefinition, AgentInboxItem, AgentLibrary } from '../../../shared/contracts/agents';
 import { AppTooltip } from '../../components/AppTooltip';
+import { useMinuteNow } from '../../components/useMinuteNow';
 import { formatRelativeTime } from '../../lib/relativeTime';
 import { getDesktopApi } from '../../platform/api';
 import { useSkinComponents } from '../../skins/SkinProvider';
@@ -42,7 +43,7 @@ export function SidebarAgents() {
   const [query, setQuery] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [showInbox, setShowInbox] = useState(false);
-  const now = useMemo(() => Date.now(), [library, inbox]);
+  const now = useMinuteNow(true);
   const latestUnread = useMemo(() => {
     const latest = new Map<string, AgentInboxItem>();
     for (const item of inbox.items) if (item.readAt === null && !latest.has(item.agentId)) latest.set(item.agentId, item);
@@ -155,7 +156,7 @@ export function SidebarAgents() {
         </button>
       </AppTooltip>
     </div>
-    {showInbox ? <AgentInboxPanel query={needle} /> : <div className="folder-list" aria-label="Agents" aria-busy={loading}>
+    {showInbox ? <AgentInboxPanel query={needle} now={now} /> : <div className="folder-list" aria-label="Agents" aria-busy={loading}>
       <div className="session-list">{visible.map(row)}</div>
       {!loading && !visible.length && (
         <div className="empty-sessions">

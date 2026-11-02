@@ -3555,7 +3555,7 @@ describe('PiRuntimeService', () => {
     expect(state.commands).toEqual([
       { name: 'login', description: 'Connect a Pi model provider with OAuth or an API key', source: 'builtin' },
       { name: 'logout', description: 'Disconnect a Pi model provider', source: 'builtin' },
-      { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax, pause, resume, clear', source: 'builtin' },
+      { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax <objective>, pause, resume, clear', source: 'builtin' },
       { name: 'parallax', description: 'Control Parallax', source: 'extension' },
       { name: 'review', description: 'Review changes', source: 'prompt' },
       { name: 'skill:vibesecurity', description: 'Defensive security review', source: 'skill' },
@@ -5052,7 +5052,7 @@ describe('PiRuntimeService', () => {
     const state = await service.openProject({ path: '/project', name: 'project', trusted: true });
     expect(state.status).toBe('auth-required');
     expect(state.sessionId).toBe('session-1');
-    expect(state.error?.actionable).toContain('Connect your AI');
+    expect(state.error?.actionable).toContain('/login');
     expect(fake.adapter.createRuntime).toHaveBeenCalledOnce();
     expect(fake.session.bindExtensions).toHaveBeenCalledOnce();
     await service.dispose();

@@ -41,7 +41,7 @@
   border: 1px solid var(--theme-border, #555);
   border-radius: 0;
   padding: 3px 8px;
-  background: var(--theme-background, #0c0c0c);
+  background: var(--theme-raised, #151515);
   color: inherit;
   font: inherit;
 }

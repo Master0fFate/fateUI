@@ -201,6 +201,7 @@ export function MusicPlayerDock() {
   useEffect(() => {
     if (panelRef.current) panelRef.current.inert = !open;
     if (playlistRef.current) playlistRef.current.inert = !open || !playlistOpen;
+    if (open && audioRef.current) setCurrentTime(audioRef.current.currentTime);
     if (open && !queue) requestAnimationFrame(() => sourceRef.current?.focus());
   }, [open, playlistOpen, queue]);
 
@@ -734,7 +735,7 @@ export function MusicPlayerDock() {
         }}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onTimeUpdate={(event) => { if (open) setCurrentTime(event.currentTarget.currentTime); }}
         onDurationChange={(event) => {
           if (!Number.isFinite(event.currentTarget.duration)) return;
           const nextDuration = event.currentTarget.duration;

@@ -51,10 +51,10 @@
 :root[data-skin="m3-expressive"] .sidebar-toolbar-action > button { width: 40px; height: 40px; border-radius: 50%; }
 /* Icon-only controls share a layout contract: UA button padding must not
    displace or squeeze SVGs when compact mode reduces the circular surface. */
-:root[data-skin="m3-expressive"] :is(.sidebar-toolbar-action > button, .icon-button, .composer .send-button, .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button), .music-controls button, .music-dock-toggle, .browser-toolbar button, .browser-tab-close, .browser-new-tab) {
+:root[data-skin="m3-expressive"] :is(.sidebar-toolbar-action > button, .icon-button, .composer .send-button, .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button, .learning-indicator), .music-controls button, .music-dock-toggle, .browser-toolbar button, .browser-tab-close, .browser-new-tab) {
   display: grid; place-items: center; box-sizing: border-box; padding: 0; line-height: 0;
 }
-:root[data-skin="m3-expressive"] :is(.sidebar-toolbar-action > button, .icon-button, .composer .send-button, .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button), .music-controls button, .music-dock-toggle, .browser-toolbar button, .browser-tab-close, .browser-new-tab) > svg {
+:root[data-skin="m3-expressive"] :is(.sidebar-toolbar-action > button, .icon-button, .composer .send-button, .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button, .learning-indicator), .music-controls button, .music-dock-toggle, .browser-toolbar button, .browser-tab-close, .browser-new-tab) > svg {
   display: block; flex: none; margin: 0;
 }
 :root[data-skin="m3-expressive"] .music-controls .music-play svg { transform: none; }
@@ -118,8 +118,8 @@
 :root[data-skin="m3-expressive"] .effort-slider-value { font-weight: 600; letter-spacing: .02em; text-transform: none; }
 :root[data-skin="m3-expressive"] .model-setting-toggle { border-radius: 50%; }
 :root[data-skin="m3-expressive"] .composer-toolbar :is(.composer-project-button, .composer-branch) { min-height: 34px; padding-inline: 12px; border-radius: 24px; background: var(--theme-raised); }
-:root[data-skin="m3-expressive"] .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button) { display: grid; box-sizing: border-box; flex: 0 0 var(--m3-action-size); width: var(--m3-action-size); min-width: var(--m3-action-size); height: var(--m3-action-size); min-height: var(--m3-action-size); place-items: center; border-radius: 50%; background: var(--theme-raised); padding: 0; }
-:root[data-skin="m3-expressive"] .composer-toolbar .tooltip-trigger:has(> :is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button)) { flex: 0 0 var(--m3-action-size); min-width: var(--m3-action-size); }
+:root[data-skin="m3-expressive"] .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button, .learning-indicator) { display: grid; box-sizing: border-box; flex: 0 0 var(--m3-action-size); width: var(--m3-action-size); min-width: var(--m3-action-size); height: var(--m3-action-size); min-height: var(--m3-action-size); place-items: center; border-radius: 50%; background: var(--theme-raised); padding: 0; }
+:root[data-skin="m3-expressive"] .composer-toolbar .tooltip-trigger:has(> :is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button, .learning-indicator)) { flex: 0 0 var(--m3-action-size); min-width: var(--m3-action-size); }
 :root[data-skin="m3-expressive"] :is(.tool-card, .queued-message, .goalmax-task-strip, .goalmax-rail, .subagent-chat-preview, .subagent-session-row, .browser-annotation-editor) { border-radius: 16px; box-shadow: none; }
 :root[data-skin="m3-expressive"] .agent-tree-root { min-height: 88px; margin: 4px 10px 10px; padding: 18px; border-radius: 24px; border-color: var(--theme-border); background: var(--theme-raised); }
 :root[data-skin="m3-expressive"] .agent-tree-root { grid-template-columns: var(--m3-agent-icon-size) minmax(0, 1fr) auto; }

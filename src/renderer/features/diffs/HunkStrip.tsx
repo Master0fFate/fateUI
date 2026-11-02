@@ -2,7 +2,7 @@ import { Check, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import type { GitHunk } from '../../../shared/contracts/ipc';
 import { useUiStore } from '../../stores/uiStore';
-import { useWorkspaceStore } from '../../stores/workspaceStore';
+import { messageOf, useWorkspaceStore } from '../../stores/workspaceStore';
 
 function rejectionFeedback(path: string, hunk: GitHunk): string {
   return `I rejected this change in ${path} and reverted it:\n\n\`\`\`diff\n${hunk.text}\n\`\`\`\n\nDo not reapply it. Explain what you intended and propose a different approach if the change is still needed.`;
@@ -26,6 +26,8 @@ export function HunkStrip({ path }: { path: string }) {
     try {
       await revertHunk(path, hunk.index, hunk.header);
       requestComposerDraft(rejectionFeedback(path, hunk), false, 'Rejected hunk feedback ready. Review it before sending.');
+    } catch (caught) {
+      useUiStore.getState().showToast({ kind: 'error', title: 'Revert failed', message: messageOf(caught) });
     } finally {
       setBusy(null);
     }

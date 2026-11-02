@@ -460,7 +460,7 @@ export class MultiProjectPiRuntime {
 
   private observeBackgroundAttention(projectPath: string, service: PiRuntimeService, events: readonly PiEvent[]): void {
     if (this.manager.focusedProjectPath === projectPath) return;
-    const sessionId = service.getState(false).sessionId;
+    const sessionId = service.selectedSessionId;
     if (!sessionId) return;
     const remembered = this.attentionByProject.get(projectPath) ?? new Map<string, NonNullable<SessionSummary['attention']>>();
     const update = backgroundAttentionUpdate(events);
@@ -596,7 +596,7 @@ export class MultiProjectPiRuntime {
     service.setEventSink((events) => {
       this.manager.touch(path);
       if (this.manager.focusedProjectPath === path) {
-        const sessionId = service.getState(false).sessionId;
+        const sessionId = service.selectedSessionId;
         if (sessionId) this.attentionByProject.get(path)?.delete(sessionId);
         this.rendererSink(events);
       } else {

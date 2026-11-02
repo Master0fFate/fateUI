@@ -56,7 +56,7 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
   const Icon = presentedStatus === 'running' ? LoaderCircle : presentedStatus === 'error' ? CircleAlert : presentedStatus === 'stopped' ? CircleStop : Check;
   const statusLabel = presentedStatus === 'running' ? 'Running' : presentedStatus === 'error' ? 'Error' : presentedStatus === 'stopped' ? 'Stopped' : 'Completed';
   const presentedStatusLabel = waitPollCount > 1 ? `${waitPollCount} wait polls · ${statusLabel}` : statusLabel;
-  const summary = tool.input.replace(/\s+/g, ' ').trim() || 'No input';
+  const summary = previewHotPathText(tool.input, 240).text.replace(/\s+/g, ' ').trim() || 'No input';
   const ariaStatus = isSubagentTool && presentedStatus === 'succeeded' ? 'completed' : presentedStatus;
   const childIds = [...new Set(tool.subagentRunIds ?? [])];
   const hasChildLink = childIds.length > 0 || tool.name === 'agent_workflow';

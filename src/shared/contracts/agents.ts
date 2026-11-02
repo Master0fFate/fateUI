@@ -4,7 +4,7 @@ import type { RuntimeState } from './ipc';
 const id = z.string().uuid();
 const time = z.number().int().safe().nonnegative();
 const revision = z.number().int().positive().safe();
-const name = z.string().trim().min(1).max(80).refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), 'Names cannot contain control characters.');
+const name = z.string().trim().min(1, 'Add a name.').max(80).refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), 'Names cannot contain control characters.');
 export const agentPermissionSchema = z.enum(['read-only', 'edit', 'full-access']);
 export const agentModelSchema = z.object({ provider: z.string().min(1).max(200), id: z.string().min(1).max(500) }).strict();
 export const agentDefaultsSchema = z.object({
@@ -25,7 +25,7 @@ export const agentDefinitionSchema = agentDraftSchema.extend({
   revision, createdAt: time, updatedAt: time, deleted: z.boolean(),
 }).passthrough();
 export const routineDraftSchema = z.object({
-  name, agentId: id, message: z.string().trim().min(1).max(200_000), intervalMinutes: z.number().int().min(1).max(10_080),
+  name, agentId: id, message: z.string().trim().min(1, 'Add a message.').max(200_000), intervalMinutes: z.number().int('Use whole minutes.').min(1, 'Use 1 to 10080 minutes.').max(10_080, 'Use 1 to 10080 minutes.'),
   timeZone: z.string().min(1).max(100).refine((value) => { try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; } catch { return false; } }, 'Choose a valid IANA timezone.'),
   enabled: z.boolean(), notify: z.boolean(), osNotify: z.boolean(),
 }).strict();
@@ -37,7 +37,7 @@ const watchFields = z.object({
   name, agentId: id,
   url: z.string().trim().max(2048).refine((value) => { try { return ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; } }, 'Enter an http or https address.'),
   condition: watchConditionSchema, text: z.string().trim().max(500), price: z.number().positive().max(1_000_000_000).nullable(),
-  intervalMinutes: z.number().int().min(1).max(10_080), enabled: z.boolean(),
+  intervalMinutes: z.number().int('Use whole minutes.').min(1, 'Use 1 to 10080 minutes.').max(10_080, 'Use 1 to 10080 minutes.'), enabled: z.boolean(),
 }).strict();
 const watchTarget = (watch: z.infer<typeof watchFields>) => watch.condition === 'change' || (watch.condition === 'appears' || watch.condition === 'disappears' ? watch.text.length > 0 : watch.price !== null);
 export const watchDraftSchema = watchFields.refine(watchTarget, 'Add the text or price to watch for.');

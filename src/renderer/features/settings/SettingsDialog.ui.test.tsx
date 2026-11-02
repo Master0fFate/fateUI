@@ -168,7 +168,7 @@ describe('SettingsDialog feedback', () => {
       ...desktopHostCapabilities, supported: { ...desktopHostCapabilities.supported, updater: false },
     });
     render(<SettingsDialog />);
-    const button = await screen.findByRole('button', { name: 'Check for Updates' });
+    const button = await screen.findByRole('button', { name: 'Check for updates' });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('title', 'Application updates are managed on the local desktop.');
     expect(bridge.onUpdatesProgress).not.toHaveBeenCalled();
@@ -441,7 +441,7 @@ describe('SettingsDialog feedback', () => {
 
     await screen.findByRole('checkbox', { name: /Performance mode/ });
     expect(bridge.checkForUpdates).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Check for Updates' }));
+    await user.click(screen.getByRole('button', { name: 'Check for updates' }));
 
     expect(bridge.checkForUpdates).toHaveBeenCalledOnce();
     expect(await screen.findByRole('status')).toHaveTextContent('FateGUI is up to date. Installed version: 1.4.0');
@@ -454,7 +454,7 @@ describe('SettingsDialog feedback', () => {
     const user = userEvent.setup();
     render(<SettingsDialog />);
 
-    const check = await screen.findByRole('button', { name: 'Check for Updates' });
+    const check = await screen.findByRole('button', { name: 'Check for updates' });
     await user.click(check);
     expect(check).toBeDisabled();
     await user.click(check);

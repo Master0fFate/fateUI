@@ -59,6 +59,7 @@ const diskStore: RecoverySnapshotStore = {
 
 export class RecoverySnapshotService {
   private pending: RecoverySnapshot | null = null;
+  private reader: (() => Parameters<typeof snapshotFromRuntime>[0]) | null = null;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private lastWrite = 0;
   private flushing: Promise<void> = Promise.resolve();
@@ -90,16 +91,18 @@ export class RecoverySnapshotService {
   }
 
   peek(): RecoverySnapshot | null {
+    this.capture();
     return this.pending;
   }
 
   /** Persist the live runtime. Throttled so a stream does not hammer disk. */
-  remember(state: Parameters<typeof snapshotFromRuntime>[0]): void {
-    this.pending = snapshotFromRuntime(state, this.now());
+  remember(read: () => Parameters<typeof snapshotFromRuntime>[0]): void {
+    this.reader = read;
     const wait = Math.max(0, WRITE_INTERVAL_MS - (this.now() - this.lastWrite));
     if (this.writeTimer) return;
     this.writeTimer = setTimeout(() => {
       this.writeTimer = null;
+      this.capture();
       this.flushing = this.flushing.then(() => this.persist(this.pending));
     }, wait);
     this.writeTimer.unref?.();
@@ -112,8 +115,20 @@ export class RecoverySnapshotService {
       this.writeTimer = null;
     }
     this.pending = null;
+    this.reader = null;
     await this.flushing;
     await this.store.remove(this.filePath).catch(() => undefined);
+  }
+
+  private capture(): void {
+    const read = this.reader;
+    if (!read) return;
+    this.reader = null;
+    try {
+      this.pending = snapshotFromRuntime(read(), this.now());
+    } catch {
+      return;
+    }
   }
 
   private async persist(snapshot: RecoverySnapshot | null): Promise<void> {

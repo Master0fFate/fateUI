@@ -327,7 +327,7 @@ test('M3 Expressive independent preview, save, compact layout and restart', asyn
     await expectLoadedFontFace(page, 'Inter Variable');
     await expect(page.locator('html')).toHaveAttribute('data-interface-font', 'inter');
     await expect(page.locator('html')).toHaveAttribute('data-code-font', 'jetbrains-mono');
-    await settings.getByRole('button', { name: 'Reset to skin appearance defaults' }).click();
+    await settings.getByRole('button', { name: 'Use skin defaults' }).click();
     await expect(interfaceFont).toContainText('Roboto Flex');
     await expectLoadedFontFace(page, 'Roboto Flex Variable');
     await settings.getByRole('button', { name: 'Save changes' }).click();
@@ -343,7 +343,7 @@ test('M3 Expressive independent preview, save, compact layout and restart', asyn
     await stableSidebarSearch(page, 'search-mono');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await settings.getByRole('tab', { name: /Skins/u }).click();
-    await settings.getByRole('button', { name: 'Reset to skin appearance defaults' }).click();
+    await settings.getByRole('button', { name: 'Use skin defaults' }).click();
     await settings.getByRole('button', { name: 'Save changes' }).click();
     await settings.getByRole('button', { name: 'Close settings' }).click();
     await geometry(page, chromeRadius);

@@ -324,12 +324,20 @@ function safeMarkdownUrl(url: string, key: string): string {
 
 function CodeBlock({ child }: { child: ReactElement<{ className?: string; children?: ReactNode }> }) {
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+  }, []);
   const source = String(child.props.children ?? '').replace(/\n$/, '');
   const copy = async () => {
     try {
       await writeClipboardText(source);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1_500);
+      if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => {
+        copiedTimer.current = null;
+        setCopied(false);
+      }, 1_500);
     } catch {
       // The code remains selectable if the host clipboard is unavailable.
     }
@@ -390,17 +398,20 @@ export function MessageImages({ images }: { images: RuntimeImage[] }) {
   ))}</>;
 }
 
+function MarkdownImage({ src, alt }: { src?: string | undefined; alt?: string | undefined }) {
+  return <ChatImage src={src} alt={alt ?? ''} />;
+}
+
+const markdownPlugins = [remarkGfm, remarkAgentMentions];
+const markdownComponents = { a: AgentMentionLink, img: MarkdownImage, pre: MermaidAwarePre };
+
 export const AssistantMarkdown = memo(function AssistantMarkdown({ text, images = [] }: { text: string; images?: RuntimeImage[] | undefined }) {
   return (
     <div className="markdown-content">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkAgentMentions]}
+        remarkPlugins={markdownPlugins}
         urlTransform={safeMarkdownUrl}
-        components={{
-          a: AgentMentionLink,
-          img: ({ src, alt }) => <ChatImage src={src} alt={alt ?? ''} />,
-          pre: MermaidAwarePre,
-        }}
+        components={markdownComponents}
       >
         {text}
       </ReactMarkdown>

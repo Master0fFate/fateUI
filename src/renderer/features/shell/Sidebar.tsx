@@ -33,6 +33,7 @@ import { serializeSessionReference, SESSION_REFERENCE_TRANSFER_TYPE } from '../.
 import { AppTooltip } from '../../components/AppTooltip';
 import { IconButton } from '../../components/IconButton';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { useMinuteNow } from '../../components/useMinuteNow';
 import { DeferredPanel } from '../../components/DeferredPanel';
 import { useSkinComponents } from '../../skins/SkinProvider';
 import { SelectControl } from '../../components/SelectControl';
@@ -180,7 +181,6 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
   const [sessions, setSessions] = useState<SessionSummary[]>(runtime.sessions ?? []);
   const [renderExpanded, setRenderExpanded] = useState(!collapsed);
   const [expandedVisible, setExpandedVisible] = useState(!collapsed);
-  const [relativeNow, setRelativeNow] = useState(() => Date.now());
   const expandedSectionsRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(true);
   const navigationBusyRef = useRef(false);
@@ -280,16 +280,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
     }
     return () => { if (timer) clearTimeout(timer); };
   }, [collapsed]);
-  useEffect(() => {
-    if (collapsed || sessions.length === 0) return undefined;
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = () => {
-      setRelativeNow(Date.now());
-      timer = setTimeout(tick, 60_000 - Date.now() % 60_000 + 25);
-    };
-    timer = setTimeout(tick, 60_000 - Date.now() % 60_000 + 25);
-    return () => clearTimeout(timer);
-  }, [collapsed, sessions.length]);
+  const relativeNow = useMinuteNow(!collapsed && sessions.length > 0);
   useEffect(() => {
     const projectPath = runtime.project?.path;
     const canSearchRuntime = Boolean(getFateApiOptional()) && typeof getFateApiOptional()?.listSessions === 'function';
@@ -848,7 +839,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
             return { ...state, [path]: cached };
           });
           setPreviewCountByPath((state) => {
-            if (items.length === 0 && previewsByPath[path] && previewsByPath[path].length > 0) return state;
+            if (items.length === 0 && (state[path] ?? 0) > 0) return state;
             return { ...state, [path]: items.length };
           });
           setPreviewStateByPath((state) => ({ ...state, [path]: 'idle' }));
@@ -890,8 +881,13 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
 
   useEffect(() => {
     if (collapsed || query.trim()) return undefined;
-    const timer = window.setInterval(() => refreshPreviews(), 15_000);
-    return () => window.clearInterval(timer);
+    const tick = () => { if (!document.hidden) refreshPreviews(); };
+    const timer = window.setInterval(tick, 15_000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, [collapsed, query, projects]);
 
   const switchToProject = (path: string) => {
@@ -1447,7 +1443,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
               <div className="empty-sessions">
                 <FileText size={19} />
                 <p>No sessions yet</p>
-                {runtime.status === 'auth-required' && <span>Saved sessions remain available; authenticate to prompt Pi.</span>}
+                {runtime.status === 'auth-required' && <span>Type /login to connect a provider.</span>}
               </div>
             )}
           </div>
@@ -1468,7 +1464,7 @@ function DesktopSidebar({ collapsed, onToggle }: SidebarProps) {
           <button className="sidebar-settings-button sidebar-settings-rail-button" type="button" aria-label="Settings" onClick={() => openSettings(true)}><ActionContent text="cfg"><Settings size={18} /></ActionContent></button>
         </AppTooltip>
         <AppTooltip content="New session" wrapTrigger>
-          <button className="new-session icon-only" type="button" aria-label="New session" disabled={!runtime.project || replacementBusy} onClick={createSession}><ActionContent text="new"><MessageSquarePlus size={17} /></ActionContent></button>
+          <button className="new-session icon-only" type="button" aria-label="New session" disabled={!runtime.project || Boolean(runtime.project.agentId) || replacementBusy} onClick={createSession}><ActionContent text="new"><MessageSquarePlus size={17} /></ActionContent></button>
         </AppTooltip>
         <AppTooltip content="Open project" wrapTrigger><button type="button" aria-label="Open project" disabled={replacementBusy} onClick={selectProject}><ActionContent text="dir"><FolderOpen size={18} /></ActionContent></button></AppTooltip>
       </nav>}

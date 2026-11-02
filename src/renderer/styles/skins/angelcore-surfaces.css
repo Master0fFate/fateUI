@@ -11,7 +11,7 @@
   border-radius: var(--surface-surface-radius); border-color: var(--surface-border); background: var(--surface-background);
   box-shadow: none; backdrop-filter: none; font-family: var(--font-interface); font-size: var(--surface-font-size);
 }
-:root[data-skin][data-skin-styled] :is(.custom-select-item, .palette-item, .folder-action-item, .session-action-item, .composer-tools-list > button, .branch-popover > button) { min-height: var(--surface-row-height); border-radius: var(--surface-control-radius); font-size: var(--surface-font-size); }
+:root[data-skin][data-skin-styled] :is(.custom-select-item, .palette-item, .folder-action-item, .session-action-item, .composer-tools-list > button, .branch-pick) { min-height: var(--surface-row-height); border-radius: var(--surface-control-radius); font-size: var(--surface-font-size); }
 :root[data-skin][data-skin-styled] .tooltip { padding: var(--surface-padding); line-height: 1.5; max-width: min(48ch, calc(100vw - 24px)); }
 :root[data-skin][data-skin-styled] .tooltip-arrow { fill: var(--surface-background); stroke: var(--surface-border); }
 

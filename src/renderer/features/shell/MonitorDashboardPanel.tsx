@@ -93,7 +93,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
       } finally { busy = false; }
     };
     void read();
-    const timer = setInterval(() => void read(), 15_000);
+    const timer = setInterval(() => { if (!document.hidden) void read(); }, 15_000);
     return () => { active = false; clearInterval(timer); };
   }, [supported, project?.path, project?.trusted, sessionId, webScope?.workspaceId, webScope?.workspaceGeneration,
     webScope?.selectionRevision, section, offset, refresh]);
@@ -187,7 +187,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
       <div className="monitor-dashboard-body">
         {!shown && !error ? <p className="monitor-dashboard-empty activity-status" role="status"><Loader2 size={11} className="activity-spinner" aria-hidden="true" />Loading…</p> : null}
         {shown?.items.length === 0 && !error ? <p className="monitor-dashboard-empty">{shown.overall === 'unknown' || Object.values(shown.sources).some((status) => status !== 'ready')
-          ? 'No rows returned. A source is partial or unknown; this does not prove there is no active work.'
+          ? 'Some sources are unavailable, so active work may be missing.'
           : `No ${section === 'overview' ? 'active or flagged work' : section}.`}</p> : null}
         {shown ? <ol className="monitor-dashboard-list" start={offset + 1}>
           {shown.items.map((item) => {

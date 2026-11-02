@@ -9,7 +9,7 @@ const statusIcons = { succeeded: CircleCheck, failed: CircleAlert, interrupted: 
 const statusLabels = { succeeded: 'Done', failed: 'Failed', interrupted: 'Interrupted', notice: 'Alert' } as const;
 const kindIcons = { run: Play, routine: Repeat, watch: Eye } as const;
 
-export function AgentInboxPanel({ query }: { query: string }) {
+export function AgentInboxPanel({ query, now }: { query: string; now: number }) {
   const agents = useAgentsStore((state) => state.library.agents);
   const inbox = useAgentsStore((state) => state.inbox);
   const compactSessions = useUiStore((state) => state.compactSessions);
@@ -17,7 +17,6 @@ export function AgentInboxPanel({ query }: { query: string }) {
   const names = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.name])), [agents]);
   const known = inbox.items.filter((item) => names.has(item.agentId));
   const unread = agents.reduce((sum, agent) => sum + (inbox.unread[agent.id] ?? 0), 0);
-  const now = useMemo(() => Date.now(), [inbox]);
   const visible = known.filter((item) => (!unreadOnly || item.readAt === null)
     && (!query || `${names.get(item.agentId)} ${item.title} ${item.summary}`.toLocaleLowerCase().includes(query)));
 

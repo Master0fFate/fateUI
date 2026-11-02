@@ -343,6 +343,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
   useEffect(() => {
     if (!open || !desktopSettingsAvailable || activeSection !== 'system' || systemLoadStarted.current) return;
     let active = true;
+    let settled = false;
     systemLoadStarted.current = true;
     setSystemLoading(true);
     const diagnosticsRequest = getDesktopApi().getDiagnostics()
@@ -351,8 +352,14 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
     const logsRequest = getDesktopApi().getLogs()
       .then((value) => { if (active) setLogs(value); })
       .catch((error: unknown) => { if (active) setLogsError(error instanceof Error ? error.message : 'Application logs could not load.'); });
-    void Promise.allSettled([diagnosticsRequest, logsRequest]).then(() => { if (active) setSystemLoading(false); });
-    return () => { active = false; };
+    void Promise.allSettled([diagnosticsRequest, logsRequest]).then(() => {
+      settled = true;
+      if (active) setSystemLoading(false);
+    });
+    return () => {
+      active = false;
+      if (!settled) systemLoadStarted.current = false;
+    };
   }, [activeSection, open, desktopSettingsAvailable]);
 
   useEffect(() => {
@@ -736,9 +743,9 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   <div className="settings-group">
                     <div className="settings-theme-row"><div><strong>Palette</strong><small>Project Pi themes load after you trust the project.</small></div><SelectControl compact={appearance.compactMode} label="Interface theme" value={settings.themeId} className="settings-theme-select" options={themeCatalog.map((theme) => ({ value: theme.id, label: theme.name, detail: theme.tone === 'light' ? 'Light' : 'Dark' }))} onValueChange={(themeId) => setSettings({ ...settings, themeId })} /></div>
                   </div>
-                  <BackgroundSettings />
+                  <BackgroundSettings compact={appearance.compactMode} />
                   <div className="settings-title settings-title--spaced"><div><h3>Typography</h3></div></div>
-                  <button type="button" className="settings-inline-action" onClick={() => setSettings(resetSkinAppearance(settings))}>Reset to skin appearance defaults</button>
+                  <button type="button" className="settings-inline-action" onClick={() => setSettings(resetSkinAppearance(settings))}>Use skin defaults</button>
                   <p className="skin-pack-help">The selected skin supplies appearance defaults. Font and density changes override them for this skin only.</p>
                   {fontStatus.pending.length > 0 && <p className="skin-pack-help">Loading bundled skin font...</p>}
                   {Object.values(fontStatus.errors).map((error) => <p className="settings-error" role="alert" key={error}>{error}</p>)}
@@ -984,7 +991,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                 <div className="settings-panel" role="tabpanel" id="settings-panel-system" aria-labelledby="settings-tab-system">
                   <div className="settings-title"><div><h3>Updates</h3></div></div>
                   <div className="settings-group">
-                    <label className="settings-toggle"><div><strong>Beta branch</strong><small>Check for Updates also offers pre-releases.</small></div><input type="checkbox" checked={settings.betaUpdates} onChange={(event) => setSettings({ ...settings, betaUpdates: event.target.checked })} /><span aria-hidden="true" /></label>
+                    <label className="settings-toggle"><div><strong>Beta branch</strong><small>Check for updates also offers pre-releases.</small></div><input type="checkbox" checked={settings.betaUpdates} onChange={(event) => setSettings({ ...settings, betaUpdates: event.target.checked })} /><span aria-hidden="true" /></label>
                   </div>
                   <div className="settings-title settings-title--spaced"><div><h3>Pi diagnostics</h3></div></div>
                   {diagnosticsError
@@ -1036,7 +1043,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                 : <span className="update-check-result" role="status">{updateResult.message}</span>)}
             </div>
             <div className="settings-footer-actions">
-              <button type="button" className="update-check-link" aria-busy={checkingForUpdates} disabled={checkingForUpdates || !hasCapability('updater')} title={!hasCapability('updater') ? unavailableExplanation.updater : undefined} onClick={() => void checkForUpdates()}>{checkingForUpdates ? 'Checking for updates…' : 'Check for Updates'}</button>
+              <button type="button" className="update-check-link" aria-busy={checkingForUpdates} disabled={checkingForUpdates || !hasCapability('updater')} title={!hasCapability('updater') ? unavailableExplanation.updater : undefined} onClick={() => void checkForUpdates()}>{checkingForUpdates ? 'Checking for updates…' : 'Check for updates'}</button>
               <button type="button" className="primary-button" aria-busy={saving} disabled={!settingsLoaded || saving} onClick={() => void save()}><Save size={14} /><span className="icon-label">Save changes</span></button>
             </div>
           </footer>

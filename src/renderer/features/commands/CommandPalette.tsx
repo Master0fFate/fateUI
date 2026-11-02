@@ -18,7 +18,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { RuntimeState } from '../../../shared/contracts/ipc';
 import { openResource, useResourceSearch, type ResourceSearchItem } from '../resources/resourceSearch';
@@ -67,6 +67,8 @@ export function CommandPalette() {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const operationBusy = useRef(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const pendingFocus = useRef<HTMLElement | null>(null);
   const resources = useResourceSearch(query, open);
 
   const commands = useMemo<Command[]>(() => {
@@ -99,9 +101,11 @@ export function CommandPalette() {
     const effectiveModel = runtime.pendingModel ?? runtime.model;
     const newSessionReason = !runtime.project
       ? 'Open a project before creating a session.'
-      : runtime.sessionOperation
-        ? 'Wait for the current session change to finish.'
-        : undefined;
+      : runtime.project.agentId
+        ? 'Agent chats keep a single conversation.'
+        : runtime.sessionOperation
+          ? 'Wait for the current session change to finish.'
+          : undefined;
     const focusReason = connected ? undefined : 'Open and trust a project before focusing the composer.';
     const modelReason = !connected || !runtime.sessionId ? 'Start a session before changing its model.' : undefined;
     const thinkingReason = modelReason ?? (!effectiveModel?.reasoning ? 'The model selected for the next message does not support reasoning.' : undefined);
@@ -110,7 +114,7 @@ export function CommandPalette() {
       { id: 'open-project', label: 'Open project', hint: 'Ctrl/⌘ O', icon: FolderOpen, run: () => { if (Boolean(getFateApiOptional())) invoke('Open project', () => getDesktopApi().selectProject(), true); } },
       { id: 'new-session', label: 'New session', hint: 'Ctrl/⌘ N', icon: Bot, disabled: Boolean(newSessionReason), ...(newSessionReason ? { disabledReason: newSessionReason } : {}), run: () => { if (Boolean(getFateApiOptional())) invoke('New session', () => getFateApi().newSession(), true); } },
       { id: 'resources', label: 'Open resources', icon: Library, run: () => { actions.setSidebarCollapsed(false); actions.setSidebarTab('resources'); } },
-      { id: 'focus-composer', label: 'Focus composer', icon: Search, disabled: Boolean(focusReason), ...(focusReason ? { disabledReason: focusReason } : {}), run: () => document.querySelector<HTMLTextAreaElement>('#pi-composer')?.focus() },
+      { id: 'focus-composer', label: 'Focus composer', icon: Search, disabled: Boolean(focusReason), ...(focusReason ? { disabledReason: focusReason } : {}), run: () => { pendingFocus.current = document.querySelector<HTMLTextAreaElement>('#pi-composer'); } },
       { id: 'stop', label: 'Stop generation', hint: 'Esc', icon: Square, disabled: !runtime.streaming, ...(!runtime.streaming ? { disabledReason: 'Nothing is currently generating.' } : {}), run: () => { if (Boolean(getFateApiOptional())) void getFateApi().abort().catch((error: unknown) => actions.showToast({ kind: 'error', title: 'Stop generation failed', message: commandErrorMessage(error) })); } },
       { id: 'sidebar', label: 'Toggle sidebar', hint: 'Ctrl/⌘ B', icon: PanelLeft, run: actions.toggleSidebar },
       { id: 'inspector', label: 'Toggle inspector', icon: PanelRight, run: actions.toggleInspector },
@@ -194,6 +198,10 @@ export function CommandPalette() {
   const activeIndex = entries.length === 0 ? 0 : Math.min(selectedIndex, entries.length - 1);
   const activeEntry = entries[activeIndex];
 
+  useLayoutEffect(() => {
+    if (open) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [open]);
+
   useEffect(() => {
     if (!open || entries.length === 0) return;
     document.getElementById(`palette-option-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
@@ -262,7 +270,14 @@ export function CommandPalette() {
     }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay command-palette-overlay" />
-        <Dialog.Content className="command-palette" aria-describedby="command-description">
+        <Dialog.Content className="command-palette" aria-describedby="command-description"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const target = pendingFocus.current ?? returnFocus.current;
+            pendingFocus.current = null;
+            returnFocus.current = null;
+            if (target?.isConnected) target.focus({ preventScroll: true });
+          }}>
           <Dialog.Title className="visually-hidden">Command center</Dialog.Title>
           <Dialog.Description id="command-description" className="visually-hidden">Search commands and resources across Fate UI</Dialog.Description>
           <div className="palette-search">

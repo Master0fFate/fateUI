@@ -87,12 +87,12 @@ describe('RecoverySnapshot', () => {
     vi.useFakeTimers();
     const store = memoryStore();
     const service = new RecoverySnapshotService('/recovery.json', store, () => 10);
-    service.remember({
+    service.remember(() => ({
       project: { path: '/proj', name: 'proj', trusted: true },
       sessionId: 'sess-1',
       streaming: false,
       tools: [],
-    });
+    }));
     await vi.runAllTimersAsync();
     expect(store.files.get('/recovery.json')).toContain('"sessionId":"sess-1"');
     await service.markClean();

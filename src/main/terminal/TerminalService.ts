@@ -130,7 +130,7 @@ export class TerminalService {
   }
 
   create(ownerId: number, cols: number, rows: number): { id: string; shell: string; cwd: string } {
-    const project = this.runtime.getState(false).project;
+    const project = this.runtime.currentProject();
     if (!project?.trusted) throw new Error('Open and trust a project before starting a manual terminal.');
     const cwd = this.files.getRoot();
     const shell = this.resolveShell(cwd);
@@ -222,7 +222,7 @@ export class TerminalService {
   private owned(ownerId: number, id: string): OwnedTerminal {
     const terminal = this.terminals.get(id);
     if (!terminal || terminal.ownerId !== ownerId) throw new Error('Terminal session is unavailable.');
-    const project = this.runtime.getState(false).project;
+    const project = this.runtime.currentProject();
     if (!project?.trusted || project.path !== terminal.projectPath) {
       this.close(ownerId, id);
       throw new Error('Terminal session belongs to a different project.');

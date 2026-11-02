@@ -47,7 +47,7 @@ function createService(trusted = true) {
   let project = trusted ? { path: 'C:/project', trusted: true } : null;
   const service = new TerminalService(
     { getRoot: () => 'C:/project' } as never,
-    { getState: () => ({ project }) } as never,
+    { currentProject: () => project } as never,
     { get: () => ({ terminalShell: 'pwsh.exe' }) } as never,
     logs,
     (configured) => configured || 'pwsh.exe',

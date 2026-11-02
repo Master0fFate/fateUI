@@ -1,7 +1,7 @@
 import { getDesktopApi, getDesktopApiOptional } from '../platform/api';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ArrowLeft, Check, ExternalLink, KeyRound, LoaderCircle, LogOut, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   ModelsDevListResult,
   ModelsDevMutationResult,
@@ -94,6 +94,10 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
   // instead of visibly downloading logos. Catalog logos prefetch in the
   // background as soon as their ids arrive.
   const [ready, setReady] = useState(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (open && ready) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [open, ready]);
 
   useEffect(() => {
     if (!open) return;
@@ -258,7 +262,13 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
     <Dialog.Root open={open && ready} onOpenChange={(next) => { if (!next) close(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="provider-dialog-overlay" />
-        <Dialog.Content className="provider-dialog-content" aria-describedby={undefined}>
+        <Dialog.Content className="provider-dialog-content" aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const target = returnFocus.current;
+            returnFocus.current = null;
+            if (target?.isConnected) target.focus({ preventScroll: true });
+          }}>
           <div className="provider-dialog-head">
             {selected ? (
               <button type="button" className="provider-dialog-back" onClick={() => { setSelectedId(null); setDetail(null); setDetailError(null); cancelLogin(); }}>

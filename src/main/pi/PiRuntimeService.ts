@@ -1499,7 +1499,7 @@ export class PiRuntimeService {
   }
 
   private get runtime(): AgentSessionRuntime | null { return this.selectedSlot?.runtime ?? null; }
-  private get selectedSessionId(): string | null { return this.selectedSlot?.runtime.session.sessionId ?? this.coldSession?.snapshot.summary.id ?? null; }
+  get selectedSessionId(): string | null { return this.selectedSlot?.runtime.session.sessionId ?? this.coldSession?.snapshot.summary.id ?? null; }
   private get permissionLevel(): PermissionLevel { return this.permissionStoreFailure ? 'read-only' : this.selectedSlot?.permissionLevel ?? this.coldSession?.permissionLevel ?? this.fallbackPermissionLevel; }
 
   /** Per-runtime root attestation sink. The sink closes over a handle bound to one slot, so a background live slot is attributed to itself (never the selected slot). */
@@ -1787,6 +1787,8 @@ export class PiRuntimeService {
   private handleTaskEvent(event: TaskEvent): void {
     this.taskEventSink(event);
   }
+
+  currentProject(): ProjectState | null { return this.project; }
 
   getState(includeMessages = true): RuntimeState {
     const session = this.runtime?.session;
@@ -2906,7 +2908,7 @@ export class PiRuntimeService {
   async setModel(provider: string, id: string): Promise<RuntimeState> {
     const model = this.modelRuntime?.getModel(provider, id);
     if (!model || !this.models.some((candidate) => candidate.provider === provider && candidate.id === id)) {
-      throw new PiDesktopError({ code: 'AUTH_REQUIRED', message: `Model ${provider}/${id} is unavailable or not authenticated.`, actionable: 'Use Connect your AI to sign in with its provider, then select the model again.', retryable: true });
+      throw new PiDesktopError({ code: 'AUTH_REQUIRED', message: `Model ${provider}/${id} is unavailable or not authenticated.`, actionable: 'Type /login to sign in with its provider, then select the model again.', retryable: true });
     }
     const cold = this.coldSession;
     if (cold) {
@@ -5114,7 +5116,7 @@ export class PiRuntimeService {
     const builtinCommands: NonNullable<RuntimeState['commands']> = [
       { name: 'login', description: 'Connect a Pi model provider with OAuth or an API key', source: 'builtin' },
       { name: 'logout', description: 'Disconnect a Pi model provider', source: 'builtin' },
-      { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax, pause, resume, clear', source: 'builtin' },
+      { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax <objective>, pause, resume, clear', source: 'builtin' },
     ];
     const extensionCommands = session.extensionRunner?.getRegisteredCommands?.().filter((command) => command.invocationName.toLocaleLowerCase() !== 'goalmax').map((command) => ({
       name: command.invocationName.slice(0, 500),

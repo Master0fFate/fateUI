@@ -176,11 +176,19 @@ export function ChangeRow({ change, selected, reviewed = false, disabled = false
 
 function CommitCard({ commit, details, loading }: { commit: GitCommitSummary; details?: GitCommitDetails; loading: boolean }) {
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+  }, []);
   const copyHash = async () => {
     try {
       await writeClipboardText(commit.hash);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1_400);
+      if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => {
+        copiedTimer.current = null;
+        setCopied(false);
+      }, 1_400);
     } catch { setCopied(false); }
   };
   const exactTime = new Date(commit.authoredAt).toLocaleString();
@@ -345,8 +353,7 @@ export function ChangesPanel() {
     sessionOperation: state.runtime.sessionOperation,
   })));
   const timelineOrder = useRuntimeStore((state) => state.timelineOrder);
-  const { messagesVersion, timelineVersion, toolsVersion, subagentOrder, subagentRecorderVersion, agentTeamOrder, agentTeamsById } = useRuntimeStore(useShallow((state) => ({
-    messagesVersion: state.messagesVersion,
+  const { timelineVersion, toolsVersion, subagentOrder, subagentRecorderVersion, agentTeamOrder, agentTeamsById } = useRuntimeStore(useShallow((state) => ({
     timelineVersion: state.timelineVersion,
     toolsVersion: state.toolsVersion,
     subagentOrder: state.subagentOrder,
@@ -376,7 +383,7 @@ export function ChangesPanel() {
   const selectedChange = changes.find((change) => change.path === selected);
   const origins = useMemo(() => selectChangeOrigins(selectedChange, {
     timelineOrder, timelineById, messagesById, toolsById, subagents, teams,
-  }), [messagesVersion, selectedChange, subagents, teams, timelineOrder, timelineVersion, toolsVersion]);
+  }), [selectedChange, subagents, teams, timelineOrder, timelineVersion, toolsVersion]);
 
   useEffect(() => {
     const index = changes.findIndex((change) => change.path === selected);

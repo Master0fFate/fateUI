@@ -2,7 +2,7 @@ import { getFateApi, getFateApiOptional, getWebApiOptional } from '../../platfor
 import { canMutateNetwork, useRuntimeStore } from '../../stores/runtimeStore';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Check, CircleAlert, LoaderCircle, Pause, Pencil, Play, Target, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { GoalMaxControlInput, GoalMaxState } from '../../../shared/contracts/goalmaxxing';
 import { AppTooltip } from '../../components/AppTooltip';
 import { SelectControl } from '../../components/SelectControl';
@@ -131,6 +131,10 @@ function GoalMaxEditor({ goal }: { goal: GoalView }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initialized = useRef(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (open) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [open]);
   useEffect(() => {
     if (!open) { initialized.current = false; return; }
     if (initialized.current) return;
@@ -190,7 +194,13 @@ function GoalMaxEditor({ goal }: { goal: GoalView }) {
     <Dialog.Root open={open} onOpenChange={(next) => { if (!saving) setOpen(next); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="goalmax-editor-dialog" aria-describedby="goalmax-editor-description">
+        <Dialog.Content className="goalmax-editor-dialog" aria-describedby="goalmax-editor-description"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const target = returnFocus.current;
+            returnFocus.current = null;
+            if (target?.isConnected) target.focus({ preventScroll: true });
+          }}>
           <header><div><Dialog.Title>Edit goal</Dialog.Title><Dialog.Description id="goalmax-editor-description">Update the objective, completion gate, or explicit limits.</Dialog.Description></div><Dialog.Close aria-label="Close goal editor"><ActionContent text="x"><X size={15} /></ActionContent></Dialog.Close></header>
           <label className="goalmax-field"><span>Objective</span><textarea value={objective} maxLength={200_000} rows={6} onChange={(event) => setObjective(event.target.value)} autoFocus /></label>
           <details className="goalmax-criteria-editor">

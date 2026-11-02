@@ -715,8 +715,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     sessionCapabilities: state.runtime.sessionCapabilities,
     sessionOperation: state.runtime.sessionOperation,
     agentTeams: state.runtime.agentTeams,
-    subagents: state.runtime.subagents,
-    subagentWorkflows: state.runtime.subagentWorkflows,
+    childWorkActive: hasStoppableChildWork(state.runtime),
   })));
   const activeSessionDraftKey = sessionDraftKey(runtime.project?.path ?? null, runtime.sessionId, runtime.sessions);
   const cachedActiveDraft = activeSessionDraftKey === null ? undefined : sessionDraftsByIdentity.get(activeSessionDraftKey);
@@ -768,7 +767,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const PermissionIcon = permissionLevel === 'read-only' ? Shield : permissionLevel === 'full-access' ? Zap : ShieldCheck;
   const forkPoint = runtime.forkPoints?.at(-1);
   const activeSessionRunning = runtime.activeSessionRunning ?? runtime.streaming;
-  const childWorkActive = hasStoppableChildWork(runtime);
+  const childWorkActive = runtime.childWorkActive;
   const goalCancelable = Boolean(activeGoal && activeGoal.status !== 'completed' && activeGoal.status !== 'cancelled');
   const hasPendingPrompt = Boolean(draft.trim() || images.length > 0 || browserAnnotationIds.length > 0 || sessionReferences.length > 0);
   const liveAgentMessageTarget = liveAgentTarget !== null && liveAgentTarget.kind !== 'session';
@@ -1460,15 +1459,15 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         if (submittedImages.length > 0 || submittedBrowserAnnotationIds.length > 0 || submittedSessionReferences.length > 0) throw new Error('Remove image, browser annotation, and session attachments before using GoalMax commands.');
         const currentGoal = useGoalMaxStore.getState().goal;
         if (goalCommand.kind === 'view') {
-          if (!currentGoal) throw new Error('This thread has no GoalMax objective. Start one with /goalmax followed by an objective.');
+          if (!currentGoal) throw new Error('This session has no GoalMax objective. Start one with /goalmax <objective>.');
           useUiStore.getState().openGoalMax();
         } else if (goalCommand.kind === 'clear') {
-          if (!currentGoal) throw new Error('This thread has no GoalMax objective to clear.');
+          if (!currentGoal) throw new Error('This session has no GoalMax objective to clear.');
           if (typeof getFateApiOptional()?.clearGoalMax !== 'function') throw new Error('Restart Fate UI to clear persistent goals.');
           await getFateApi().clearGoalMax();
           setActiveGoal(null);
         } else if (goalCommand.kind === 'pause' || goalCommand.kind === 'resume') {
-          if (!currentGoal) throw new Error(`This thread has no GoalMax objective to ${goalCommand.kind}.`);
+          if (!currentGoal) throw new Error(`This session has no GoalMax objective to ${goalCommand.kind}.`);
           if (typeof getFateApiOptional()?.controlGoalMax !== 'function') throw new Error('Restart Fate UI to control persistent goals.');
           setActiveGoal(await getFateApi().controlGoalMax({ action: goalCommand.kind }));
         } else {
@@ -1514,7 +1513,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         try {
           await getDesktopApi().dismissBrowserAnnotations(submittedBrowserAnnotationIds);
         } catch (error) {
-          useBrowserStore.getState().setError(error instanceof Error ? error.message : 'Sent page markers could not be cleared.');
+          useBrowserStore.getState().setError(error instanceof Error ? error.message : 'Sent browser annotations could not be cleared.');
         }
       }
       clearSubmittedDraft();
@@ -2838,7 +2837,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         {images.length > 0 && <div className="composer-attachments">{images.map((image, index) => (
           <span key={`${image.name}-${index}`}><button type="button" className="composer-attachment-preview" aria-label={`Expand image: ${image.name}`} onClick={() => setPreviewImage(image)}><img alt="" src={`data:${image.mimeType};base64,${image.data}`} /></button><em>{image.name}</em><button type="button" aria-label={`Remove ${image.name}`} onClick={() => updateImages((current) => current.filter((_item, itemIndex) => itemIndex !== index))}><X size={12} /></button></span>
         ))}</div>}
-        <PromptHeading target={liveAgentTarget ? `@${liveAgentTarget.handle}` : 'Pi'} hint={sendMessageWithModifier ? 'Ctrl/Cmd+Enter to send' : 'Enter to send'} />
+        <PromptHeading target={liveAgentTarget ? `@${liveAgentTarget.handle}` : 'Pi'} hint={sendMessageWithModifier ? 'Ctrl/⌘ Enter to send' : 'Enter to send'} />
         {input}
         <div className="composer-toolbar">
           {(voiceState === 'recording' || voiceState === 'transcribing') && (

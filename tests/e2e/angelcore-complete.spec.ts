@@ -335,7 +335,7 @@ test('v2 pack fonts, embedded image, density styles and user font overrides surv
     await expectLoadedFontFace(restored, 'FateSkin_skin_font_font_studio_mono');
     await expectLoadedFontFace(restored, 'Poppins');
     await expect.poll(() => dialog.evaluate((element) => getComputedStyle(element).fontFamily)).toContain('Poppins');
-    await dialog.getByRole('button', { name: 'Reset to skin appearance defaults' }).click();
+    await dialog.getByRole('button', { name: 'Use skin defaults' }).click();
     await expect(dialog.getByRole('combobox', { name: 'Interface font' })).toContainText('Studio Mono');
     await expectLoadedFontFace(restored, 'FateSkin_skin_font_font_studio_mono');
     await dialog.getByRole('button', { name: 'Save changes' }).click();

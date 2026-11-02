@@ -89,7 +89,7 @@ function ToolsPanel() {
     if (!jump || jump.projectPath !== projectPath || jump.sessionId !== sessionId || jump.target.kind !== 'tool') return;
     const index = order.indexOf(jump.target.toolCallId);
     if (index < 0 || !useRuntimeStore.getState().toolsById[jump.target.toolCallId]) {
-      showToast({ kind: 'info', title: 'Activity not retained', message: 'That tool execution is no longer available in the bounded timeline.' }); clearFlightDeckJump(jump.nonce); return;
+      showToast({ kind: 'info', title: 'Activity not retained', message: 'That tool execution is no longer kept.' }); clearFlightDeckJump(jump.nonce); return;
     }
     listRef.current?.scrollToIndex({ index, align: 'center', behavior: 'auto' });
   }, [clearFlightDeckJump, jump, order, projectPath, sessionId, showToast]);

@@ -351,6 +351,7 @@ export class AgentsService {
       const handle = await workspace.startAgentRun({ sessionPath: session.file, sessionId: session.sessionId, request: run.request, mode: run.mode, permission: run.permission, timeLimitMs: RUN_LIMIT_MS },
         () => this.host.assertAdmission?.(run.projectPath, session.sessionId));
       active.handle = handle;
+      if (active.cancelled) throw new Error('The run was stopped before it started.');
       await this.changeRun(agent.id, RUNS, run.id, (current) => ({ ...current, status: 'running', sessionId: handle.sessionId }));
       await this.repository.updateState(agent.id, (current) => ({ ...current, lastRunAt: Date.now() }));
       active.timer = setTimeout(() => { active.cancelled = true; void handle.abort(); }, RUN_LIMIT_MS);
@@ -360,6 +361,7 @@ export class AgentsService {
       });
     } catch (error) {
       this.stopTimers(active);
+      await active.handle?.abort().catch(() => undefined);
       this.active.delete(run.id);
       const failed = await this.changeRun(agent.id, RUNS, run.id, (current) => ({ ...current, status: 'failed', finishedAt: Date.now(), error: failure(error) })).catch(() => null);
       if (failed) await this.announce(agent.id, runNotice(failed, 'failed')).catch(() => undefined);
