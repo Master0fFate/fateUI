@@ -23,7 +23,7 @@ export function LearningIndicator() {
     return () => { current = false; unsubscribe?.(); };
   }, []);
   if (!memory?.enabled) return null;
-  const modes = [memory.global ? 'GLOBAL' : null, memory.project ? 'PROJECT' : null].filter(Boolean).join(' · ') || 'None';
+  const modes = [memory.global ? 'Profile' : null, memory.project ? 'Project' : null].filter(Boolean).join(' · ') || 'None';
   return (
     <AppTooltip content={`Memory Learning · ${modes}`} wrapTrigger>
       <button type="button" className="learning-indicator" aria-label={`Memory Learning ${modes}`} onClick={() => useLearningStore.getState().show()}>

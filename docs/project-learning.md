@@ -1,13 +1,13 @@
 # Memory Learning
 
-Memory Learning stores reviewed knowledge in two complementary layers: a **user coding profile** (GLOBAL) and **this repository's briefing, notes and procedures** (PROJECT). It does **not** train the model, diagnose you, run saved commands, or prove improved coding quality.
+Memory Learning stores reviewed knowledge in two complementary layers: a **user coding profile** and **this repository's briefing, notes and procedures**. It does **not** train the model, diagnose you, run saved commands, or prove improved coding quality.
 
 ## Try it
 
-1. Open a trusted project. In **Settings → Memory Learning**, turn the master switch on, then enable **GLOBAL**, **PROJECT**, or both. Save. All three default off/on as: master **off**, layers **on** once the master is enabled.
+1. Open a trusted project. In **Settings → Memory Learning**, turn the master switch on, then enable **Profile**, **Project**, or both. Save. All three default off/on as: master **off**, layers **on** once the master is enabled.
 2. Open **Learning** from the composer, or **Manage lessons, drafts & recent use** from Settings. Settings also lists the exact files on disk.
-3. Edit **GLOBAL** as **User profile**: communication, workflow, coding/design preferences, decision-making, learning style, likes and dislikes. Approve only explicit preferences you stated. Fate UI does not infer a psychological profile.
-4. Edit **PROJECT** as a **Project briefing** (purpose, architecture, decisions, current work, next steps) plus ordinary notes and procedures. Use **Add lesson** for task-specific project knowledge.
+3. Edit **Profile** as **User profile**: communication, workflow, coding/design preferences, decision-making, learning style, likes and dislikes. Approve only explicit preferences you stated. Fate UI does not infer a psychological profile.
+4. Edit **Project** as a **Project briefing** (purpose, architecture, decisions, current work, next steps) plus ordinary notes and procedures. Use **Add lesson** for task-specific project knowledge.
 5. Save a manual draft without a provider, or generate one from reviewed evidence. Generation is one tool-free request to the previewed model and can incur cost. Sending evidence is not approval.
 6. Set each store's selection mode to **Automatic** if you want that store's reviewed core memory reused on later sessions without picking it again. Manual remains the default. After a new session, **Recent use** shows the actual attached revisions.
 
@@ -15,8 +15,8 @@ Memory Learning stores reviewed knowledge in two complementary layers: a **user 
 
 The Settings switch overrides both stores. Off prevents new captures, generation, and attachments; stored data remains manageable and is not deleted.
 
-- **GLOBAL · user coding profile:** `learning/v1/global/current.json` under the Fate UI data directory. One reviewed profile per Fate UI data root. It can be reused across trusted projects. It is not a personality model. Repository facts, architecture and task state do not belong here. Legacy shared notes in this store stay visible but are not attached automatically until you convert and approve them as profile preferences.
-- **PROJECT · repository memory:** `learning/v1/projects/<canonical-root-hash>/current.json`. Isolated by the trusted canonical directory, not folder name or Git remote. Separate clones and linked worktrees have separate stores. Moving a repository does not migrate its knowledge. The briefing orients later sessions; notes and procedures still use lexical activation.
+- **Profile · user coding profile:** `learning/v1/global/current.json` under the Fate UI data directory. One reviewed profile per Fate UI data root. It can be reused across trusted projects. It is not a personality model. Repository facts, architecture and task state do not belong here. Legacy shared notes in this store stay visible but are not attached automatically until you convert and approve them as profile preferences.
+- **Project · repository memory:** `learning/v1/projects/<canonical-root-hash>/current.json`. Isolated by the trusted canonical directory, not folder name or Git remote. Separate clones and linked worktrees have separate stores. Moving a repository does not migrate its knowledge. The briefing orients later sessions; notes and procedures still use lexical activation.
 
 On Windows with no `FATE_GUI_DATA_DIR` override, the master toggle lives in `%USERPROFILE%\.pi\fateGUI\settings.json` and the two stores sit beside it under `learning\v1\`. Settings shows the resolved paths for this machine. Nothing is written into the git repository.
 
@@ -29,11 +29,11 @@ At most three complete items and 6 KiB of UTF-8 advisory context are supplied. P
 The `remember` tool lets the model propose one fact you stated or confirmed. It never approves anything.
 
 - **Where it is.** Agent chats have it directly. Ordinary root chats find it through tool search, so it does not enlarge every coding prompt. Agent runs, Agent Team members and other child sessions cannot save memory.
-- **Where it goes.** `about: "user"` adds the fact to one section of the GLOBAL user profile (communication, workflow, coding or design preferences, decision-making, learning style, likes, dislikes). `about: "here"` adds it to the **decisions** of the PROJECT briefing. In an Agent chat, PROJECT is the Agent's own folder, so that briefing is the Agent's memory.
+- **Where it goes.** `about: "user"` adds the fact to one section of the Profile (communication, workflow, coding or design preferences, decision-making, learning style, likes, dislikes). `about: "here"` adds it to the **decisions** of the Project briefing. In an Agent chat, Project is the Agent's own folder, so that briefing is the Agent's memory.
 - **Drafts.** The fact is merged into the current profile or briefing and saved as a pending replacement draft. Further facts join the same pending draft instead of creating competing copies; the review shows each one as “Added in chat”. Approving creates a new immutable revision as usual. A fact that is already there changes nothing.
-- **Switches.** The master switch, the GLOBAL/PROJECT layer toggles and a store set to **Off** all stop saving; the model gets a plain message saying nothing was saved. Untrusted projects cannot save.
+- **Switches.** The master switch, the Profile/Project layer toggles and a store set to **Off** all stop saving; the model gets a plain message saying nothing was saved. Untrusted projects cannot save.
 - **Limits.** One fact is at most 200 characters and passes the same secret-like redaction as evidence. The profile and briefing keep their 20 lines per section and 2 KiB body budget, and a store holds at most 100 drafts; when a fact does not fit, nothing is saved and the model is asked to have you tidy the memory.
-- **Review.** **Memory drafts · N** above the composer counts pending drafts in the open project's store and the GLOBAL profile. Select it to open Learning on the drafts. No draft is attached to a turn until you approve it.
+- **Review.** **Memory drafts · N** above the composer counts pending drafts in the open project's store and the Profile. Select it to open Learning on the drafts. No draft is attached to a turn until you approve it.
 
 ## Evidence and provider data
 

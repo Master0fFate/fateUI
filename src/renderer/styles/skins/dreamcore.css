@@ -233,6 +233,7 @@
 }
 :root[data-skin="dreamcore"] .command-palette,
 :root[data-skin="dreamcore"] .settings-dialog,
+:root[data-skin="dreamcore"] .learning-dialog,
 :root[data-skin="dreamcore"] .automation-editor,
 :root[data-skin="dreamcore"] .model-popover,
 :root[data-skin="dreamcore"] .permission-popover,

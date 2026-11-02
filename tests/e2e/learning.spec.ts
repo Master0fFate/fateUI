@@ -18,8 +18,8 @@ test('off-by-default scoped learning supports manual approval and an actual diff
     await expect(settings.getByRole('heading', { name: 'Memory Learning' })).toBeVisible();
     await expect(settings.getByRole('checkbox', { name: 'Enable Memory Learning' })).not.toBeChecked();
     await settings.getByRole('checkbox', { name: 'Enable Memory Learning' }).check();
-    await expect(settings.getByRole('checkbox', { name: 'Enable GLOBAL memory' })).toBeChecked();
-    await expect(settings.getByRole('checkbox', { name: 'Enable PROJECT memory' })).toBeChecked();
+    await expect(settings.getByRole('checkbox', { name: 'Enable Profile memory' })).toBeChecked();
+    await expect(settings.getByRole('checkbox', { name: 'Enable Project memory' })).toBeChecked();
     await settings.getByRole('button', { name: 'Save changes' }).click();
     await expect.poll(() => page.evaluate(() => window.piDesktop.getSettings())).toMatchObject({ memoryLearning: { enabled: true, global: true, project: true } });
     await expect(settings.getByRole('region', { name: 'Memory storage locations' })).toContainText('settings.json');
@@ -58,14 +58,14 @@ test('off-by-default scoped learning supports manual approval and an actual diff
     await learning.getByRole('button', { name: 'Close Memory Learning' }).click();
     await page.evaluate(async () => { await window.piDesktop.switchSession('e2e-session-2'); });
     await page.getByRole('button', { name: /Memory Learning/u }).click();
-    await learning.getByRole('button', { name: 'Use on next turn' }).click();
+    await learning.getByRole('button', { name: 'Use next turn' }).click();
     await learning.getByRole('button', { name: 'Close Memory Learning' }).click();
     await page.getByLabel('Message Pi').fill('Implement renderer file preview with filesystem work in main.');
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect.poll(() => page.evaluate(async () => (await window.piDesktop.getLearningState()).snapshot?.manifests.at(-1))).toMatchObject({ sessionId: 'e2e-session-2', state: 'handed-to-runtime', items: [expect.objectContaining({ revisionId: expect.any(String) })] });
     await page.getByRole('button', { name: /Memory Learning/u }).click();
     await learning.getByRole('button', { name: 'Recent use', exact: true }).click();
-    await expect(learning.getByRole('heading', { name: 'Handed to runtime (provider receipt unproven)' })).toBeVisible();
+    await expect(learning.getByRole('heading', { name: 'Handed to runtime' })).toBeVisible();
     await page.screenshot({ path: await evidenceOutputPath('memory-learning-recent-use.png') });
     await learning.getByRole('button', { name: 'Close Memory Learning' }).click();
     await expect.poll(() => page.evaluate(async () => (await window.piDesktop.getRuntimeState()).streaming)).toBe(false);
@@ -77,7 +77,8 @@ test('off-by-default scoped learning supports manual approval and an actual diff
     await learning.getByRole('button', { name: 'Save draft', exact: true }).click();
     await learning.getByRole('button', { name: 'Review draft' }).click();
     await learning.getByRole('button', { name: 'Approve exact revision' }).click();
-    await learning.getByLabel('Learning selection mode').selectOption('automatic');
+    await learning.getByRole('combobox', { name: 'Learning selection mode' }).click();
+    await page.getByRole('option', { name: 'Automatic' }).click();
     await expect.poll(() => page.evaluate(async () => (await window.piDesktop.getLearningState('global')).snapshot?.mode)).toBe('automatic');
     await learning.getByRole('button', { name: 'Project', exact: true }).click();
     await learning.getByRole('button', { name: 'Project briefing', exact: true }).click();
@@ -86,7 +87,8 @@ test('off-by-default scoped learning supports manual approval and an actual diff
     await learning.getByRole('button', { name: 'Save draft', exact: true }).click();
     await learning.getByRole('button', { name: 'Review draft' }).click();
     await learning.getByRole('button', { name: 'Approve exact revision' }).click();
-    await learning.getByLabel('Learning selection mode').selectOption('automatic');
+    await learning.getByRole('combobox', { name: 'Learning selection mode' }).click();
+    await page.getByRole('option', { name: 'Automatic' }).click();
     await expect.poll(() => page.evaluate(async () => (await window.piDesktop.getLearningState()).contextModes)).toEqual({ global: 'automatic', project: 'automatic' });
     await learning.getByRole('button', { name: 'Close Memory Learning' }).click();
     await page.evaluate(async () => { await window.piDesktop.switchSession('e2e-session-1'); });

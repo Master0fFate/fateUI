@@ -57,7 +57,8 @@ describe('agent workspace review', () => {
 
   it('requires explicit commit selection for cherry-pick', async () => {
     const user = await openDetails();
-    await user.selectOptions(screen.getByLabelText('Integration method'), 'cherry-pick');
+    await user.click(screen.getByRole('combobox', { name: 'Integration method' }));
+    await user.click(await screen.findByRole('option', { name: 'Cherry-pick' }));
     expect(screen.getByRole('button', { name: 'Integrate changes' })).toBeDisabled();
     await user.click(screen.getByLabelText(`Select commit ${sourceHead.slice(0, 12)}`));
     await user.click(screen.getByRole('button', { name: 'Integrate changes' }));

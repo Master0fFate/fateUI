@@ -8,6 +8,9 @@ import { isCoreMemory, memoryKindLabel, newCoreMemory } from '../../../shared/le
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { ipcErrorMessage } from '../../lib/ipcError';
+import { InlineConfirm } from '../../components/InlineConfirm';
+import { SelectControl } from '../../components/SelectControl';
+import { useSkinComponents } from '../../skins/SkinProvider';
 import { learningDraftKey, useLearningStore } from './learningStore';
 import './learning.css';
 
@@ -16,6 +19,12 @@ type MutationAction = LearningMutation extends infer T ? T extends LearningMutat
 const newNote = (): LessonContent => ({ kind: 'note', title: '', body: { guidance: '', rationale: '', exceptions: [] }, activation: { ...emptyActivation } });
 const lineList = (value: string) => value ? value.split('\n') : [];
 const readError = (error: unknown) => ipcErrorMessage(error, 'Memory Learning could not complete this action.');
+const scopeName: Record<LearningScope, string> = { global: 'Profile', project: 'Project' };
+const modeOptions = [{ value: 'off', label: 'Off' }, { value: 'manual', label: 'Manual' }, { value: 'automatic', label: 'Automatic' }];
+const projectKindOptions = [{ value: 'note', label: 'Note' }, { value: 'procedure', label: 'Project skill (procedure)' }, { value: 'project-brief', label: 'Project briefing' }];
+const activationLabels = { relativePaths: 'Paths', symbols: 'Symbols', keywords: 'Keywords' } as const;
+const humanize = (field: string) => { const words = field.replace(/([A-Z])/gu, ' $1').toLowerCase(); return words.charAt(0).toUpperCase() + words.slice(1); };
+const activationSummary = (activation: LessonContent['activation']) => [...activation.relativePaths, ...activation.symbols, ...activation.keywords, ...(activation.branchRestriction ? [`branch ${activation.branchRestriction}`] : [])].join(', ');
 
 export function LearningPanel() {
   const open = useLearningStore((state) => state.open);
@@ -23,6 +32,8 @@ export function LearningPanel() {
   const runtimeProject = useRuntimeStore((state) => state.runtime.project?.path);
   const runtimeProjectName = useRuntimeStore((state) => state.runtime.project?.name);
   const sessionId = useRuntimeStore((state) => state.runtime.sessionId);
+  const compactMode = useUiStore((state) => state.compactMode);
+  const { ActionContent } = useSkinComponents();
   const key = learningDraftKey(runtimeProject, sessionId);
   const [state, setState] = useState<LearningState | null>(null);
   const [editScope, setEditScope] = useState<LearningScope>(() => useLearningStore.getState().focus ?? 'project');
@@ -40,12 +51,15 @@ export function LearningPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const request = useRef<string | null>(null);
   const captureRef = useRef<LearningCapture | null>(null);
   const stateRef = useRef<LearningState | null>(null);
   const generation = useRef(0);
   const captureInitialized = useRef(false);
   const snapshot = state?.snapshot;
+  const activeScope = state?.binding?.scope ?? 'project';
+  const isGlobal = activeScope === 'global';
   const enabled = state?.enabled && snapshot?.mode !== 'off';
   const recentUse = state?.recentUse ?? snapshot?.manifests ?? [];
   const pendingDrafts = snapshot?.drafts.filter((draft) => draft.state === 'pending').length ?? 0;
@@ -70,7 +84,7 @@ export function LearningPanel() {
     ++generation.current;
     captureInitialized.current = false;
     setState(null); setEditor(null);
-    setManual(correction ?? ''); setIntent(''); setCapture(null); setExcerpts([]); setSelectedSources([]); setFilePath(''); setError(null); setNotice(null); setBusy(false);
+    setManual(correction ?? ''); setIntent(''); setCapture(null); setExcerpts([]); setSelectedSources([]); setFilePath(''); setError(null); setNotice(null); setBusy(false); setConfirmDelete(null);
     void refresh();
     const unsubscribe = getDesktopApiOptional()?.onLearningChanged?.(() => { void refresh(); });
     return () => {
@@ -136,29 +150,47 @@ export function LearningPanel() {
     setEditor(revision && lesson ? { lessonId: lesson.id, content: structuredClone(revision.content), evidenceIds: revision.evidenceIds } : { content: newCoreMemory(scope), evidenceIds: [] });
     setView('drafts');
   };
+  const changeKind = (kind: string) => {
+    if (!editor) return;
+    updateContent(kind === 'user-profile' ? newCoreMemory('global') : kind === 'project-brief' ? newCoreMemory('project') : kind === 'note' ? newNote() : { kind: 'procedure', title: editor.content.title, body: { purpose: '', useWhen: [], doNotUseWhen: [], preconditions: [], steps: [], verification: [], stopConditions: [] }, activation: { ...emptyActivation } });
+  };
+  const openSettings = () => { useLearningStore.getState().close(); useUiStore.getState().setSettingsOpen(true); };
   const evidenceView = (ids: string[]) => ids.map((id) => {
     const evidence = snapshot?.evidence.find((item) => item.id === id);
-    return <details key={id}><summary>{evidence ? `${evidence.basis} · ${evidence.source.path ?? evidence.source.entryId ?? 'manual text'}` : 'Evidence deleted — review required'}</summary>{evidence && <><pre>{evidence.text}</pre><small>Commit: {evidence.codeState.commit ?? 'unknown'} · verification/code-state association: unknown · {evidence.omitted ? 'excerpt / omissions' : 'selected text'}</small><button type="button" disabled={busy} onClick={() => void run(() => mutate({ action: 'delete-evidence', id }))}>Delete evidence</button></>}</details>;
+    return <details key={id}><summary>{evidence ? `${evidence.basis} · ${evidence.source.path ?? evidence.source.entryId ?? 'manual text'}` : 'Evidence deleted — review required'}</summary>{evidence && <><pre>{evidence.text}</pre><small>Commit: {evidence.codeState.commit ?? 'unknown'} · verification/code-state association: unknown · {evidence.omitted ? 'excerpt / omissions' : 'selected text'}</small><button type="button" className="settings-inline-action" disabled={busy} onClick={() => void run(() => mutate({ action: 'delete-evidence', id }))}>Delete evidence</button></>}</details>;
   });
   return <Dialog.Root open={open} onOpenChange={(value) => { if (!value) useLearningStore.getState().close(); }}>
     <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="learning-dialog" aria-describedby="learning-description">
-      <header><div><Dialog.Title><Brain size={18} /> Memory Learning</Dialog.Title><Dialog.Description id="learning-description">{state?.binding?.scope.toUpperCase() ?? 'PROJECT'} · {(state?.binding && runtimeProjectName) || state?.projectName || 'No trusted project'} · reviewed knowledge, not model training.</Dialog.Description></div><Dialog.Close aria-label="Close Memory Learning"><X size={18} /></Dialog.Close></header>
+      <header className="settings-header">
+        <div><Dialog.Title><Brain size={16} /> Memory Learning</Dialog.Title><Dialog.Description id="learning-description">{scopeName[activeScope]} · {(state?.binding && runtimeProjectName) || state?.projectName || 'No trusted project'} · not model training</Dialog.Description></div>
+        <Dialog.Close className="settings-close" aria-label="Close Memory Learning"><ActionContent text="close"><X size={17} /></ActionContent></Dialog.Close>
+      </header>
       <div className="learning-body">
-        {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-        {busy && <div role="status">Working… <button type="button" onClick={() => { const binding = stateRef.current?.binding; if (binding && request.current) void getDesktopApi().cancelLearning({ binding, id: request.current }).catch(() => undefined); }}>Cancel capture or generation</button></div>}
-        {!enabled && <p role="status">Learning is off. Existing data remains manageable. Enable Memory Learning in Settings → Memory Learning; choose GLOBAL or PROJECT and save.</p>}
-        {state?.binding?.scope === 'global' ? <p className="learning-warning">GLOBAL is your coding profile: communication, workflow, design taste, likes and dislikes. Only explicit reviewed preferences—not guessed psychology or repository state. Automatic mode reuses it across trusted projects.</p> : <p>PROJECT holds this repository’s purpose, architecture, decisions, current work and next steps. A reviewed briefing prevents repeating orientation in every session; it does not replace checking current code.</p>}
-        {state?.contextModes && <p>Context layers: GLOBAL {state.contextModes.global ?? 'unavailable'} + PROJECT {state.contextModes.project ?? 'unavailable'}. The scope selector chooses what you edit, not an exclusive context source. Current instructions always win.</p>}
-        {state?.diagnostic && <p role="status">{state.diagnostic}</p>}
+        {error && <p className="learning-warning" role="alert">{error}</p>}{notice && <p className="settings-card-status" role="status">{notice}</p>}
+        {busy && <div className="settings-card-status" role="status">Working… <button type="button" className="settings-inline-action" aria-label="Cancel capture or generation" onClick={() => { const binding = stateRef.current?.binding; if (binding && request.current) void getDesktopApi().cancelLearning({ binding, id: request.current }).catch(() => undefined); }}>Cancel</button></div>}
+        {state && !enabled && <div className="settings-empty-card" role="status"><strong>Learning is off</strong><span>Stored memory stays editable.</span><button type="button" className="settings-inline-action" onClick={openSettings}>Open Settings</button></div>}
+        {state?.diagnostic && <p className="settings-card-status" role="status">{state.diagnostic}</p>}
         {snapshot && state?.binding && <>
-          <div className="learning-actions"><button type="button" aria-pressed={editScope === 'global'} onClick={() => { setEditScope('global'); setEditor(null); }}>Profile</button><button type="button" aria-pressed={editScope === 'project'} onClick={() => { setEditScope('project'); setEditor(null); }}>Project</button><label>Selection mode <select aria-label="Learning selection mode" value={snapshot.mode} disabled={busy} onChange={(event) => void run(() => mutate({ action: 'set-mode', mode: event.target.value as 'off' | 'manual' | 'automatic' }))}><option value="off">Off</option><option value="manual">Manual</option><option value="automatic">Automatic (opt-in)</option></select></label>{state.binding.scope === 'project' && <button type="button" disabled={!enabled || busy} onClick={() => { setEditor({ content: newNote(), evidenceIds: [] }); setView('drafts'); }}>Add lesson</button>}<button type="button" disabled={!enabled || busy} onClick={openCore}>{state.binding.scope === 'global' ? 'User profile' : 'Project briefing'}</button><button type="button" onClick={() => void refresh()}>Refresh</button></div>
-          <nav className="learning-actions" aria-label="Learning views">{(['lessons', 'drafts', 'recent'] as const).map((tab) => <button type="button" aria-pressed={view === tab} key={tab} onClick={() => { setView(tab); setEditor(null); }}>{tab === 'recent' ? 'Recent use' : tab === 'drafts' ? `Drafts${pendingDrafts ? ` · ${pendingDrafts}` : ''}` : 'Lessons'}</button>)}</nav>
+          <div className="settings-group">
+            <div className="settings-select-row"><div><strong>Memory</strong><small>{isGlobal ? 'Your stated preferences, all projects' : 'This repo: briefing and notes'}</small></div><div className="activity-filters" role="group" aria-label="Memory scope"><button type="button" className="activity-chip" aria-pressed={editScope === 'global'} onClick={() => { setEditScope('global'); setEditor(null); }}>Profile</button><button type="button" className="activity-chip" aria-pressed={editScope === 'project'} onClick={() => { setEditScope('project'); setEditor(null); }}>Project</button></div></div>
+            <div className="settings-select-row"><div><strong>Selection</strong></div><SelectControl compact={compactMode} label="Learning selection mode" className="settings-thinking-select" value={snapshot.mode} disabled={busy} options={modeOptions} onValueChange={(mode) => void run(() => mutate({ action: 'set-mode', mode: mode as 'off' | 'manual' | 'automatic' }))} /></div>
+            {state.contextModes && enabled && <div className="settings-select-row"><div><strong>Layers</strong><small>Profile {state.contextModes.global ?? 'n/a'} · Project {state.contextModes.project ?? 'n/a'}</small></div><button type="button" className="settings-inline-action" onClick={openSettings}>Open Settings</button></div>}
+          </div>
+          <div className="learning-toolbar">
+            <nav className="activity-filters" aria-label="Learning views">{(['lessons', 'drafts', 'recent'] as const).map((tab) => <button type="button" className="activity-chip" aria-pressed={view === tab} key={tab} onClick={() => { setView(tab); setEditor(null); }}>{tab === 'recent' ? 'Recent use' : tab === 'drafts' ? `Drafts${pendingDrafts ? ` · ${pendingDrafts}` : ''}` : 'Lessons'}</button>)}</nav>
+            <div>{!isGlobal && <button type="button" className="settings-inline-action" disabled={!enabled || busy} onClick={() => { setEditor({ content: newNote(), evidenceIds: [] }); setView('drafts'); }}>Add lesson</button>}<button type="button" className="settings-inline-action" disabled={!enabled || busy} onClick={openCore}>{isGlobal ? 'User profile' : 'Project briefing'}</button><button type="button" className="settings-inline-action" onClick={() => void refresh()}>Refresh</button></div>
+          </div>
           {view === 'lessons' && !editor && <>
-            {!snapshot.lessons.length && <p>{state.binding.scope === 'global' ? 'No approved user profile yet. Open User profile to record explicit coding preferences.' : 'No approved project memory yet. Add a briefing, note, or managed project skill.'}</p>}
+            {!snapshot.lessons.length && <div className="settings-empty-card"><strong>No lessons</strong><span>{isGlobal ? 'Open User profile to add preferences.' : 'Add a briefing, note or skill.'}</span></div>}
             {snapshot.lessons.map((lesson) => {
               const revision = snapshot.revisions.find((item) => item.id === lesson.activeRevisionId)!;
-              return <article className="learning-card" key={lesson.id}><h3>{revision.content.title} <small>{memoryKindLabel(revision.content.kind)} · v{revision.revisionNumber}</small></h3><p>Approved by you · {lesson.enabled ? 'Enabled' : 'Disabled'} · {lesson.freshness}{lesson.conflict ? ' · unresolved conflict' : ''}</p><pre>{learningMarkdown(revision.content)}</pre><small>Activation: {JSON.stringify(revision.content.activation)}</small>
-                <div className="learning-actions"><button type="button" disabled={!enabled || !lesson.enabled || lesson.conflict || lesson.freshness !== 'current' || !sessionId} onClick={() => {
+              const activation = activationSummary(revision.content.activation);
+              const revisions = snapshot.revisions.filter((item) => item.lessonId === lesson.id);
+              return <article className="settings-card" key={lesson.id}>
+                <div className="settings-toggle settings-card-head"><div><strong>{revision.content.title}</strong><small>{memoryKindLabel(revision.content.kind)} · v{revision.revisionNumber} · {lesson.enabled ? 'Enabled' : 'Disabled'} · {lesson.freshness}{lesson.conflict ? ' · conflict' : ''}</small></div></div>
+                <pre>{learningMarkdown(revision.content)}</pre>
+                {activation && <small>Activates on: {activation}</small>}
+                <div className="settings-card-actions"><button type="button" className="settings-inline-action" disabled={!enabled || !lesson.enabled || lesson.conflict || lesson.freshness !== 'current' || !sessionId} onClick={() => {
                   if (!state.binding) return;
                   const existing = useLearningStore.getState().turns[key];
                   const sameSession = existing && existing.binding.projectKey === state.binding.projectKey && existing.binding.sessionId === state.binding.sessionId && existing.binding.runtimeGeneration === state.binding.runtimeGeneration;
@@ -166,61 +198,80 @@ export function LearningPanel() {
                   if (pins.length >= 3) { setError('At most three items can be selected for one turn.'); return; }
                   useLearningStore.getState().setTurn(key, { binding: state.binding, pins: [...pins, { lessonId: lesson.id, revisionId: revision.id, scope: state.binding.scope }], excluded: existing?.excluded ?? [] });
                   setNotice('Selected exact revision for the next turn. Eligibility is checked again at dispatch.');
-                }}>Use on next turn</button><button type="button" disabled={!enabled || busy} onClick={() => setEditor({ lessonId: lesson.id, content: structuredClone(revision.content), evidenceIds: revision.evidenceIds })}>Edit as new draft</button><button type="button" disabled={busy} onClick={() => void run(() => mutate({ action: 'set-enabled', id: lesson.id, enabled: !lesson.enabled }))}>{lesson.enabled ? 'Disable' : 'Re-enable'}</button><button type="button" disabled={busy} onClick={() => void run(() => mutate({ action: 'set-conflict', id: lesson.id, conflict: !lesson.conflict }))}>{lesson.conflict ? 'Resolve conflict' : 'Mark conflict'}</button></div>
-                <details><summary>Evidence and revision history</summary>{evidenceView(revision.evidenceIds)}{snapshot.revisions.filter((item) => item.lessonId === lesson.id).map((item) => <details key={item.id}><summary>Revision {item.revisionNumber} · {item.id}</summary><pre>{learningMarkdown(item.content)}</pre><code>{item.contentDigest}</code><button type="button" disabled={!enabled || busy} onClick={() => setEditor({ lessonId: lesson.id, content: structuredClone(item.content), evidenceIds: item.evidenceIds })}>Review this content as a new revision</button></details>)}</details>
-                <details><summary>Delete lesson</summary><p>Removes all stored revisions and orphan evidence. Past provider requests and sessions are not erased.</p><button type="button" disabled={busy} onClick={() => void run(() => mutate({ action: 'delete-lesson', id: lesson.id }))}>Confirm delete lesson</button></details>
+                }}>Use next turn</button><button type="button" className="settings-inline-action" aria-label="Edit as new draft" disabled={!enabled || busy} onClick={() => setEditor({ lessonId: lesson.id, content: structuredClone(revision.content), evidenceIds: revision.evidenceIds })}>Edit</button><button type="button" className="settings-inline-action" disabled={busy} onClick={() => void run(() => mutate({ action: 'set-enabled', id: lesson.id, enabled: !lesson.enabled }))}>{lesson.enabled ? 'Disable' : 'Enable'}</button><button type="button" className="settings-inline-action" disabled={busy} onClick={() => void run(() => mutate({ action: 'set-conflict', id: lesson.id, conflict: !lesson.conflict }))}>{lesson.conflict ? 'Resolve' : 'Mark conflict'}</button><button type="button" className="settings-inline-action" aria-label="Delete lesson" disabled={busy} onClick={() => setConfirmDelete(lesson.id)}>Delete</button></div>
+                {confirmDelete === lesson.id && <InlineConfirm title="Delete lesson?" message="Removes all revisions and orphan evidence. Past requests and sessions keep their text." confirmLabel="Delete" busy={busy} onCancel={() => setConfirmDelete(null)} onConfirm={() => { setConfirmDelete(null); void run(() => mutate({ action: 'delete-lesson', id: lesson.id })); }} />}
+                <details><summary>History · {revisions.length}</summary>{evidenceView(revision.evidenceIds)}{revisions.map((item) => <details key={item.id}><summary>Revision {item.revisionNumber}</summary><pre>{learningMarkdown(item.content)}</pre><code>{item.contentDigest}</code><div className="settings-card-actions"><button type="button" className="settings-inline-action" disabled={!enabled || busy} onClick={() => setEditor({ lessonId: lesson.id, content: structuredClone(item.content), evidenceIds: item.evidenceIds })}>Edit revision</button></div></details>)}</details>
               </article>;
             })}
           </>}
-          {view === 'drafts' && !editor && <>{!snapshot.drafts.length && <p>No drafts. Manual creation works without a provider.</p>}{snapshot.drafts.map((draft) => <article className="learning-card" key={draft.id}><h3>{draft.content.title}</h3><p>{draft.state} · user review is not verification.</p><div className="learning-actions">{draft.state === 'pending' && <button type="button" onClick={() => setEditor({ id: draft.id, ...(draft.lessonId ? { lessonId: draft.lessonId } : {}), content: structuredClone(draft.content), evidenceIds: draft.evidenceIds, review: { epoch: snapshot.epoch, expectedRevision: snapshot.revision, digest: draft.digest } })}>Review draft</button>}<button type="button" disabled={busy} onClick={() => void run(() => mutate({ action: 'delete-draft', id: draft.id }))}>Delete draft</button></div></article>)}</>}
+          {view === 'drafts' && !editor && <>
+            {!snapshot.drafts.length && <div className="settings-empty-card"><strong>No drafts</strong><span>Manual drafts work without a provider.</span></div>}
+            {snapshot.drafts.map((draft) => <article className="settings-card" key={draft.id}>
+              <div className="settings-toggle settings-card-head"><div><strong>{draft.content.title}</strong><small>{draft.state}</small></div></div>
+              <div className="settings-card-actions">{draft.state === 'pending' && <button type="button" className="settings-inline-action" onClick={() => setEditor({ id: draft.id, ...(draft.lessonId ? { lessonId: draft.lessonId } : {}), content: structuredClone(draft.content), evidenceIds: draft.evidenceIds, review: { epoch: snapshot.epoch, expectedRevision: snapshot.revision, digest: draft.digest } })}>Review draft</button>}<button type="button" className="settings-inline-action" aria-label="Delete draft" disabled={busy} onClick={() => void run(() => mutate({ action: 'delete-draft', id: draft.id }))}>Delete</button></div>
+            </article>)}
+          </>}
           {editor && <section className="learning-editor" aria-label="Lesson review">
-            <h3>{editor.id ? 'Review exact draft' : editor.lessonId ? 'Pending replacement — approved content stays unchanged' : 'Add lesson'}</h3>
-            <label>Type <select aria-label="Lesson type" value={editor.content.kind} onChange={(event) => updateContent(event.target.value === 'user-profile' ? newCoreMemory('global') : event.target.value === 'project-brief' ? newCoreMemory('project') : event.target.value === 'note' ? newNote() : { kind: 'procedure', title: editor.content.title, body: { purpose: '', useWhen: [], doNotUseWhen: [], preconditions: [], steps: [], verification: [], stopConditions: [] }, activation: { ...emptyActivation } })}>{state.binding.scope === 'global' ? <><option value="user-profile">User coding profile</option>{editor.content.kind !== 'user-profile' && <option value={editor.content.kind}>Legacy shared lesson — convert before saving</option>}</> : <><option value="note">Note</option><option value="procedure">Project skill (procedure)</option><option value="project-brief">Project briefing</option></>}</select></label>
-            {isCoreMemory(editor.content) && <p>A single reviewed core memory is reused on new turns when this scope is set to Automatic. Profile updates remain pending until approved. Briefings with current work or next steps require review after seven days, or when referenced files change.</p>}
-            <label>Title<input value={editor.content.title} maxLength={160} onChange={(event) => updateContent({ ...editor.content, title: event.target.value })} /></label>
-            {Object.entries(editor.content.body).map(([field, value]) => <label key={field}>{field.replace(/([A-Z])/gu, ' $1')}<textarea aria-label={field} value={Array.isArray(value) ? value.join('\n') : value} onChange={(event) => updateBody(field, Array.isArray(value) ? lineList(event.target.value) : event.target.value)} /></label>)}
+            <div className="settings-title settings-title--spaced"><div><h3>{editor.id ? 'Review exact draft' : editor.lessonId ? 'New revision' : 'Add lesson'}</h3>{editor.lessonId && !editor.id && <p>Approved version stays live.</p>}</div></div>
+            <div className="settings-group"><div className="settings-select-row"><div><strong>Type</strong>{isCoreMemory(editor.content) && <small>Reused when mode is Automatic. Briefings need review after 7 days.</small>}</div><SelectControl compact={compactMode} label="Lesson type" className="settings-thinking-select" value={editor.content.kind} options={isGlobal ? [{ value: 'user-profile', label: 'User coding profile' }, ...(editor.content.kind !== 'user-profile' ? [{ value: editor.content.kind, label: 'Legacy (convert)' }] : [])] : projectKindOptions} onValueChange={changeKind} /></div></div>
+            <label className="settings-input-row"><span>Title</span><input value={editor.content.title} maxLength={160} onChange={(event) => updateContent({ ...editor.content, title: event.target.value })} /></label>
+            {Object.entries(editor.content.body).map(([field, value]) => <label className="settings-input-row" key={field}><span>{humanize(field)}</span><textarea aria-label={field} value={Array.isArray(value) ? value.join('\n') : value} onChange={(event) => updateBody(field, Array.isArray(value) ? lineList(event.target.value) : event.target.value)} /></label>)}
             {snapshot.drafts.find((item) => item.id === editor.id)?.uncertainty.map((text, index) => <p className="learning-warning" key={index}>{text}</p>)}
-            {!isCoreMemory(editor.content) && <><h4>Activation scope (reviewed with the content)</h4>{(['relativePaths', 'symbols', 'keywords'] as const).map((field) => <label key={field}>{field} (one per line)<textarea aria-label={field} value={editor.content.activation[field].join('\n')} onChange={(event) => updateContent({ ...editor.content, activation: { ...editor.content.activation, [field]: lineList(event.target.value) } })} /></label>)}
-            <label>Branch restriction<input value={editor.content.activation.branchRestriction ?? ''} onChange={(event) => updateContent({ ...editor.content, activation: { ...editor.content.activation, branchRestriction: event.target.value || null } })} /></label></>}
-            {snapshot.revisions.filter((item) => item.lessonId !== editor.lessonId && JSON.stringify(item.content.body) === JSON.stringify(editor.content.body)).slice(0, 3).map((item) => <p className="learning-warning" key={item.id}>Exact content duplicate: {item.content.title}. Keep one item or narrow the scope; nothing is automatically merged.</p>)}
-            {snapshot.revisions.filter((item) => item.lessonId !== editor.lessonId && item.content.activation.keywords.filter((word) => editor.content.activation.keywords.includes(word)).length >= 2).slice(0, 3).map((item) => <p key={item.id}>Possible overlap: {item.content.title}. Lexical overlap does not establish contradiction. Mark conflicting lessons before reuse.</p>)}
-            <details open><summary>Reviewed evidence</summary>{evidenceView(editor.evidenceIds)}{!editor.evidenceIds.length && <p>Manual content without runtime evidence is a user assertion, not a verified result.</p>}</details>
-            <details open={correction !== null}><summary>Capture or replace evidence</summary>
-              <p>Select exact durable entries below, or paste text as user-asserted evidence. Message-row text is never treated as an authenticated entry ID.</p>
-              <label>Manual evidence (user-asserted)<textarea value={manual} onChange={(event) => setManual(event.target.value)} maxLength={16384} /></label>
-              <div className="learning-sources">{state.sources.map((source) => <label key={source.entryId}><input type="checkbox" checked={selectedSources.includes(source.entryId)} onChange={(event) => setSelectedSources((previous) => event.target.checked ? [...previous, source.entryId] : previous.filter((id) => id !== source.entryId))} /><span>{source.role} · {source.entryId} · {source.preview}</span></label>)}</div>
-              <label>Project-relative file (optional)<input value={filePath} onChange={(event) => setFilePath(event.target.value)} placeholder="src/main/example.ts" /></label><div className="learning-actions"><label>First line<input type="number" min={1} value={startLine} onChange={(event) => setStartLine(event.target.valueAsNumber)} /></label><label>Last line<input type="number" min={1} value={endLine} onChange={(event) => setEndLine(event.target.valueAsNumber)} /></label></div>
-              <button type="button" disabled={!enabled || busy} onClick={() => void preview()}>Preview selected evidence</button>
+            {!isCoreMemory(editor.content) && <>
+              <div className="settings-title settings-title--spaced"><div><h3>Activation</h3></div></div>
+              {(['relativePaths', 'symbols', 'keywords'] as const).map((field) => <label className="settings-input-row" key={field}><span>{activationLabels[field]}</span><textarea aria-label={field} placeholder="One per line" value={editor.content.activation[field].join('\n')} onChange={(event) => updateContent({ ...editor.content, activation: { ...editor.content.activation, [field]: lineList(event.target.value) } })} /></label>)}
+              <label className="settings-input-row"><span>Branch</span><input value={editor.content.activation.branchRestriction ?? ''} onChange={(event) => updateContent({ ...editor.content, activation: { ...editor.content.activation, branchRestriction: event.target.value || null } })} /></label>
+            </>}
+            {snapshot.revisions.filter((item) => item.lessonId !== editor.lessonId && JSON.stringify(item.content.body) === JSON.stringify(editor.content.body)).slice(0, 3).map((item) => <p className="learning-warning" key={item.id}>Duplicate of {item.content.title}.</p>)}
+            {snapshot.revisions.filter((item) => item.lessonId !== editor.lessonId && item.content.activation.keywords.filter((word) => editor.content.activation.keywords.includes(word)).length >= 2).slice(0, 3).map((item) => <p className="learning-warning" key={item.id}>Overlaps {item.content.title}. Mark conflicts before reuse.</p>)}
+            <div className="settings-title settings-title--spaced"><div><h3>Evidence</h3></div></div>
+            {evidenceView(editor.evidenceIds)}{!editor.evidenceIds.length && <p className="settings-card-status">Manual content without runtime evidence is unverified.</p>}
+            <details open={correction !== null}><summary>Add evidence</summary>
+              <p className="settings-card-status">Pasted text counts as your assertion.</p>
+              <label className="settings-input-row"><span>Pasted text</span><textarea value={manual} onChange={(event) => setManual(event.target.value)} maxLength={16384} /></label>
+              {state.sources.length > 0 && <div className="settings-group">{state.sources.map((source) => <label className="settings-toggle" key={source.entryId}><div><strong>{source.role}</strong><small>{source.preview}</small></div><input type="checkbox" checked={selectedSources.includes(source.entryId)} onChange={(event) => setSelectedSources((previous) => event.target.checked ? [...previous, source.entryId] : previous.filter((id) => id !== source.entryId))} /><span aria-hidden="true" /></label>)}</div>}
+              <label className="settings-input-row"><span>File (optional)</span><input value={filePath} onChange={(event) => setFilePath(event.target.value)} placeholder="src/main/example.ts" /></label>
+              <div className="settings-card-grid"><label className="settings-input-row"><span>First line</span><input type="number" min={1} value={startLine} onChange={(event) => setStartLine(event.target.valueAsNumber)} /></label><label className="settings-input-row"><span>Last line</span><input type="number" min={1} value={endLine} onChange={(event) => setEndLine(event.target.valueAsNumber)} /></label></div>
+              <div className="settings-card-actions"><button type="button" className="settings-inline-action" disabled={!enabled || busy} onClick={() => void preview()}>Preview evidence</button></div>
             </details>
-            {capture && <section aria-label="Exact provider source preview"><h4>Exact redacted sources to send</h4><p>Review every excerpt. Secret filtering is not exhaustive. Only this accepted preview is retained.</p>{excerpts.map((excerpt) => <label key={excerpt.id}>Source {excerpt.id}<textarea value={excerpt.text} onChange={(event) => setExcerpts((previous) => previous.map((item) => item.id === excerpt.id ? { ...item, text: event.target.value } : item))} /><button type="button" onClick={() => setExcerpts((previous) => previous.filter((item) => item.id !== excerpt.id))}>Remove source</button></label>)}
-              <button type="button" disabled={busy || !excerpts.length} onClick={() => void run(async () => { if (!state.binding) return; const current = generation.current; const next = await getDesktopApi().reviewLearningCapture({ binding: state.binding, captureId: capture.id, excerpts }); if (current === generation.current) { setCapture(next); setExcerpts(next.evidence.map(({ id, text }) => ({ id, text }))); } })}>Accept redacted preview</button>
-              <label>Intended lesson / correction<textarea value={intent} maxLength={4000} onChange={(event) => setIntent(event.target.value)} /></label>
-              <p>{state.provider ? `Provider: ${state.provider.provider} · Model: ${state.provider.model}. Generate sends these sources and your correction in one tool-free request and may incur provider cost.` : 'Provider unavailable. Save and edit manually instead.'}</p>
-              <button type="button" disabled={!enabled || busy || !state.provider || !previewUnchanged} onClick={() => void generate()}>Generate draft — send reviewed sources</button>
-              {request.current && <button type="button" onClick={() => { if (state.binding && request.current) void getDesktopApi().cancelLearning({ binding: state.binding, id: request.current }); }}>Cancel generation</button>}
+            {capture && <section aria-label="Exact provider source preview">
+              <div className="settings-title settings-title--spaced"><div><h3>Sources to send</h3><p>Redaction can miss secrets.</p></div></div>
+              {excerpts.map((excerpt) => <div key={excerpt.id}><label className="settings-input-row"><span>Source {excerpt.id}</span><textarea value={excerpt.text} onChange={(event) => setExcerpts((previous) => previous.map((item) => item.id === excerpt.id ? { ...item, text: event.target.value } : item))} /></label><div className="settings-card-actions"><button type="button" className="settings-inline-action" aria-label={`Remove source ${excerpt.id}`} onClick={() => setExcerpts((previous) => previous.filter((item) => item.id !== excerpt.id))}>Remove</button></div></div>)}
+              <div className="settings-card-actions"><button type="button" className="settings-inline-action" disabled={busy || !excerpts.length} onClick={() => void run(async () => { if (!state.binding) return; const current = generation.current; const next = await getDesktopApi().reviewLearningCapture({ binding: state.binding, captureId: capture.id, excerpts }); if (current === generation.current) { setCapture(next); setExcerpts(next.evidence.map(({ id, text }) => ({ id, text }))); } })}>Accept preview</button></div>
+              <label className="settings-input-row"><span>Correction</span><textarea value={intent} maxLength={4000} onChange={(event) => setIntent(event.target.value)} /></label>
+              <small>{state.provider ? `${state.provider.provider} · ${state.provider.model} · one request, may cost` : 'No provider. Edit manually.'}</small>
+              <div className="settings-card-actions"><button type="button" className="settings-inline-action" aria-label="Generate draft and send reviewed sources" disabled={!enabled || busy || !state.provider || !previewUnchanged} onClick={() => void generate()}>Generate draft</button>{request.current && <button type="button" className="settings-inline-action" onClick={() => { if (state.binding && request.current) void getDesktopApi().cancelLearning({ binding: state.binding, id: request.current }); }}>Cancel generation</button>}</div>
             </section>}
-            <div className="learning-actions"><button type="button" disabled={!enabled || busy || Boolean(capture && !previewUnchanged)} onClick={() => void run(async () => {
+            <div className="settings-card-actions settings-card-actions--panel"><button type="button" className="settings-inline-action" disabled={!enabled || busy || Boolean(capture && !previewUnchanged)} onClick={() => void run(async () => {
               const candidate: unknown = JSON.parse(JSON.stringify(editor.content), (_key, value: unknown) => Array.isArray(value) && value.every((item) => typeof item === 'string') ? value.map((item: string) => item.trim()).filter(Boolean) : value);
               const validated = lessonContentSchema.safeParse(candidate);
               if (!validated.success) throw new Error(validated.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).slice(0, 4).join('; '));
               await mutate({ action: 'save-draft', ...(editor.id ? { id: editor.id } : {}), ...(editor.lessonId ? { lessonId: editor.lessonId } : {}), content: validated.data, evidenceIds: editor.evidenceIds, ...(capture ? { captureId: capture.id } : {}) }); setView('drafts');
-            })}>Save draft</button>{editor.id && <><button type="button" disabled={busy || !editor.review} onClick={() => void run(() => mutate({ action: 'approve', id: editor.id!, digest: editor.review!.digest }, editor.review))}>Approve exact revision</button><button type="button" disabled={busy} onClick={() => void run(() => mutate({ action: 'reject', id: editor.id! }))}>Reject</button></>}<button type="button" onClick={() => setEditor(null)}>Cancel review</button></div>
-            {!editor.review && editor.id && <p>Edited content must be saved and reviewed again before approval.</p>}
+            })}>Save draft</button>{editor.id && <><button type="button" className="primary-button" disabled={busy || !editor.review} onClick={() => void run(() => mutate({ action: 'approve', id: editor.id!, digest: editor.review!.digest }, editor.review))}>Approve exact revision</button><button type="button" className="settings-inline-action" disabled={busy} onClick={() => void run(() => mutate({ action: 'reject', id: editor.id! }))}>Reject</button></>}<button type="button" className="settings-inline-action" aria-label="Cancel review" onClick={() => setEditor(null)}>Cancel</button></div>
+            {!editor.review && editor.id && <small>Save edits before approving.</small>}
           </section>}
           {view === 'recent' && !editor && <>
-            {!recentUse.length && <p>No learning dispatches recorded. A selection preview is not a sent request.</p>}
-            {[...recentUse].reverse().map((manifest) => <article className="learning-card" key={manifest.dispatchId}><h3>{manifest.state === 'handed-to-runtime' ? 'Handed to runtime (provider receipt unproven)' : manifest.state === 'prepared' ? 'Prepared — delivery uncertain if interrupted' : manifest.state}</h3><small>{manifest.dispatchId} · session {manifest.sessionId} · {manifest.bytes} UTF-8 bytes · ~{manifest.estimatedTokens} tokens ({manifest.tokenMethod})</small><ul>{manifest.items.map((item) => <li key={item.revisionId}>{(item.scope ?? manifest.scope).toUpperCase()} · {item.revisionId} {(item.scope ?? manifest.scope) !== snapshot.scope ? '(other memory scope)' : snapshot.revisions.some((revision) => revision.id === item.revisionId) ? '' : '(source revision deleted)'} — {item.reasons.join('; ')}</li>)}{manifest.skipped.map((item) => <li key={item.lessonId}>Skipped {item.lessonId}: {item.reason}</li>)}</ul></article>)}
-            <h3>Draft generation usage (separate from coding)</h3>{snapshot.generationUsage.map((usage) => <p key={usage.requestId}>{usage.provider}/{usage.model} · {usage.outcome} · {usage.costUsd === null ? 'cost unknown' : `$${usage.costUsd}`} · input {usage.inputTokens ?? 'unknown'} / output {usage.outputTokens ?? 'unknown'}</p>)}
+            {!recentUse.length && <div className="settings-empty-card"><strong>Nothing sent yet</strong></div>}
+            {[...recentUse].reverse().map((manifest) => {
+              const handed = manifest.state === 'handed-to-runtime';
+              const prepared = manifest.state === 'prepared';
+              return <article className="settings-card" key={manifest.dispatchId}>
+                <div className="settings-toggle settings-card-head"><div><h3>{handed ? 'Handed to runtime' : prepared ? 'Prepared' : manifest.state}</h3><small>{[handed ? 'Receipt unproven' : prepared ? 'Delivery uncertain' : '', `${manifest.bytes} B`, `~${manifest.estimatedTokens} tokens`].filter(Boolean).join(' · ')}</small></div></div>
+                <ul>{manifest.items.map((item) => <li key={item.revisionId}>{scopeName[item.scope ?? manifest.scope]} · {item.revisionId}{(item.scope ?? manifest.scope) !== snapshot.scope ? ' (other scope)' : snapshot.revisions.some((revision) => revision.id === item.revisionId) ? '' : ' (deleted)'} — {item.reasons.join('; ')}</li>)}{manifest.skipped.map((item) => <li key={item.lessonId}>Skipped {item.lessonId}: {item.reason}</li>)}</ul>
+              </article>;
+            })}
+            {snapshot.generationUsage.length > 0 && <><div className="settings-title settings-title--spaced"><div><h3>Generation cost</h3></div></div>{snapshot.generationUsage.map((usage) => <p className="settings-card-status" key={usage.requestId}>{usage.provider}/{usage.model} · {usage.outcome} · {usage.costUsd === null ? 'cost unknown' : `$${usage.costUsd}`} · input {usage.inputTokens ?? 'unknown'} / output {usage.outputTokens ?? 'unknown'}</p>)}</>}
           </>}
         </>}
-        <details><summary>Deletion limits and recovery</summary><p>Disable stops future use. Deletion cannot retract provider requests or remove text from existing Pi sessions, exported copies, or OS backups. Use a fresh session to avoid historical context. This is not secure erasure.</p><label>Type DELETE LEARNING to reset the selected scope<input aria-label="Reset learning confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label><button type="button" disabled={busy || confirmation !== 'DELETE LEARNING' || !state?.binding} onClick={() => void run(async () => {
+        <div className="settings-title settings-title--spaced"><div><h3>Reset scope</h3><p>Disable stops use. Reset can't erase text already sent or kept in sessions, exports or backups.</p></div></div>
+        <label className="settings-input-row"><span>Type DELETE LEARNING</span><input aria-label="Reset learning confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+        <div className="settings-card-actions"><button type="button" className="settings-inline-action" aria-label="Reset selected learning scope" disabled={busy || confirmation !== 'DELETE LEARNING' || !state?.binding} onClick={() => void run(async () => {
           if (!state?.binding) return;
           if (snapshot) await mutate({ action: 'reset', confirmation: 'DELETE LEARNING' });
           else if (state.recoveryDigest) setState(await getDesktopApi().recoverLearning({ binding: state.binding, action: 'reset-store', digest: state.recoveryDigest, confirmation: 'DELETE LEARNING' }));
           else throw new Error('Unsafe or oversized store requires manual recovery; no automatic reset is offered.');
           setConfirmation('');
-        })}>Reset selected learning scope</button>{state?.recoveryDigest && snapshot && <button type="button" disabled={busy} onClick={() => void run(async () => { if (state.binding && state.recoveryDigest) setState(await getDesktopApi().recoverLearning({ binding: state.binding, action: 'recover-lock', digest: state.recoveryDigest })); })}>Recover dead writer lock</button>}</details>
-        <button type="button" onClick={() => { useLearningStore.getState().close(); useUiStore.getState().setSettingsOpen(true); }}>Open Settings</button>
+        })}>Reset</button>{state?.recoveryDigest && snapshot && <button type="button" className="settings-inline-action" disabled={busy} onClick={() => void run(async () => { if (state.binding && state.recoveryDigest) setState(await getDesktopApi().recoverLearning({ binding: state.binding, action: 'recover-lock', digest: state.recoveryDigest })); })}>Recover lock</button>}</div>
       </div>
     </Dialog.Content></Dialog.Portal>
   </Dialog.Root>;

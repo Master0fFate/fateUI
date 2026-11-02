@@ -196,8 +196,8 @@ describe('SettingsDialog feedback', () => {
     await user.click(await screen.findByRole('tab', { name: /Memory Learning/u }));
     expect(await screen.findByText('/user-data/settings.json')).toBeInTheDocument();
     const master = screen.getByRole('checkbox', { name: 'Enable Memory Learning' });
-    const global = screen.getByRole('checkbox', { name: 'Enable GLOBAL memory' });
-    const project = screen.getByRole('checkbox', { name: 'Enable PROJECT memory' });
+    const global = screen.getByRole('checkbox', { name: 'Enable Profile memory' });
+    const project = screen.getByRole('checkbox', { name: 'Enable Project memory' });
     expect(master).not.toBeChecked();
     expect(global).toBeDisabled();
     expect(project).toBeDisabled();

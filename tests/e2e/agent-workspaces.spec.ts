@@ -81,14 +81,15 @@ test('Settings owns workspace policy while Run Agents reviews and retains work',
     await expect.poll(() => workspace.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: await evidenceOutputPath('agent-workspace-review-narrow.png') });
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
-    await workspace.getByLabel('Integration method').selectOption('cherry-pick');
+    await workspace.getByRole('combobox', { name: 'Integration method' }).click();
+    await page.getByRole('option', { name: 'Cherry-pick' }).click();
     await expect(workspace.getByRole('button', { name: 'Integrate changes' })).toBeDisabled();
     await workspace.getByLabel('Select commit aaaaaaaaaaaa').check();
     await workspace.getByRole('button', { name: 'Integrate changes' }).click();
     const confirmation = workspace.getByRole('alertdialog', { name: 'Integrate into Main agent?' });
     await expect(confirmation).toContainText('/e2e/project');
     await confirmation.getByRole('button', { name: 'Integrate', exact: true }).click();
-    await expect(workspace.getByRole('status')).toContainText('Changes integrated');
+    await expect(workspace.getByRole('status')).toContainText('Integrated');
     await expect(workspace).toContainText('/e2e/worktrees/reviewer');
     await page.getByRole('button', { name: 'Close workspace' }).click();
     await agents.getByRole('button', { name: 'Close /root/reviewer and preserve history', exact: true }).click();
@@ -97,7 +98,7 @@ test('Settings owns workspace policy while Run Agents reviews and retains work',
     const cleanup = workspace.getByRole('alertdialog', { name: 'Remove Reviewer worktree?' });
     await expect(cleanup).toContainText('branch and agent history stay available');
     await cleanup.getByRole('button', { name: 'Remove worktree' }).click();
-    await expect(workspace.getByRole('status')).toContainText('Git branch is retained');
+    await expect(workspace.getByRole('status')).toContainText('Branch kept');
     await page.getByRole('button', { name: 'Close workspace' }).click();
     await expect(agents.getByLabel('Workspace for Reviewer', { exact: true })).toContainText('Removed worktree');
   } finally {

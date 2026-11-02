@@ -13,6 +13,7 @@ import { useRuntimeStore } from '../stores/runtimeStore';
 import { ipcErrorMessage } from '../lib/ipcError';
 import { ProviderLogo, prefetchProviderLogos } from './ProviderLogo';
 import { SelectControl } from './SelectControl';
+import { useSkinComponents } from '../skins/SkinProvider';
 
 /**
  * The one provider window in Fate UI. Used by /login ("Connect a provider",
@@ -63,6 +64,7 @@ function methodLabel(methods: readonly ('oauth' | 'api_key')[]): string {
 }
 
 export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }: ProviderConnectDialogProps) {
+  const { ActionContent } = useSkinComponents();
   const providerLogin = useRuntimeStore((state) => state.runtime.providerLogin);
   const managedProviders = useRuntimeStore((state) => state.runtime.modelsDevManaged) ?? [];
   const [catalog, setCatalog] = useState<ModelsDevProviderSummary[] | null>(null);
@@ -256,7 +258,7 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
   const blockingPrompt = login.status === 'awaiting-input' && login.prompt && login.prompt.type !== 'manual_code' ? login.prompt : null;
   const working = pendingStart || login.status === 'working' || (login.status === 'awaiting-input' && login.prompt?.type === 'manual_code');
   const manualPrompt = login.prompt?.type === 'manual_code' ? login.prompt : null;
-  const workingMessage = pendingStart && login.status === 'idle' ? 'Starting secure provider sign-in…' : login.message ?? 'Working…';
+  const workingMessage = pendingStart && login.status === 'idle' ? 'Starting sign-in…' : login.message ?? 'Working…';
 
   return (
     <Dialog.Root open={open && ready} onOpenChange={(next) => { if (!next) close(); }}>
@@ -272,12 +274,12 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
           <div className="provider-dialog-head">
             {selected ? (
               <button type="button" className="provider-dialog-back" onClick={() => { setSelectedId(null); setDetail(null); setDetailError(null); cancelLogin(); }}>
-                <ArrowLeft size={15} /><span>Back</span>
+                <ActionContent text="back"><ArrowLeft size={15} /><span>Back</span></ActionContent>
               </button>
             ) : (
               <Dialog.Title className="provider-dialog-title">Connect a provider</Dialog.Title>
             )}
-            <Dialog.Close className="provider-dialog-close" aria-label="Close"><X size={15} /></Dialog.Close>
+            <Dialog.Close className="provider-dialog-close" aria-label="Close"><ActionContent text="x"><X size={15} /></ActionContent></Dialog.Close>
           </div>
 
           {!selected && (
@@ -287,19 +289,19 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={catalogLoading ? 'Loading the models.dev catalog…' : `${rows.length} providers · sign-in or add · search by name or id`}
+                  placeholder={catalogLoading ? 'Loading catalog…' : `Search ${rows.length} providers`}
                   autoFocus
                   aria-label="Search providers"
                 />
               </div>
               <div className="provider-dialog-list" role="listbox" aria-label="Providers">
                 {catalogLoading && !catalog && (
-                  <div className="provider-dialog-state"><LoaderCircle className="provider-dialog-spinner" size={16} aria-hidden="true" /><span>Loading the live catalog from models.dev…</span></div>
+                  <div className="provider-dialog-state"><LoaderCircle className="provider-dialog-spinner" size={16} aria-hidden="true" /><span>Loading catalog…</span></div>
                 )}
                 {catalogError && (
                   <div className="provider-dialog-state provider-dialog-state--error" role="alert">
                     <span>{catalogError}</span>
-                    <button type="button" className="provider-dialog-retry" onClick={loadCatalog}><RefreshCw size={13} /> Retry</button>
+                    <button type="button" className="activity-refresh" aria-label="Retry" onClick={loadCatalog}><ActionContent text="retry"><RefreshCw size={13} /> Retry</ActionContent></button>
                   </div>
                 )}
                 {visible.map((row) => (
@@ -324,7 +326,7 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                   <div className="provider-dialog-state"><span>No provider matches “{query.trim()}”.</span></div>
                 )}
               </div>
-              <p className="provider-dialog-foot">Sign-in providers come from the embedded Pi runtime · provider data from <a href="https://models.dev" target="_blank" rel="noreferrer">models.dev</a> loads live and nothing is cached.</p>
+              <p className="provider-dialog-foot">Catalog from <a href="https://models.dev" target="_blank" rel="noreferrer">models.dev</a>, loaded live.</p>
             </>
           )}
 
@@ -363,8 +365,8 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                     </label>
                   )}
                   <div className="provider-dialog-actions">
-                    <span className="provider-dialog-assurance"><ShieldCheck size={13} aria-hidden="true" /> Credentials stay in Fate UI’s local provider store.</span>
-                    <button className="provider-dialog-add" type="submit" disabled={!value}>Continue</button>
+                    <span className="provider-dialog-assurance"><ShieldCheck size={13} aria-hidden="true" /> Stored locally</span>
+                    <button className="provider-dialog-add" type="submit" aria-label="Continue" disabled={!value}><ActionContent text="continue">Continue</ActionContent></button>
                   </div>
                 </form>
               ) : working ? (
@@ -375,7 +377,7 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                     <p>{workingMessage}</p>
                     {login.deviceCode && <code>{login.deviceCode.userCode}</code>}
                   </div>
-                  <button type="button" className="provider-dialog-retry" onClick={close}>Cancel</button>
+                  <button type="button" className="activity-refresh" aria-label="Cancel" onClick={close}><ActionContent text="cancel">Cancel</ActionContent></button>
                 </div>
               ) : (
                 <div className="provider-dialog-methods">
@@ -384,33 +386,33 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                       {method === 'oauth' ? <ExternalLink size={15} /> : <KeyRound size={15} />}
                       <span>
                         <strong>{method === 'oauth' ? 'Sign in in browser' : 'Use an API key'}</strong>
-                        <small>{method === 'oauth' ? 'Continue with the provider’s secure sign-in page' : 'Send a one-time credential to Fate UI’s local provider store'}</small>
+                        <small>{method === 'oauth' ? 'Provider sign-in page' : 'Stored locally'}</small>
                       </span>
                     </button>
                   ))}
                   {selected.configured && (
-                    <button type="button" className="provider-dialog-signout" onClick={() => void getDesktopApiOptional()?.logoutProvider(selected.id).catch(() => undefined)}>
-                      <LogOut size={14} /> Sign out of {selected.name}
+                    <button type="button" className="provider-dialog-signout" aria-label={`Sign out of ${selected.name}`} onClick={() => void getDesktopApiOptional()?.logoutProvider(selected.id).catch(() => undefined)}>
+                      <ActionContent text="sign out"><LogOut size={14} /> Sign out of {selected.name}</ActionContent>
                     </button>
                   )}
                   {selectedManaged && (
-                    <button type="button" className="provider-dialog-signout provider-dialog-signout--danger" disabled={removing} onClick={removeManaged}>
-                      {removing ? <LoaderCircle className="provider-dialog-spinner" size={14} /> : <X size={14} />} Remove from Fate UI
+                    <button type="button" className="provider-dialog-signout provider-dialog-signout--danger" aria-label="Remove from Fate UI" disabled={removing} onClick={removeManaged}>
+                      <ActionContent text="remove">{removing ? <LoaderCircle className="provider-dialog-spinner" size={14} /> : <X size={14} />} Remove from Fate UI</ActionContent>
                     </button>
                   )}
                 </div>
               )}
               {manualPrompt && (
                 <details className="provider-dialog-manual">
-                  <summary>Browser sign-in did not finish automatically</summary>
+                  <summary>Paste sign-in code</summary>
                   <form onSubmit={(event) => { event.preventDefault(); respond(); }}>
                     <p>{manualPrompt.message}</p>
                     <label className="provider-dialog-key provider-dialog-key--form">
-                      <span>Authorization code or redirect URL</span>
+                      <span>Code or URL</span>
                       <input type="text" value={value} maxLength={20_000} placeholder={manualPrompt.placeholder} autoComplete="off" onChange={(event) => setValue(event.target.value)} />
                     </label>
                     <div className="provider-dialog-actions">
-                      <button className="provider-dialog-add" type="submit" disabled={!value}>Submit code</button>
+                      <button className="provider-dialog-add" type="submit" aria-label="Submit code" disabled={!value}><ActionContent text="submit">Submit code</ActionContent></button>
                     </div>
                   </form>
                 </details>
@@ -431,7 +433,7 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
               {detailError && (
                 <div className="provider-dialog-state provider-dialog-state--error" role="alert">
                   <span>{detailError}</span>
-                  <button type="button" className="provider-dialog-retry" onClick={() => openDetail(selected)}><RefreshCw size={13} /> Retry</button>
+                  <button type="button" className="activity-refresh" aria-label="Retry" onClick={() => openDetail(selected)}><ActionContent text="retry"><RefreshCw size={13} /> Retry</ActionContent></button>
                 </div>
               )}
               {detail && (
@@ -460,9 +462,9 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                     <>
                       {addError && <p className="provider-dialog-error" role="alert">{addError}</p>}
                       <div className="provider-dialog-actions">
-                        <span className="provider-dialog-assurance"><ShieldCheck size={13} aria-hidden="true" /> Added to Fate UI provider storage. Sign in through its row, or remove it here.</span>
-                        <button type="button" className="provider-dialog-signout provider-dialog-signout--danger" disabled={removing} onClick={removeManaged}>
-                          {removing ? <LoaderCircle className="provider-dialog-spinner" size={14} /> : <X size={14} />} Remove from Fate UI
+                        <span className="provider-dialog-assurance"><ShieldCheck size={13} aria-hidden="true" /> Added to Fate UI</span>
+                        <button type="button" className="provider-dialog-signout provider-dialog-signout--danger" aria-label="Remove from Fate UI" disabled={removing} onClick={removeManaged}>
+                          <ActionContent text="remove">{removing ? <LoaderCircle className="provider-dialog-spinner" size={14} /> : <X size={14} />} Remove from Fate UI</ActionContent>
                         </button>
                       </div>
                     </>
@@ -470,7 +472,7 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                     <>
                       <label className="provider-dialog-key">
                         <KeyRound size={14} aria-hidden="true" />
-                        <span>API key <em>optional now · or set <code>{detail.envVar ?? 'the provider env var'}</code> before starting Fate UI</em></span>
+                        <span>API key <em>Optional · or set <code>{detail.envVar ?? 'the provider env var'}</code></em></span>
                         <input
                           type="password"
                           value={apiKey}
@@ -482,9 +484,11 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                       </label>
                       {addError && <p className="provider-dialog-error" role="alert">{addError}</p>}
                       <div className="provider-dialog-actions">
-                        <span className="provider-dialog-assurance"><ShieldCheck size={13} aria-hidden="true" /> The key goes to Fate UI’s local credential store only.</span>
-                        <button type="button" className="provider-dialog-add" onClick={add} disabled={adding || detail.models.length === 0}>
-                          {adding ? <><LoaderCircle className="provider-dialog-spinner" size={14} /> Adding…</> : <><Check size={14} /> Add {detail.models.length} models</>}
+                        <span className="provider-dialog-assurance"><ShieldCheck size={13} aria-hidden="true" /> Stored locally</span>
+                        <button type="button" className="provider-dialog-add" aria-label={adding ? 'Adding…' : `Add ${detail.models.length} models`} onClick={add} disabled={adding || detail.models.length === 0}>
+                          {adding
+                            ? <ActionContent text="adding"><LoaderCircle className="provider-dialog-spinner" size={14} /> Adding…</ActionContent>
+                            : <ActionContent text={`add ${detail.models.length}`}><Check size={14} /> Add {detail.models.length} models</ActionContent>}
                         </button>
                       </div>
                     </>

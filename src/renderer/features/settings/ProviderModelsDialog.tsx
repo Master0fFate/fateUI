@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { ModelInfo } from '../../../shared/contracts/ipc';
 import { modelIdentity } from '../../../shared/modelVisibility';
 import { ProviderLogo } from '../../components/ProviderLogo';
+import { useSkinComponents } from '../../skins/SkinProvider';
 
 interface ProviderModelsDialogProps {
   open: boolean;
@@ -23,6 +24,7 @@ export function ProviderModelsDialog({
   disabledModels,
   onDisabledModelsChange,
 }: ProviderModelsDialogProps) {
+  const { ActionContent } = useSkinComponents();
   const hidden = new Set(disabledModels);
   const keys = models.map((model) => modelIdentity(model.provider, model.id));
   const enabledCount = keys.filter((key) => !hidden.has(key)).length;
@@ -58,19 +60,19 @@ export function ProviderModelsDialog({
                 </Dialog.Description>
               </div>
             </div>
-            <Dialog.Close className="provider-dialog-close" aria-label="Close"><X size={15} /></Dialog.Close>
+            <Dialog.Close className="provider-dialog-close" aria-label="Close"><ActionContent text="x"><X size={15} /></ActionContent></Dialog.Close>
           </div>
 
           {models.length > 0 && (
             <div className="provider-models-actions">
-              <button type="button" className="provider-dialog-retry" onClick={() => setAll(true)}>Enable all</button>
-              <button type="button" className="provider-dialog-retry" onClick={() => setAll(false)}>Disable all</button>
+              <button type="button" className="activity-refresh" aria-label="Enable all" onClick={() => setAll(true)}><ActionContent text="all on">Enable all</ActionContent></button>
+              <button type="button" className="activity-refresh" aria-label="Disable all" onClick={() => setAll(false)}><ActionContent text="all off">Disable all</ActionContent></button>
             </div>
           )}
 
           <div className="provider-dialog-models" role="list" aria-label={`${title} models`}>
             {models.length === 0 && (
-              <div className="provider-dialog-state"><span>This provider has no models yet.</span></div>
+              <div className="provider-dialog-state"><span>No models</span></div>
             )}
             {models.map((model) => {
               const key = modelIdentity(model.provider, model.id);

@@ -101,7 +101,7 @@ export function GoalMaxRail() {
           <Dialog.Content className="goalmax-confirm-dialog" aria-describedby="goalmax-clear-description">
             <Dialog.Title>Clear this goal?</Dialog.Title>
             <Dialog.Description id="goalmax-clear-description">Active root and child work will be cancelled. Audit history stays archived.</Dialog.Description>
-            <div className="goalmax-dialog-actions"><Dialog.Close disabled={busy || networkBusy}>Keep goal</Dialog.Close><button className="danger-button" type="button" disabled={unavailable} onClick={() => void clear()}>Cancel & clear</button></div>
+            <div className="goalmax-dialog-actions"><Dialog.Close aria-label="Keep goal" disabled={busy || networkBusy}><ActionContent text="keep">Keep goal</ActionContent></Dialog.Close><button className="danger-button" type="button" aria-label="Cancel & clear" disabled={unavailable} onClick={() => void clear()}><ActionContent text="clear">Cancel & clear</ActionContent></button></div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -201,18 +201,18 @@ function GoalMaxEditor({ goal }: { goal: GoalView }) {
             returnFocus.current = null;
             if (target?.isConnected) target.focus({ preventScroll: true });
           }}>
-          <header><div><Dialog.Title>Edit goal</Dialog.Title><Dialog.Description id="goalmax-editor-description">Update the objective, completion gate, or explicit limits.</Dialog.Description></div><Dialog.Close aria-label="Close goal editor"><ActionContent text="x"><X size={15} /></ActionContent></Dialog.Close></header>
+          <header><div><Dialog.Title>Edit goal</Dialog.Title><Dialog.Description id="goalmax-editor-description">Objective, criteria and limits.</Dialog.Description></div><Dialog.Close aria-label="Close goal editor"><ActionContent text="x"><X size={15} /></ActionContent></Dialog.Close></header>
           <label className="goalmax-field"><span>Objective</span><textarea value={objective} maxLength={200_000} rows={6} onChange={(event) => setObjective(event.target.value)} autoFocus /></label>
           <details className="goalmax-criteria-editor">
             <summary>Criteria <span>{criteria.length}</span></summary>
             <div>{criteria.map((criterion, index) => (
               <div className="goalmax-criterion-edit" key={criterion.id ?? index}>
                 <input aria-label={`Criterion ${index + 1}`} value={criterion.title} maxLength={240} onChange={(event) => setCriteria((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} />
-                <button type="button" aria-label={`Remove criterion ${index + 1}`} disabled={criteria.length === 1} onClick={() => setCriteria((current) => current.filter((_item, itemIndex) => itemIndex !== index))}><X size={13} /></button>
+                <button type="button" aria-label={`Remove criterion ${index + 1}`} disabled={criteria.length === 1} onClick={() => setCriteria((current) => current.filter((_item, itemIndex) => itemIndex !== index))}><ActionContent text="x"><X size={13} /></ActionContent></button>
               </div>
-            ))}<button className="goalmax-add-criterion" type="button" disabled={criteria.length >= 32} onClick={() => setCriteria((current) => [...current, { title: '', description: '', required: true }])}>Add criterion</button></div>
+            ))}<button className="goalmax-add-criterion" type="button" aria-label="Add criterion" disabled={criteria.length >= 32} onClick={() => setCriteria((current) => [...current, { title: '', description: '', required: true }])}><ActionContent text="add">Add criterion</ActionContent></button></div>
           </details>
-          {web && <p>Budgets are not included in this read. Each untouched field preserves its host value. An empty edited field explicitly removes only that limit.</p>}
+          {web && <p>Untouched budgets keep host values. Clearing a field removes that limit.</p>}
           <div className="goalmax-budget-fields">
             <label className="goalmax-field"><span>Token limit</span><input inputMode="numeric" placeholder={web ? 'Unchanged' : 'None'} value={tokenLimit} onChange={(event) => setDraft((current) => ({ ...current, tokenDirty: true, tokenLimit: event.target.value.replace(/[^0-9]/gu, '') }))} /></label>
             <label className="goalmax-field"><span>Time · minutes</span><input inputMode="numeric" placeholder={web ? 'Unchanged' : 'None'} value={timeMinutes} onChange={(event) => setDraft((current) => ({ ...current, timeDirty: true, timeMinutes: event.target.value.replace(/[^0-9]/gu, '') }))} /></label>
@@ -220,9 +220,8 @@ function GoalMaxEditor({ goal }: { goal: GoalView }) {
             <label className="goalmax-field"><span>Agents</span><SelectControl label="Goal agent strategy" value={agentStrategy} className="goalmax-verification-select" options={[...(web ? [{ value: '', label: 'Unchanged (host value omitted)' }] : []), { value: 'auto', label: 'Auto' }, { value: 'read-only', label: 'Read only' }, { value: 'off', label: 'Off' }]} onValueChange={(value) => { if (value === '' || value === 'auto' || value === 'read-only' || value === 'off') setDraft((current) => ({ ...current, agentStrategy: value })); }} /></label>
           </div>
           {error ? <p className="goalmax-dialog-error" role="alert">{error}</p> : null}
-          {web && goal.revision !== editingRevision && <p role="status">The host revision changed; this local draft is not applied.</p>}
-          <button type="button" disabled={saving} onClick={() => { setDraft(initialDraft()); setError(null); }}>Use current host goal</button>
-          <div className="goalmax-dialog-actions"><Dialog.Close disabled={saving}>Cancel</Dialog.Close><button type="button" disabled={saving || unavailable || !objective.trim()} onClick={() => void save()}>{saving ? <LoaderCircle className="tool-spinner" size={14} /> : null}Save</button></div>
+          {web && goal.revision !== editingRevision && <p role="status">Host goal changed. Draft not applied.</p>}
+          <div className="goalmax-dialog-actions"><button className="settings-inline-action" type="button" aria-label={web ? 'Use host goal' : 'Reset'} disabled={saving} onClick={() => { setDraft(initialDraft()); setError(null); }}><ActionContent text="reset">{web ? 'Use host goal' : 'Reset'}</ActionContent></button><Dialog.Close aria-label="Cancel" disabled={saving}><ActionContent text="cancel">Cancel</ActionContent></Dialog.Close><button type="button" aria-label="Save" disabled={saving || unavailable || !objective.trim()} onClick={() => void save()}>{saving ? <LoaderCircle className="tool-spinner" size={14} /> : null}<ActionContent text="save">Save</ActionContent></button></div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
