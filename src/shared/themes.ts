@@ -85,4 +85,12 @@ export const builtInThemes: readonly ThemeDefinition[] = [
     id: 'm3-expressive', name: 'M3 Expressive', tone: 'dark',
     colors: { canvas: '#0a0e19', panel: '#151b31', raised: '#212944', raisedHover: '#303958', border: '#303957', borderStrong: '#566184', text: '#eceefa', textSoft: '#c9cde5', muted: '#a3adcc', subtle: '#7884a7', accent: '#b3a6ff', accentHover: '#c6bcff', accentSoft: '#363f78', currentSession: '#323d78', lastActiveSession: '#212944', onAccent: '#211944', success: '#91d7bf', warning: '#edca8c', danger: '#ffb4b1', shadow: '#040711' },
   },
+  {
+    id: 'standard-dark', name: 'Dark Standard', tone: 'dark',
+    colors: { canvas: '#11100f', panel: '#171514', raised: '#1d1b1a', raisedHover: '#2b2825', border: '#302d2a', borderStrong: '#5a554e', text: '#e8e4dc', textSoft: '#cbc6bd', muted: '#a39e95', subtle: '#726e68', accent: '#ffffff', accentHover: '#5a554e', accentSoft: '#2b2825', currentSession: '#2b2825', lastActiveSession: '#1d1b1a', onAccent: '#000000', success: '#7fbd5b', warning: '#d5aa52', danger: '#df6b61', shadow: '#000000' },
+  },
+  {
+    id: 'standard-light', name: 'Light Standard', tone: 'light',
+    colors: { canvas: '#f4f2ef', panel: '#ffffff', raised: '#f7f5f2', raisedHover: '#e8e4de', border: '#d8d3cc', borderStrong: '#aaa49b', text: '#252321', textSoft: '#48443f', muted: '#69645e', subtle: '#8b857d', accent: '#252321', accentHover: '#aaa49b', accentSoft: '#e8e4de', currentSession: '#e8e4de', lastActiveSession: '#f7f5f2', onAccent: '#ffffff', success: '#417b37', warning: '#9a6810', danger: '#b7443d', shadow: '#868583' },
+  },
 ] as const;
