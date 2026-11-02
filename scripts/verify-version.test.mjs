@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 describe('release metadata verification', () => {
   it('verifies the repository release metadata and exact public title', async () => {
     const result = await execFileAsync(process.execPath, [path.join(root, 'scripts', 'verify-version.mjs')], { cwd: root });
-    expect(result.stdout).toBe('Version sources match exactly: 2.2.5; release title: V2.2.5\n');
+    expect(result.stdout).toBe('Version sources match exactly: 2.2.6; release title: V2.2.6\n');
   });
 
   it('keeps the codename out of package and production SemVer', () => {
