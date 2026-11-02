@@ -3555,6 +3555,7 @@ describe('PiRuntimeService', () => {
     expect(state.commands).toEqual([
       { name: 'login', description: 'Connect a Pi model provider with OAuth or an API key', source: 'builtin' },
       { name: 'logout', description: 'Disconnect a Pi model provider', source: 'builtin' },
+      { name: 'compact', description: 'Compact the conversation context · /compact [instructions]', source: 'builtin' },
       { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax <objective>, pause, resume, clear', source: 'builtin' },
       { name: 'parallax', description: 'Control Parallax', source: 'extension' },
       { name: 'review', description: 'Review changes', source: 'prompt' },

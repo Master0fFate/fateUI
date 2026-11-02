@@ -16,6 +16,19 @@ interface SkillInvocation {
   end: number;
 }
 
+export interface CompactCommand {
+  instructions?: string;
+}
+
+const COMPACT_COMMAND = /^\/compact(?:\s+([\s\S]+))?$/iu;
+
+export function parseCompactCommand(text: string): CompactCommand | null {
+  const match = COMPACT_COMMAND.exec(text.trim());
+  if (!match) return null;
+  const instructions = match[1]?.trim();
+  return instructions ? { instructions } : {};
+}
+
 /**
  * Pi expands skills and prompt templates only when their slash command starts
  * the prompt. Promote an exact inline resource invocation while leaving
@@ -26,7 +39,7 @@ export function promoteInlineResourceCommand(text: string, commands: readonly Ru
 
   const resources = new Set(
     commands
-      .filter((command) => command.source !== 'extension')
+      .filter((command) => command.source !== 'extension' && command.source !== 'builtin')
       .map((command) => command.name),
   );
   const tokens = text.matchAll(/(^|\s)\/([^\s/]+)/gu);

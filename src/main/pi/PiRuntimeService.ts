@@ -95,7 +95,7 @@ import type {
 import { PiEventBatcher } from './PiEventBatcher';
 import { PiEventNormalizer, messageImages, messageText, safeText, safeToolInput, subagentRunIds } from './PiEventNormalizer';
 import { createToolProvenance } from './ToolProvenance';
-import { expandMultipleSkillCommands, promoteInlineResourceCommand } from './PiInlineCommands';
+import { expandMultipleSkillCommands, parseCompactCommand, promoteInlineResourceCommand } from './PiInlineCommands';
 import { createPiExtensionUiBridge, emptyExtensionUiState, type ExtensionNoticeLevel, type PiExtensionUiBridge } from './PiExtensionUi';
 import { QuestionnaireCoordinator } from './QuestionnaireCoordinator';
 import { PiDesktopError, authRequiredError, normalizeError } from './errors';
@@ -184,6 +184,7 @@ const MAX_HYDRATED_IMAGE_CHARACTERS = 20_000_000;
 const MAX_CONTEXT_FILE_BYTES = 256 * 1024;
 const MAX_MESSAGE_CONTENT_BLOCKS = 1_000;
 const MAX_QUEUED_MESSAGES = 100;
+const MAX_COMPACT_INSTRUCTIONS = 20_000;
 const MAX_LIVE_RUNTIME_SLOTS = 4;
 const MAX_SESSION_ATTENTION_ENTRIES = 1_000;
 const MAX_MANUAL_SESSION_NAME_CLAIMS = 5_000;
@@ -2335,6 +2336,17 @@ export class PiRuntimeService {
     await this.materializeColdSession();
     this.requireSession();
     this.cancelPromptOptimization();
+    if (!skipCommandExpansion && !preparedPrompt && !replayedMessage) {
+      const compact = parseCompactCommand(input.text);
+      if (compact) {
+        if (input.images?.length || input.browserAnnotations?.length || input.sessionReferences?.length || input.learning?.pins.length) {
+          throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Send /compact without attachments.', retryable: true });
+        }
+        this.assertPermissionAdmission(this.selectedSlot!);
+        assertAdmission?.();
+        return this.startCompactCommand(compact.instructions);
+      }
+    }
     return this.promptSlot(this.selectedSlot!, input, skipCommandExpansion, preparedPrompt, replayedMessage, assertAdmission ? { assertAdmission } : {});
   }
 
@@ -4171,8 +4183,30 @@ export class PiRuntimeService {
   }
 
   async compact(instructions?: string): Promise<RuntimeState> {
+    await this.runCompaction(this.assertCompactionAllowed(), instructions);
+    return this.getState(false);
+  }
+
+  private startCompactCommand(instructions: string | undefined): PromptAcceptance {
+    if (instructions && instructions.length > MAX_COMPACT_INSTRUCTIONS) {
+      throw new PiDesktopError({ code: 'INVALID_REQUEST', message: `Compaction instructions are limited to ${MAX_COMPACT_INSTRUCTIONS} characters.`, retryable: true });
+    }
+    const slot = this.selectedSlot;
+    void this.runCompaction(this.assertCompactionAllowed(), instructions).catch((error: unknown) => {
+      if (error instanceof PiDesktopError || this.selectedSlot !== slot) return;
+      this.emitError(normalizeError(error));
+    });
+    return { accepted: true, runId: randomUUID() };
+  }
+
+  private assertCompactionAllowed(): AgentSession {
     const session = this.requireIdleSession('compacting context');
     if (this.hasOwnedAgentWork(session.sessionId)) throw this.activeOperationError('compacting context while child sessions or Agent Team nodes are live');
+    if (typeof session.compact !== 'function') throw this.unsupported('Context compaction');
+    return session;
+  }
+
+  private async runCompaction(session: AgentSession, instructions: string | undefined): Promise<void> {
     const slot = this.selectedSlot!;
     const initialization = this.initialization;
     const sessionGeneration = slot.sessionGeneration;
@@ -4181,7 +4215,6 @@ export class PiRuntimeService {
       && !slot.disposed
       && this.selectedSlot === slot
       && slot.runtime.session === session;
-    if (typeof session.compact !== 'function') throw this.unsupported('Context compaction');
     try {
       await session.compact(instructions);
     } catch (error) {
@@ -4195,7 +4228,6 @@ export class PiRuntimeService {
     await this.refreshSessions();
     if (!ownsSession()) throw this.replacementSuperseded();
     this.emitState();
-    return this.getState(false);
   }
 
   private hostStopping = false;
@@ -5116,6 +5148,7 @@ export class PiRuntimeService {
     const builtinCommands: NonNullable<RuntimeState['commands']> = [
       { name: 'login', description: 'Connect a Pi model provider with OAuth or an API key', source: 'builtin' },
       { name: 'logout', description: 'Disconnect a Pi model provider', source: 'builtin' },
+      { name: 'compact', description: 'Compact the conversation context · /compact [instructions]', source: 'builtin' },
       { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax <objective>, pause, resume, clear', source: 'builtin' },
     ];
     const extensionCommands = session.extensionRunner?.getRegisteredCommands?.().filter((command) => command.invocationName.toLocaleLowerCase() !== 'goalmax').map((command) => ({

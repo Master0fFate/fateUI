@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { promises as fs, readFileSync, readlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 /**
  * Advisory locks cooperate only with other Fate v2 processes. A lock is never taken from an owner
@@ -120,7 +122,7 @@ function parseRecord(content: string): OwnerRecord | null {
   if (typeof value !== 'object' || value === null) return null;
   const record = value as Partial<OwnerRecord>;
   if (record.version !== 1 || typeof record.host !== 'string' || typeof record.platform !== 'string' || typeof record.token !== 'string'
-    || typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid) || record.pid <= 0) return null;
+    || typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid) || record.pid <= 0 || !Number.isFinite(record.startedAt)) return null;
   if (record.linux !== undefined) {
     const linux = record.linux as Partial<LinuxProcessIdentity> | null;
     if (!linux || typeof linux.machineId !== 'string' || typeof linux.bootId !== 'string' || typeof linux.pidNamespace !== 'string'
@@ -129,13 +131,27 @@ function parseRecord(content: string): OwnerRecord | null {
   return record as OwnerRecord;
 }
 
+const execFileAsync = promisify(execFile);
+
+async function windowsProcessCreatedAfter(pid: number, time: number): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      `$env:PSModulePath = "$PSHOME\\Modules"; (Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CreationDate.ToUniversalTime().ToString('o')`], { windowsHide: true, timeout: 15_000 });
+    const created = Date.parse(stdout.trim());
+    return Number.isFinite(created) && created > time;
+  } catch { return false; }
+}
+
 /**
  * Proof that the recorded owner no longer exists. A record from another host or platform, an
  * unreadable record, and a PID that any process holds (a reused PID included, except on Linux
  * where the kernel start time tells them apart) all leave the owner standing.
  */
-function ownerHasStopped(record: OwnerRecord): boolean {
+async function ownerHasStopped(record: OwnerRecord): Promise<boolean> {
   if (record.host !== os.hostname() || record.platform !== process.platform) return false;
+  if (process.platform === 'win32') {
+    return noSuchProcess(record.pid) || windowsProcessCreatedAfter(record.pid, record.startedAt);
+  }
   if (process.platform !== 'linux') return noSuchProcess(record.pid);
   const here = linuxIdentity();
   // An owner in another PID namespace (a container) can run without being visible here.
@@ -195,7 +211,7 @@ async function recoverStoppedOwner(lockPath: string): Promise<boolean> {
     content = await fs.readFile(file, 'utf8');
   } catch { return false; }
   const record = parseRecord(content);
-  if (!record || record.token !== token || !ownerHasStopped(record)) return false;
+  if (!record || record.token !== token || !await ownerHasStopped(record)) return false;
   const claim = path.join(lockPath, `recovering-${token}`);
   try { await fs.link(file, claim); } catch { return false; } // Another start holds it, or the record is gone.
   // The record goes before the claim: while either exists, no other start can pass the step above.
