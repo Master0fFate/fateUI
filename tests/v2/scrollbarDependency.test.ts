@@ -30,7 +30,7 @@ const preserved = {
 
 describe('fixed-viewport scrollbar dependency closure', () => {
   it('removes the unresolved package from the exact lock graph through one scoped override', () => {
-    const lock = yaml.parse(readFileSync(path.join(root, 'pnpm-lock.yaml'), 'utf8'));
+    const [, lock] = yaml.parseAllDocuments(readFileSync(path.join(root, 'pnpm-lock.yaml'), 'utf8')).map((document: { toJS(): unknown }) => document.toJS());
     const workspace = yaml.parse(readFileSync(path.join(root, 'pnpm-workspace.yaml'), 'utf8'));
     expect(workspace.overrides['react-remove-scroll@2.7.2>react-remove-scroll-bar']).toBe('-');
     expect(workspace.patchedDependencies['react-remove-scroll@2.7.2']).toBe('patches/react-remove-scroll@2.7.2.patch');
