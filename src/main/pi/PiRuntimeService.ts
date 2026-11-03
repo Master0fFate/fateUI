@@ -1332,6 +1332,7 @@ export class PiRuntimeService {
   /** A selected saved transcript rendered from JSONL without a live Pi agent. */
   private coldSession: ColdSessionState | null = null;
   private readonly liveSlots = new Set<RuntimeSlot>();
+  private resourceCache: { projectPath: string; commands: NonNullable<RuntimeState['commands']>; skills: NonNullable<RuntimeState['skills']> } | null = null;
   private readonly pendingDisposals = new Set<Promise<void>>();
   private readonly sessionAttention = new Map<string, SessionAttentionRecord>();
   private readonly manualSessionNames = new Set<string>();
@@ -1878,7 +1879,8 @@ export class PiRuntimeService {
     };
     const taskList = selectedSessionId && this.project ? this.tasks.get(this.project.path, selectedSessionId) : null;
     const taskListSummary = summarizeTaskList(taskList);
-    const skills = this.runtime?.services?.resourceLoader?.getSkills?.().skills.slice(0, 5_000).map((skill) => ({ name: skill.name.slice(0, 500), description: skill.description.slice(0, 2_000) }));
+    const resources = this.resourceRuntime();
+    const skills = resources?.services?.resourceLoader?.getSkills?.().skills.slice(0, 5_000).map((skill) => ({ name: skill.name.slice(0, 500), description: skill.description.slice(0, 2_000) }));
     return {
       status: this.status,
       project: this.project,
@@ -1898,8 +1900,7 @@ export class PiRuntimeService {
       modelsDevManaged: this.modelsDevManagedCache,
       messages,
       tools,
-      commands: this.getCommands(session),
-      skills: skills ?? [],
+      ...this.projectResources(resources, skills),
       ...(objective ? { objective } : {}),
       ...(contextUsage ? { contextUsage } : {}),
       ...(tokenTelemetry ? { tokenTelemetry } : {}),
@@ -2378,7 +2379,7 @@ export class PiRuntimeService {
     const commandPrompt = skipCommandExpansion
       ? input.text
       : expandMultipleSkillCommands(input.text, session.resourceLoader.getSkills().skills)
-        ?? promoteInlineResourceCommand(input.text, this.getCommands(session));
+        ?? promoteInlineResourceCommand(input.text, this.getCommands(slot.runtime));
     const includesProjectResources = !preparedPrompt && hasProjectResourceTags(input.text);
     const resourcePromptText = includesProjectResources
       ? await appendProjectResourceContext(commandPrompt, this.project?.path ?? null, input.text)
@@ -5143,14 +5144,32 @@ export class PiRuntimeService {
     return result;
   }
 
-  private getCommands(session: AgentSession | undefined): NonNullable<RuntimeState['commands']> {
-    if (!session) return [];
+  private resourceRuntime(): AgentSessionRuntime | null {
+    if (this.runtime) return this.runtime;
+    for (const slot of this.liveSlots) if (!slot.disposed) return slot.runtime;
+    return null;
+  }
+
+  private projectResources(runtime: AgentSessionRuntime | null, skills: RuntimeState['skills'] | undefined): Pick<RuntimeState, 'commands' | 'skills'> {
+    const projectPath = this.project?.path;
+    if (runtime && projectPath) {
+      const resources = { commands: this.getCommands(runtime), skills: skills ?? [] };
+      this.resourceCache = { projectPath, ...resources };
+      return resources;
+    }
+    const cached = this.resourceCache?.projectPath === projectPath ? this.resourceCache : null;
+    return { commands: cached?.commands ?? this.getCommands(null), skills: cached?.skills ?? [] };
+  }
+
+  private getCommands(runtime: AgentSessionRuntime | null): NonNullable<RuntimeState['commands']> {
     const builtinCommands: NonNullable<RuntimeState['commands']> = [
       { name: 'login', description: 'Connect a Pi model provider with OAuth or an API key', source: 'builtin' },
       { name: 'logout', description: 'Disconnect a Pi model provider', source: 'builtin' },
       { name: 'compact', description: 'Compact the conversation context · /compact [instructions]', source: 'builtin' },
       { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax <objective>, pause, resume, clear', source: 'builtin' },
     ];
+    const session = runtime?.session;
+    if (!session) return builtinCommands;
     const extensionCommands = session.extensionRunner?.getRegisteredCommands?.().filter((command) => command.invocationName.toLocaleLowerCase() !== 'goalmax').map((command) => ({
       name: command.invocationName.slice(0, 500),
       description: (command.description ?? '').slice(0, 2_000),
@@ -5161,7 +5180,7 @@ export class PiRuntimeService {
       description: (command.description ?? '').slice(0, 2_000),
       source: 'prompt' as const,
     })) ?? [];
-    const skillCommands = this.runtime?.services?.resourceLoader?.getSkills?.().skills.map((skill) => ({
+    const skillCommands = runtime.services?.resourceLoader?.getSkills?.().skills.map((skill) => ({
       name: `skill:${skill.name}`.slice(0, 500),
       description: skill.description.slice(0, 2_000),
       source: 'skill' as const,
