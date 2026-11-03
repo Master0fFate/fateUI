@@ -3,7 +3,11 @@ import type { WebWorkspace } from '../../../client/WebFateApi';
 import type { PermissionLevel } from '../../../shared/contracts/ipc';
 import { methodCatalog, type InputOf, type WireResultOf } from '../../../shared/protocol/methods';
 import type { CommandStatus } from '../../../shared/protocol/commandOutcomes';
+import { SelectControl } from '../../components/SelectControl';
+import { useUiStore } from '../../stores/uiStore';
 import './connections.css';
+
+const permissionOptions = [{ value: 'read-only', label: 'Read only' }, { value: 'edit', label: 'Edit' }, { value: 'full-access', label: 'Full access' }];
 
 export interface WorkspaceControlPanelProps {
   id: string;
@@ -44,7 +48,7 @@ export function WorkspaceControlPanel(props: WorkspaceControlPanelProps) {
     canControl, canApprovePermission, takeoverAllowed, onClose, onRefresh, onClaim, onRenew, onRelease,
     onTakeover, onLogin, originalRequestId, onReviewOriginal, onRequestPermission, onRespondPermission, estimatedHostTime = Date.now } = props;
   const titleId = useId();
-  const permissionId = useId();
+  const compactMode = useUiStore((state) => state.compactMode);
   const heading = useRef<HTMLHeadingElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const takeoverButton = useRef<HTMLButtonElement>(null);
@@ -219,10 +223,10 @@ export function WorkspaceControlPanel(props: WorkspaceControlPanelProps) {
     </fieldset>
     <fieldset><legend>Scoped permission review</legend>
       <p>Current permission: {permissionLevel ?? 'unknown'}. Reducing permission does not retroactively sandbox an active external operation.</p>
-      <label htmlFor={permissionId}>Requested permission</label>
-      <select id={permissionId} value={newLevel} disabled={!permissionReady || busy || Boolean(challenge) || takeoverReview} onChange={(event) => {
-        const level = methodCatalog['permission.issue'].inputSchema.shape.newLevel.parse(event.target.value); setNewLevel(level);
-      }}><option value="read-only">Read only</option><option value="edit">Edit</option><option value="full-access">Full access</option></select>
+      <label><span>Requested permission</span>
+        <SelectControl compact={compactMode} label="Requested permission" value={newLevel} options={permissionOptions} disabled={!permissionReady || busy || Boolean(challenge) || takeoverReview} onValueChange={(value) => {
+          const level = methodCatalog['permission.issue'].inputSchema.shape.newLevel.parse(value); setNewLevel(level);
+        }} /></label>
       <button ref={permissionButton} type="button" disabled={!permissionReady || busy || Boolean(challenge) || takeoverReview || newLevel === permissionLevel || reviewLimitReached} onClick={() => void requestPermission()}>Request permission review</button>
       {reviewLimitReached && <p>Permission review limit reached for this view. Refresh the host scope before requesting another challenge.</p>}
       {challenge && <div className="connection-inline-review" role="group" aria-label="Permission confirmation">

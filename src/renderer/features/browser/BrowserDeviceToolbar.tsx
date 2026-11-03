@@ -1,7 +1,8 @@
 import { getDesktopApi } from '../../platform/api';
 import { Hand, RotateCcw } from 'lucide-react';
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { AppTooltip } from '../../components/AppTooltip';
+import { SelectControl } from '../../components/SelectControl';
 import { useSkinComponents } from '../../skins/SkinProvider';
 import { useBrowserStore } from '../../stores/browserStore';
 import type { BrowserState } from '../../../shared/contracts/ipc';
@@ -15,6 +16,8 @@ import {
   clampDeviceWidth,
   matchPreset,
 } from './devicePresets';
+
+const devicePresetOptions = DEVICE_PRESETS.map((preset) => ({ value: preset.id, label: preset.label }));
 
 /**
  * Chrome-style device toolbar row. Shown while device emulation is on: pick a
@@ -46,8 +49,8 @@ export function BrowserDeviceToolbar({ state }: { state: BrowserState }) {
       .catch((error: unknown) => useBrowserStore.getState().setError(error instanceof Error ? error.message : 'Device emulation failed.'));
   };
 
-  const onPreset = (event: ChangeEvent<HTMLSelectElement>) => {
-    const preset = DEVICE_PRESETS.find((candidate) => candidate.id === event.target.value);
+  const onPreset = (presetId: string) => {
+    const preset = DEVICE_PRESETS.find((candidate) => candidate.id === presetId);
     if (preset) commit(preset.width, preset.height);
   };
 
@@ -67,14 +70,7 @@ export function BrowserDeviceToolbar({ state }: { state: BrowserState }) {
 
   return (
     <div className="browser-device-toolbar" role="toolbar" aria-label="Device toolbar">
-      <label className="browser-device-preset">
-        <span className="visually-hidden">Device preset</span>
-        <select value={matchPreset(emulation).id} onChange={onPreset}>
-          {DEVICE_PRESETS.map((preset) => (
-            <option key={preset.id} value={preset.id}>{preset.label}</option>
-          ))}
-        </select>
-      </label>
+      <SelectControl compact className="browser-device-preset" contentClassName="browser-device-menu" label="Device preset" value={matchPreset(emulation).id} options={devicePresetOptions} onValueChange={onPreset} />
       <div className="browser-device-size" aria-label="Emulated size">
         <label className="visually-hidden" htmlFor="browser-device-width">Width in pixels</label>
         <input

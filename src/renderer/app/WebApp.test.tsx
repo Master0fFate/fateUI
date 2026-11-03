@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebSnapshot } from '../../client/WebFateApi';
@@ -262,7 +263,9 @@ describe('shared AppShell browser projection', () => {
       f.api.rememberPendingPromptReview(scope, hostSession, originalRequestId, 'runtime.setThinking');
       throw new UnconfirmedCommand(originalRequestId);
     });
-    fireEvent.change(thinking, { target: { value: 'high' } });
+    const user = userEvent.setup();
+    await user.click(thinking);
+    await user.click(await screen.findByRole('option', { name: 'high' }));
     const review = await screen.findByRole('button', { name: 'Review original command' });
     expect(thinking).toBeDisabled();
     f.api.reviewPromptStatus.mockResolvedValueOnce({ state: 'absent', receipt: null, rejectionCode: null });

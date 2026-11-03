@@ -12,7 +12,8 @@
 :root[data-skin][data-skin-styled] :is(.browser-history-controls, .browser-tool-group) { flex-wrap: nowrap; gap: 1px; }
 :root[data-skin][data-skin-styled] .browser-history-controls button:nth-child(2) { display: inline-flex; }
 :root[data-skin][data-skin-styled] .browser-open-file { display: inline-flex !important; }
-:root[data-skin][data-skin-styled] :is(.browser-toolbar, .browser-device-toolbar) button { flex: none; min-width: 24px; width: auto; padding: 0 2px; font: 10px var(--font-interface); }
+:root[data-skin][data-skin-styled] .browser-toolbar button,
+:root[data-skin][data-skin-styled] .browser-device-toolbar button:not(.custom-select-trigger) { flex: none; min-width: 24px; width: auto; padding: 0 2px; font: 10px var(--font-interface); }
 :root[data-skin][data-skin-styled] .browser-address { min-width: 60px; flex: 1 1 0; border-radius: var(--surface-control-radius); background: var(--theme-canvas); border: 1px solid var(--surface-border); box-shadow: none; padding-inline: 6px; }
 :root[data-skin][data-skin-styled] .browser-address:focus-within { border-color: var(--theme-accent); box-shadow: none; }
 :root[data-skin][data-skin-styled] .browser-address input { font-family: var(--font-interface); font-size: var(--surface-font-size); }

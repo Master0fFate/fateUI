@@ -11,6 +11,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'r
 import { useShallow } from 'zustand/react/shallow';
 import { ResizeHandle } from '../../components/ResizeHandle';
 import { IconButton } from '../../components/IconButton';
+import { SelectControl } from '../../components/SelectControl';
 import { Composer } from '../chat/Composer';
 import { ConversationTimeline } from '../chat/ConversationTimeline';
 import { ExtensionStatusRail } from '../chat/ExtensionStatusRail';
@@ -37,6 +38,8 @@ const welcomeIntents = {
 } as const;
 
 type WelcomeIntent = keyof typeof welcomeIntents;
+
+const thinkingLevelOptions = thinkingLevelSchema.options.map((level) => ({ value: level, label: level }));
 
 interface WorkspaceProps {
   inspectorCollapsed: boolean;
@@ -80,8 +83,13 @@ function BoundedWorkspace({ inspectorCollapsed, onToggleInspector }: WorkspacePr
   const [exportError, setExportError] = useState<string | null>(null);
   const terminalOpen = useUiStore((state) => state.terminalOpen);
   const toggleTerminal = useUiStore((state) => state.toggleTerminal);
+  const compactMode = useUiStore((state) => state.compactMode);
   const mutate = useRuntimeStore((state) => state.runNetworkMutation);
   const omissions = snapshot?.header.omissions;
+  const sessionOptions = views.sessions.status === 'ready' ? views.sessions.value.sessions.map((session) => ({ value: session.id, label: session.title })) : [];
+  const sessionValue = sessionOptions.find((option) => option.value === sessionView.sessionId)?.value ?? '';
+  const modelOptions = views.models.status === 'ready' ? views.models.value.models.map((model, index) => ({ value: String(index), label: `${model.name} · ${model.provider}` })) : [];
+  const modelIndex = views.models.status === 'ready' ? views.models.value.models.findIndex((model) => model.provider === sessionView.model?.provider && model.id === sessionView.model?.id) : -1;
   const exportText = () => {
     const captured = currentNetworkScope();
     const current = useRuntimeStore.getState().snapshot;
@@ -107,22 +115,22 @@ function BoundedWorkspace({ inspectorCollapsed, onToggleInspector }: WorkspacePr
     <NetworkConnectionControls api={web} />
     {error ? <div className="runtime-notice" role="alert">{error} No current snapshot is confirmed.</div> : null}
     <div className="session-controls" aria-label="Host session and model controls">
-      <label>Session<select aria-label="Selected session" value={sessionView.sessionId ?? ''} disabled={!canMutateNetwork(web, 'session.select') || views.sessions.status !== 'ready'}
-        onChange={(event) => void mutate(web, 'session.select', (scope) => web.selectSession(scope, event.target.value))}>
-        {views.sessions.status === 'ready' ? views.sessions.value.sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>) : <option value={sessionView.sessionId ?? ''}>Sessions {views.sessions.status}</option>}
-      </select></label>
+      <label className="session-select-field"><span>Session</span><SelectControl compact={compactMode} className="session-select" label="Selected session" value={sessionValue} options={sessionOptions}
+        placeholder={views.sessions.status === 'ready' ? 'No session selected' : `Sessions ${views.sessions.status}`}
+        disabled={!canMutateNetwork(web, 'session.select') || views.sessions.status !== 'ready'}
+        onValueChange={(sessionId) => void mutate(web, 'session.select', (scope) => web.selectSession(scope, sessionId))} /></label>
       <button type="button" disabled={!canMutateNetwork(web, 'session.select')} onClick={() => void mutate(web, 'session.select', (scope) => web.createSession(scope))}>New session</button>
-      <label>Model<select aria-label="Selected model" value={views.models.status === 'ready' ? String(views.models.value.models.findIndex((model) => model.provider === sessionView.model?.provider && model.id === sessionView.model?.id)) : '-1'}
-        disabled={!canMutateNetwork(web, 'runtime.configure') || views.models.status !== 'ready'} onChange={(event) => {
+      <label className="session-select-field"><span>Model</span><SelectControl compact={compactMode} className="session-select" label="Selected model" value={modelIndex >= 0 ? String(modelIndex) : ''} options={modelOptions}
+        placeholder={views.models.status === 'ready' ? sessionView.model ? 'Current model not in host catalog' : 'No host model selected' : `Models ${views.models.status}`}
+        disabled={!canMutateNetwork(web, 'runtime.configure') || views.models.status !== 'ready'} onValueChange={(index) => {
           if (views.models.status !== 'ready') return;
-          const model = views.models.value.models[Number(event.target.value)];
+          const model = views.models.value.models[Number(index)];
           if (model) void mutate(web, 'runtime.configure', (scope) => web.setModel(scope, model.provider, model.id));
-        }}><option value="-1">{views.models.status === 'ready' ? sessionView.model ? 'Current model not in host catalog' : 'No host model selected' : `Models ${views.models.status}`}</option>
-        {views.models.status === 'ready' && views.models.value.models.map((model, index) => <option key={`${model.provider}:${model.id}`} value={index}>{model.name} · {model.provider}</option>)}
-      </select></label>
-      <label>Thinking<select aria-label="Thinking level" value={sessionView.thinkingLevel ?? ''} disabled={!canMutateNetwork(web, 'runtime.configure')} onChange={(event) => {
-        const level = thinkingLevelSchema.safeParse(event.target.value); if (level.success) void mutate(web, 'runtime.configure', (scope) => web.setThinking(scope, level.data));
-      }}>{sessionView.thinkingLevel === null && <option value="">Thinking level unknown</option>}{thinkingLevelSchema.options.map((level) => <option key={level}>{level}</option>)}</select></label>
+        }} /></label>
+      <label className="session-select-field"><span>Thinking</span><SelectControl compact={compactMode} className="session-select" label="Thinking level" value={sessionView.thinkingLevel ?? ''} options={thinkingLevelOptions} placeholder="Thinking level unknown"
+        disabled={!canMutateNetwork(web, 'runtime.configure')} onValueChange={(value) => {
+          const level = thinkingLevelSchema.safeParse(value); if (level.success) void mutate(web, 'runtime.configure', (scope) => web.setThinking(scope, level.data));
+        }} /></label>
       <button type="button" disabled={!sessionView.activeSessionRunning || !canMutateNetwork(web, 'runtime.abort')} onClick={() => void mutate(web, 'runtime.abort', (scope) => web.abort(scope))}>Stop host run</button>
       <button type="button" disabled={!currentNetworkScope() || !web.isConnected || snapshot?.header.serverEpoch !== web.serverEpoch || typeof URL.createObjectURL !== 'function'} onClick={exportText}>Export bounded session text</button>
     </div>

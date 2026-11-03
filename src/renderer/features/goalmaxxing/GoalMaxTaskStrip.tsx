@@ -13,6 +13,9 @@ import type { GoalMaxCriterion } from '../../../shared/contracts/goalmaxxing';
 import type { Task, TaskStatus } from '../../../shared/contracts/tasks';
 import { selectGoalView, useGoalMaxStore, type GoalView } from '../../stores/goalMaxStore';
 import { selectTaskView, useTaskStore } from '../../stores/taskStore';
+import { SelectControl } from '../../components/SelectControl';
+import { useUiStore } from '../../stores/uiStore';
+const taskStatusOptions = (['todo', 'in-progress', 'done', 'blocked'] as const).map((status) => ({ value: status, label: status }));
 
 function StateMark({ text, children }: { text: string; children: ReactNode }) {
   const { Symbol } = useSkinComponents();
@@ -275,6 +278,7 @@ export function TaskControlsPanel() {
 }
 function TaskRowEditor({ task, tasks }: { task: Task; tasks: readonly Task[] }) {
   const web = getWebApiOptional();
+  const compactMode = useUiStore((state) => state.compactMode);
   const editKey = `${draftScopeKey(web)}:task:${task.id}`;
   const [draft, setDraft, dropEdit] = useScopedDraft(taskEdits, editKey, () => ({ title: task.title, detail: task.detail, updatedAt: task.updatedAt }));
   const { title, detail } = draft;
@@ -304,10 +308,9 @@ function TaskRowEditor({ task, tasks }: { task: Task; tasks: readonly Task[] }) 
     <button type="button" onClick={() => { setDraft({ title: task.title, detail: task.detail, updatedAt: task.updatedAt }); setError(null); }}>Use current task row</button>
     {error && <p role="alert">{error}</p>}
     <button type="button" disabled={!title.trim()} onClick={() => void update({ id: task.id, title: title.trim(), detail })}>Save task</button>
-    <label>Status<select value={task.status} onChange={(event) => {
-      const status = event.target.value;
+    <label>Status<SelectControl compact={compactMode} label="Status" value={task.status} options={taskStatusOptions} onValueChange={(status) => {
       if (status === 'todo' || status === 'in-progress' || status === 'done' || status === 'blocked') void update({ id: task.id, status });
-    }}>{['todo', 'in-progress', 'done', 'blocked'].map((status) => <option key={status}>{status}</option>)}</select></label>
+    }} /></label>
     <label>Required<input type="checkbox" checked={task.required} onChange={(event) => void update({ id: task.id, required: event.target.checked })} /></label>
     <button type="button" onClick={() => void move(-1)}>Move task up</button><button type="button" onClick={() => void move(1)}>Move task down</button>
     <p>Done is not verified. Verification remains host-owned.</p>

@@ -1007,6 +1007,8 @@ body.is-resizing-composer { cursor: ns-resize; user-select: none; }
 .custom-select-content--compact .custom-select-copy { flex-direction: row; align-items: baseline; gap: 6px; }
 .custom-select-content--compact .custom-select-copy small { font-size: 8px; }
 .session-sort-select { width: auto; max-width: 148px; height: 28px; padding-inline: 7px; border-color: transparent; background: transparent; font-size: 10px; }
+.session-select-field { display: flex; align-items: center; gap: 6px; }
+.session-select { width: auto; max-width: 200px; }
 .session-sort-content { min-width: 170px; }
 .settings-select-field { display: flex; min-width: 0; flex-direction: column; gap: 4px; color: var(--theme-muted); font-size: 9px; font-weight: 600; }
 .settings-theme-row { display: flex; align-items: center; justify-content: space-between; min-height: 76px; gap: 24px; padding: 0; }
@@ -2493,11 +2495,11 @@ body.is-resizing-horizontal-pane { cursor: row-resize; user-select: none; }
   border-bottom: 1px solid color-mix(in srgb, var(--theme-border) 70%, transparent); background: var(--browser-chrome);
 }
 .browser-history-controls { display: flex; flex: none; align-items: center; gap: 1px; }
-.browser-toolbar button, .browser-confirmation button, .browser-grant-strip button, .browser-error-strip button, .browser-device-toolbar button {
+.browser-toolbar button, .browser-confirmation button, .browser-grant-strip button, .browser-error-strip button, .browser-device-toolbar button:not(.custom-select-trigger) {
   display: inline-flex; min-width: 28px; height: 28px; align-items: center; justify-content: center; gap: 5px; padding: 0 7px;
   border-radius: 6px; color: var(--theme-muted); background: transparent; cursor: pointer; font-size: 9px; font-weight: 600;
 }
-.browser-toolbar button:hover:not(:disabled), .browser-confirmation button:hover:not(:disabled), .browser-grant-strip button:hover:not(:disabled), .browser-error-strip button:hover:not(:disabled), .browser-device-toolbar button:hover:not(:disabled) { color: var(--theme-text); background: var(--theme-raised-hover); }
+.browser-toolbar button:hover:not(:disabled), .browser-confirmation button:hover:not(:disabled), .browser-grant-strip button:hover:not(:disabled), .browser-error-strip button:hover:not(:disabled), .browser-device-toolbar button:not(.custom-select-trigger):hover:not(:disabled) { color: var(--theme-text); background: var(--theme-raised-hover); }
 .browser-toolbar button:disabled, .browser-confirmation button:disabled, .browser-grant-strip button:disabled { opacity: .36; }
 .browser-address {
   display: flex; min-width: 100px; height: 30px; flex: 1 1 360px; align-items: center; gap: 7px; padding: 0 9px;
@@ -2546,10 +2548,7 @@ body.is-resizing-horizontal-pane { cursor: row-resize; user-select: none; }
   display: flex; flex: 0 0 34px; min-width: 0; align-items: center; justify-content: center; gap: 8px; padding: 4px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--theme-border) 70%, transparent); background: var(--browser-chrome);
 }
-.browser-device-preset select {
-  height: 24px; max-width: 150px; padding: 0 6px; border: 1px solid var(--theme-border); border-radius: 6px; outline: 0;
-  color: var(--theme-text-soft); background: color-mix(in srgb, var(--theme-canvas) 78%, var(--theme-panel)); font-size: 10px; cursor: pointer;
-}
+.browser-device-preset { width: auto; max-width: 150px; }
 .browser-device-size { display: flex; align-items: center; gap: 5px; color: var(--theme-subtle); font-size: 10px; }
 .browser-device-size input {
   width: 54px; height: 24px; padding: 0 4px; border: 1px solid var(--theme-border); border-radius: 6px; outline: 0;

@@ -33,8 +33,7 @@
 .workspace-control-panel legend { padding: 0 4px; }
 .connection-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .connection-status button,
-.workspace-control-panel button,
-.workspace-control-panel select,
+.workspace-control-panel button:not(.custom-select-trigger),
 .workspace-control-panel input {
   min-height: 28px;
   max-width: 100%;
@@ -50,11 +49,11 @@
 .connection-status button,
 .workspace-control-panel button { cursor: pointer; }
 .connection-status button:focus-visible,
-.workspace-control-panel :is(button, input, select, [tabindex]):focus-visible {
+.workspace-control-panel :is(button, input, [tabindex]):focus-visible {
   outline: 2px solid var(--theme-text, #ededed);
   outline-offset: 2px;
 }
-.workspace-control-panel button:disabled { opacity: 0.6; cursor: not-allowed; }
+.workspace-control-panel button:not(.custom-select-trigger):disabled { opacity: 0.6; cursor: not-allowed; }
 .connection-inline-review { border-left: 2px solid var(--theme-text, #ededed); padding: 4px 8px; margin: 8px 0; }
 .connection-error { border-left: 2px solid var(--theme-text, #ededed); padding-left: 8px; }
 .connection-command-list { list-style: none; margin: 0; padding: 0; }
@@ -64,5 +63,5 @@
   .workspace-control-panel,
   .workspace-control-panel fieldset { border-color: CanvasText; }
   .connection-status button:focus-visible,
-  .workspace-control-panel :is(button, input, select, [tabindex]):focus-visible { outline-color: Highlight; }
+  .workspace-control-panel :is(button, input, [tabindex]):focus-visible { outline-color: Highlight; }
 }

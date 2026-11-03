@@ -37,7 +37,7 @@ function appCommandErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function hasBlockingBrowserOverlay(root: ParentNode = document): boolean {
-  return [...root.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]')]
+  return [...root.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"], .browser-device-menu')]
     .some((element) => element.dataset.state !== 'closed' && !element.closest('.browser-workspace'));
 }
 

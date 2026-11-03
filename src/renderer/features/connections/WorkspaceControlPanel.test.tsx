@@ -22,8 +22,13 @@ function props(overrides: Partial<WorkspaceControlPanelProps> = {}): WorkspaceCo
     ...overrides,
   };
 }
+async function chooseFullAccess() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('combobox', { name: 'Requested permission' }));
+  await user.click(await screen.findByRole('option', { name: 'Full access' }));
+}
 async function openPermissionReview() {
-  fireEvent.change(screen.getByRole('combobox', { name: 'Requested permission' }), { target: { value: 'full-access' } });
+  await chooseFullAccess();
   fireEvent.click(screen.getByRole('button', { name: 'Request permission review' }));
   await screen.findByRole('group', { name: 'Permission confirmation' });
 }
@@ -127,7 +132,7 @@ describe('WorkspaceControlPanel', () => {
     let resolve!: (value: WireResultOf<'permission.issue'>) => void;
     const values = props({ controlGeneration: 4, onRequestPermission: vi.fn(() => new Promise<WireResultOf<'permission.issue'>>((done) => { resolve = done; })) });
     const view = render(<WorkspaceControlPanel {...values} />);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'full-access' } });
+    await chooseFullAccess();
     fireEvent.click(screen.getByRole('button', { name: 'Request permission review' }));
     view.rerender(<WorkspaceControlPanel {...values} scopeKey="different-host" />);
     await act(async () => { resolve(challenge()); });
@@ -136,10 +141,10 @@ describe('WorkspaceControlPanel', () => {
   });
 
   it('expires visible challenges without automatically sending a decision', async () => {
-    vi.useFakeTimers();
     const values = props({ controlGeneration: 4, onRequestPermission: vi.fn(async () => ({ ...challenge(), expiresAt: Date.now() + 500 })) });
     render(<WorkspaceControlPanel {...values} />);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'full-access' } });
+    await chooseFullAccess();
+    vi.useFakeTimers();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Request permission review' })); });
     await act(async () => { vi.advanceTimersByTime(1000); });
     expect(screen.getByRole('button', { name: 'Confirm permission change' })).toBeDisabled();
@@ -147,12 +152,12 @@ describe('WorkspaceControlPanel', () => {
   });
 
   it('uses calibrated host time for challenge admission, polling and pre-dispatch expiry', async () => {
-    vi.useFakeTimers();
     let hostTime = 1000;
     const values = props({ controlGeneration: 4, estimatedHostTime: () => hostTime,
       onRequestPermission: vi.fn(async () => ({ ...challenge(), expiresAt: 1600 })) });
     render(<WorkspaceControlPanel {...values} />);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'full-access' } });
+    await chooseFullAccess();
+    vi.useFakeTimers();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Request permission review' })); });
     const confirm = screen.getByRole('button', { name: 'Confirm permission change' });
     expect(confirm).toBeEnabled(); // Browser wall clock is far ahead of this host clock.

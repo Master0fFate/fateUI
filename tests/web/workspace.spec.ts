@@ -21,7 +21,8 @@ test('saved history pages and permission reductions use actual browser transport
   expect(pages).toHaveLength(2);
   expect(object(pages[0]!.response!.result).items).toHaveLength(128);
   expect(object(pages[1]!.response!.result).items).toHaveLength(2);
-  await client.page.getByRole('combobox', { name: 'Requested permission', exact: true }).selectOption('read-only');
+  await client.page.getByRole('combobox', { name: 'Requested permission', exact: true }).click();
+  await client.page.getByRole('option', { name: 'Read only', exact: true }).click();
   await client.page.getByRole('button', { name: 'Request permission review', exact: true }).click();
   await client.page.getByRole('button', { name: 'Confirm permission change', exact: true }).click();
   await expect.poll(async () => (await host.inspect()).runtime.permissionLevel).toBe('read-only');
@@ -33,7 +34,8 @@ test('saved history pages and permission reductions use actual browser transport
 
   // Elevate only while idle, then use the REAL production policy and runtime
   // transaction to reduce authority while a fake turn is actually in flight.
-  await client.page.getByRole('combobox', { name: 'Requested permission', exact: true }).selectOption('edit');
+  await client.page.getByRole('combobox', { name: 'Requested permission', exact: true }).click();
+  await client.page.getByRole('option', { name: 'Edit', exact: true }).click();
   await client.page.getByRole('button', { name: 'Request permission review', exact: true }).click();
   await client.page.getByRole('button', { name: 'Confirm permission change', exact: true }).click();
   await expect.poll(async () => (await host.inspect()).runtime.permissionLevel).toBe('edit');
@@ -44,7 +46,8 @@ test('saved history pages and permission reductions use actual browser transport
   await host.rpc({ type: 'barrier', operation: 'reached', name: 'emit' });
   expect((await host.inspect()).runtime.activeSessionRunning).toBe(true);
   await client.page.getByRole('button', { name: 'Review controls', exact: true }).click();
-  await client.page.getByRole('combobox', { name: 'Requested permission', exact: true }).selectOption('read-only');
+  await client.page.getByRole('combobox', { name: 'Requested permission', exact: true }).click();
+  await client.page.getByRole('option', { name: 'Read only', exact: true }).click();
   await client.page.getByRole('button', { name: 'Request permission review', exact: true }).click();
   await client.page.getByRole('button', { name: 'Confirm permission change', exact: true }).click();
   await expect.poll(async () => (await host.inspect()).runtime.permissionLevel).toBe('read-only');

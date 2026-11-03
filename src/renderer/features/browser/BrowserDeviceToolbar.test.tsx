@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserState, PiDesktopApi } from '../../../shared/contracts/ipc';
 import { useBrowserStore } from '../../stores/browserStore';
@@ -34,7 +35,9 @@ describe('BrowserDeviceToolbar', () => {
     useBrowserStore.getState().hydrate(emulationState(390, 844));
     render(<BrowserDeviceToolbar state={useBrowserStore.getState().state} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Device preset' }), { target: { value: 'iphone-se' } });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('combobox', { name: 'Device preset' }));
+    await user.click(await screen.findByRole('option', { name: 'iPhone SE' }));
     await vi.waitFor(() => expect(setBrowserDeviceEmulation).toHaveBeenCalledWith({ width: 375, height: 667, mobile: true, touch: true }));
   });
 
