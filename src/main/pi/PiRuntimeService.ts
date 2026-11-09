@@ -11,6 +11,7 @@ import { piPromptDisposition, type PiPromptDisposition } from './PiSdkCompatibil
 import { McpConfigService } from './McpConfigService';
 import { createMcpTool } from './McpService';
 import { loadFateSessionExtensions } from './FateSessionExtensions';
+import { forgetHyp3rc0d3Session, hyp3rc0d3ThinkingLevel, isHyp3rc0d3, setHyp3rc0d3Session } from './context/Hyp3rc0d3';
 import { createPullRequestTools } from './git/PullRequestTools';
 import { createBranchTools } from './git/BranchTools';
 import { GitService } from '../git/GitService';
@@ -189,6 +190,7 @@ const MAX_LIVE_RUNTIME_SLOTS = 4;
 const MAX_SESSION_ATTENTION_ENTRIES = 1_000;
 const MAX_MANUAL_SESSION_NAME_CLAIMS = 5_000;
 const MAX_COLD_PENDING_MODELS = 1_000;
+const HYP3RC0D3_KEYWORD = /^\s*hyp3rc0d3:\s*/iu;
 const MAX_TOKEN_USAGE_HISTORY = 120;
 const MAX_TOKEN_TELEMETRY_COST = 1_000_000_000;
 
@@ -1338,6 +1340,7 @@ export class PiRuntimeService {
   private readonly manualSessionNames = new Set<string>();
   private readonly coldPendingModels = new Map<string, ModelInfo>();
   private readonly coldPendingThinkingLevels = new Map<string, ThinkingLevel>();
+  private readonly hyp3rc0d3PriorLevels = new Map<string, ThinkingLevel>();
   private modelRuntime: ModelRuntime | null = null;
   private models: ModelInfo[] = [];
   private fallbackPermissionLevel: PermissionLevel = 'full-access';
@@ -1643,7 +1646,7 @@ export class PiRuntimeService {
         const slot = this.findLiveSlot(sessionId);
         if (!slot || !this.project) return null;
         const agentStrategy = this.goalAgentStrategy(sessionId);
-        return { projectPath: this.project.path, session: slot.runtime.session, ...(agentStrategy ? { agentStrategy } : {}) };
+        return { projectPath: this.project.path, session: slot.runtime.session, ...(agentStrategy ? { agentStrategy } : {}), ...(isHyp3rc0d3(sessionId) ? { hyp3rc0d3: true } : {}) };
       },
       emit: (parentSessionId, event) => {
         const slot = this.findLiveSlot(parentSessionId);
@@ -1894,6 +1897,7 @@ export class PiRuntimeService {
       models: this.models,
       thinkingLevel: session?.thinkingLevel ?? cold?.pendingThinkingLevel ?? cold?.thinkingLevel ?? 'medium',
       pendingThinkingLevel: this.selectedSlot?.pendingThinkingLevel?.level ?? cold?.pendingThinkingLevel ?? null,
+      hyp3rc0d3: isHyp3rc0d3(selectedSessionId),
       permissionLevel: this.permissionLevel,
       providerLogin: this.providerLoginState(),
       questionnaire: selectedSessionId ? this.questionnaires.get(selectedSessionId) : null,
@@ -2355,6 +2359,15 @@ export class PiRuntimeService {
     options: { assertAdmission?: () => void; pinned?: boolean }): Promise<PromptAcceptance> {
     if (this.hostStopping) throw new Error('The core is shutting down; prompts are closed.');
     const session = slot.runtime.session;
+    const hyp3rc0d3Match = HYP3RC0D3_KEYWORD.exec(input.text);
+    if (hyp3rc0d3Match) {
+      const text = input.text.slice(hyp3rc0d3Match[0].length);
+      if (!text.trim()) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Add a message after the Hyp3rc0d3 keyword.', retryable: true });
+      this.rememberHyp3rc0d3PriorLevel(session.sessionId, slot.pendingThinkingLevel?.level ?? session.thinkingLevel);
+      setHyp3rc0d3Session(session.sessionId, true);
+      input = { ...input, text };
+      if (this.selectedSlot === slot) this.emitState();
+    }
     const agentPreset = getAgentSessionPreset(session);
     const workspacePolicy = this.agentWorkspacePolicySource();
     if (agentPreset && (agentPreset.defaults.workspace !== 'shared' || workspacePolicy.strict && workspacePolicy.preferredMode !== 'shared')) throw new Error('This saved Agent conversation requires a currently permitted shared workspace. No workspace fallback was used.');
@@ -2523,6 +2536,7 @@ export class PiRuntimeService {
           // Apply reasoning after the staged model so Pi validates it against
           // the model that will actually receive the next user message.
           if (stagedThinkingLevel) session.setThinkingLevel(stagedThinkingLevel.level);
+          this.applyHyp3rc0d3Effort(session, session.model);
         } catch (error) {
           if (stagedModel) restoreStagedModel(stagedModel);
           if (stagedThinkingLevel) restoreStagedThinkingLevel(stagedThinkingLevel);
@@ -2952,27 +2966,81 @@ export class PiRuntimeService {
   setThinkingLevel(level: ThinkingLevel): RuntimeState {
     const cold = this.coldSession;
     if (cold) {
-      const pending = cold.pendingModel;
-      const effectiveModel = pending
-        ? this.modelRuntime?.getModel(pending.provider, pending.id)
-        : cold.model ? this.modelRuntime?.getModel(cold.model.provider, cold.model.id) : null;
+      const sessionId = cold.snapshot.summary.id;
+      const effectiveModel = this.coldSessionModel(cold);
       if (level !== 'off' && !effectiveModel?.reasoning) {
         throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The model selected for the next message does not support reasoning.', retryable: true });
       }
+      if (isHyp3rc0d3(sessionId)) {
+        this.rememberHyp3rc0d3PriorLevel(sessionId, level);
+        this.emitState();
+        return this.getState(false);
+      }
       cold.pendingThinkingLevel = level;
-      this.rememberColdPendingThinkingLevel(cold.snapshot.summary.id, level);
+      this.rememberColdPendingThinkingLevel(sessionId, level);
       this.fallbackStateError = null;
       this.emitState();
       return this.getState(false);
     }
     const session = this.requireSession();
     const slot = this.selectedSlot!;
+    const sessionId = session.sessionId;
     const effectiveModel = slot.pendingModel?.model ?? session.model;
     if (level !== 'off' && !effectiveModel?.reasoning) {
       throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The model selected for the next message does not support reasoning.', retryable: true });
     }
+    if (isHyp3rc0d3(sessionId)) {
+      this.rememberHyp3rc0d3PriorLevel(sessionId, level);
+      this.emitState();
+      return this.getState(false);
+    }
     slot.pendingThinkingLevel = { token: randomUUID(), level };
-    this.coldPendingThinkingLevels.delete(session.sessionId);
+    this.coldPendingThinkingLevels.delete(sessionId);
+    slot.stateError = null;
+    this.emitState();
+    return this.getState(false);
+  }
+
+  setHyp3rc0d3(enabled: boolean): RuntimeState {
+    const cold = this.coldSession;
+    if (cold) {
+      const sessionId = cold.snapshot.summary.id;
+      if (enabled) {
+        const model = this.coldSessionModel(cold);
+        if (!model?.reasoning) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Hyp3rc0d3 needs a model that supports reasoning.', retryable: true });
+        this.rememberHyp3rc0d3PriorLevel(sessionId, cold.pendingThinkingLevel ?? cold.thinkingLevel);
+        setHyp3rc0d3Session(sessionId, true);
+        const level = hyp3rc0d3ThinkingLevel(model);
+        cold.pendingThinkingLevel = level;
+        this.rememberColdPendingThinkingLevel(sessionId, level);
+      } else {
+        if (!isHyp3rc0d3(sessionId)) return this.getState(false);
+        forgetHyp3rc0d3Session(sessionId);
+        const prior = this.takeHyp3rc0d3PriorLevel(sessionId);
+        cold.pendingThinkingLevel = prior;
+        if (prior) this.rememberColdPendingThinkingLevel(sessionId, prior);
+        else this.coldPendingThinkingLevels.delete(sessionId);
+      }
+      this.fallbackStateError = null;
+      this.emitState();
+      return this.getState(false);
+    }
+    const session = this.requireSession();
+    const slot = this.selectedSlot!;
+    if (enabled) {
+      const effectiveModel = slot.pendingModel?.model ?? session.model;
+      if (!effectiveModel?.reasoning) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Hyp3rc0d3 needs a model that supports reasoning.', retryable: true });
+      this.rememberHyp3rc0d3PriorLevel(session.sessionId, slot.pendingThinkingLevel?.level ?? session.thinkingLevel);
+      slot.pendingThinkingLevel = null;
+      this.coldPendingThinkingLevels.delete(session.sessionId);
+      setHyp3rc0d3Session(session.sessionId, true);
+      this.applyHyp3rc0d3Effort(session, effectiveModel);
+    } else {
+      if (!isHyp3rc0d3(session.sessionId)) return this.getState(false);
+      forgetHyp3rc0d3Session(session.sessionId);
+      const prior = this.takeHyp3rc0d3PriorLevel(session.sessionId);
+      if (prior && session.model) session.setThinkingLevel(prior);
+    }
     slot.stateError = null;
     this.emitState();
     return this.getState(false);
@@ -4013,6 +4081,8 @@ export class PiRuntimeService {
       this.goalSessionEntryCheckpoints.delete(candidate.id);
       this.coldPendingModels.delete(candidate.id);
       this.coldPendingThinkingLevels.delete(candidate.id);
+      forgetHyp3rc0d3Session(candidate.id);
+      this.hyp3rc0d3PriorLevels.delete(candidate.id);
       this.monitorEvents.delete(candidate.id);
       this.subagents.releaseParent(candidate.id);
       this.agentWorkflows.releaseParent(candidate.id);
@@ -4663,7 +4733,10 @@ export class PiRuntimeService {
         if (this.selectedSlot === slot) this.emitState();
       } } : undefined);
       if (queued) this.acknowledgeQueuedMessage(slot, queued.id);
-      if (!queued?.boundModel && !queued?.boundThinkingLevel) return;
+      if (!queued?.boundModel && !queued?.boundThinkingLevel) {
+        this.applyHyp3rc0d3Effort(session, session.model);
+        return;
+      }
       try {
         if (queued.boundModel) {
           await session.setModel(queued.boundModel.model);
@@ -4682,6 +4755,7 @@ export class PiRuntimeService {
             this.coldPendingThinkingLevels.delete(session.sessionId);
           }
         }
+        this.applyHyp3rc0d3Effort(session, session.model);
         slot.boundaryModelOverride = queued.boundModel ?? null;
         slot.stateError = null;
         if (this.selectedSlot === slot) this.emitState();
@@ -5692,6 +5766,7 @@ export class PiRuntimeService {
     if (slot.disposed || slot.runtime.session !== session || slot.projectGeneration !== this.initialization || slot.sessionGeneration !== generation) throw this.replacementSuperseded();
     this.assertPermissionAdmission(slot);
     if (stagedThinkingLevel) session.setThinkingLevel(stagedThinkingLevel.level);
+    this.applyHyp3rc0d3Effort(session, session.model);
     if (stagedModel && slot.pendingModel?.token === stagedModel.token) {
       slot.pendingModel = null;
       this.coldPendingModels.delete(session.sessionId);
@@ -6028,6 +6103,26 @@ export class PiRuntimeService {
     while (this.coldPendingThinkingLevels.size > MAX_COLD_PENDING_MODELS) this.coldPendingThinkingLevels.delete(this.coldPendingThinkingLevels.keys().next().value!);
   }
 
+  private rememberHyp3rc0d3PriorLevel(sessionId: string, level: ThinkingLevel): void {
+    if (!this.hyp3rc0d3PriorLevels.has(sessionId)) this.hyp3rc0d3PriorLevels.set(sessionId, level);
+  }
+
+  private takeHyp3rc0d3PriorLevel(sessionId: string): ThinkingLevel | null {
+    const level = this.hyp3rc0d3PriorLevels.get(sessionId);
+    this.hyp3rc0d3PriorLevels.delete(sessionId);
+    return level ?? null;
+  }
+
+  private coldSessionModel(cold: ColdSessionState): SessionModel | null {
+    const effective = cold.pendingModel ?? cold.model;
+    return effective ? this.modelRuntime?.getModel(effective.provider, effective.id) ?? null : null;
+  }
+
+  private applyHyp3rc0d3Effort(session: AgentSession, model: SessionModel | null | undefined): void {
+    if (!isHyp3rc0d3(session.sessionId) || !model) return;
+    session.setThinkingLevel(hyp3rc0d3ThinkingLevel(model));
+  }
+
   private recordSessionAttention(sessionId: string, value: SessionAttention | null): number {
     const revision = ++this.attentionRevision;
     this.sessionAttention.delete(sessionId);
@@ -6304,6 +6399,8 @@ export class PiRuntimeService {
         failures.push(new Error(`Pi session ${sessionId} has not actually settled; retaining checkout ownership.`));
       }
       this.subagents.releaseParent(sessionId);
+      forgetHyp3rc0d3Session(sessionId);
+      this.hyp3rc0d3PriorLevels.delete(sessionId);
       this.agentWorkflows.releaseParent(sessionId);
       this.agentTeams.releaseRoot(sessionId);
       if (failures.length > 0) throw new AggregateError(failures, `Pi session ${sessionId} could not be fully disposed.`);
@@ -6334,6 +6431,7 @@ export class PiRuntimeService {
     ]);
     const slots = [...this.liveSlots];
     this.selectedSlot = null;
+    if (this.coldSession) forgetHyp3rc0d3Session(this.coldSession.snapshot.summary.id);
     this.coldSession = null;
     this.batcher.clear();
     const disposalResults = await Promise.allSettled(slots.map((slot) => this.disposeSlot(slot, true)));

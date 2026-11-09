@@ -1076,6 +1076,8 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     () => runtimeHandlers.setModel(input), ({ handle: workspace, authorize, command }) => createScopedRuntimeHandlers(workspace, authorize).setModel(command, input))));
   handle(ipcChannels.runtimeSetThinking, (event, input) => runRuntimeMutation('changing the reasoning level', () => scoped(event,
     () => runtimeHandlers.setThinking(input), ({ handle: workspace, authorize, command }) => createScopedRuntimeHandlers(workspace, authorize).setThinking(command, input))));
+  handle(ipcChannels.runtimeSetHyp3rc0d3, (event, input) => runRuntimeMutation('changing the Hyp3rc0d3 mode', () => scoped(event,
+    () => runtimeHandlers.setHyp3rc0d3(input), ({ handle: workspace, authorize, command }) => createScopedRuntimeHandlers(workspace, authorize).setHyp3rc0d3(command, input))));
   handle(ipcChannels.runtimeRecoveryReview, (event, input) => {
     emptyInputSchema.parse(input);
     return scoped(event, () => recoveryReviewSchema.parse({ reasons: [] }), ({ handle: workspace, command }) => recoveryReviewSchema.parse({

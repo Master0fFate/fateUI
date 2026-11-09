@@ -11,12 +11,13 @@ import { normalizeWorkflowStart, workflowParameters, type ModelSelection, type W
 import type { NativeWorkflowSchedulerFactory } from './durable/NativeWorkflowScheduler';
 import { SubagentWorkflowEngine, workflowView, type SubagentWorkflow, type SubagentWorkflowExecutionBinding, type SubagentWorkflowNode, type SubagentWorkflowSnapshot } from './SubagentWorkflow';
 import type { AgentTeamCoordinator } from './multi-agent/AgentTeamCoordinator';
+import { hyp3rc0d3MaxChildren, hyp3rc0d3MaxConcurrent } from './context/Hyp3rc0d3';
 
 const MAX_RESTORE_HISTORY_ENTRIES = 10_000;
 const WORKFLOW_SNAPSHOT_CUSTOM_TYPE = 'fate-subagent-workflow';
 const TASK_SETTLEMENT_POLL_MS = 5 * 60_000;
 
-type ParentContext = { projectPath: string; session: AgentSession; agentStrategy?: 'auto' | 'off' | 'read-only' };
+type ParentContext = { projectPath: string; session: AgentSession; agentStrategy?: 'auto' | 'off' | 'read-only'; hyp3rc0d3?: boolean };
 
 type WorkflowToolDetails = {
   kind: 'fate-subagent-workflow';
@@ -133,7 +134,7 @@ export class AgentWorkflowCoordinator {
         const team = this.teams.getTeams(workflow.parentSessionId)
           .find((candidate) => candidate.id === workflow.execution?.teamId && candidate.rootNodeId === workflow.execution.rootNodeId);
         if (!team) return 1;
-        return workflow.maxConcurrency;
+        return this.hyp3rc0d3Active(workflow.parentSessionId) ? Math.min(workflow.maxConcurrency, hyp3rc0d3MaxConcurrent()) : workflow.maxConcurrency;
       },
       usedHandles: (parentSessionId) => this.teams.getTeams(parentSessionId).flatMap((team) => team.nodes.map((node) => node.handle)),
       runIdentity: (parentSessionId, runId) => {
@@ -171,8 +172,10 @@ export class AgentWorkflowCoordinator {
           assertRepresentableWorkflowDurations((params as { nodes?: unknown }).nodes);
           const request = normalizeWorkflowStart(params);
           if (!request) throw new Error('Invalid workflow graph. Node IDs must be unique, dependencies must exist, and cycles are not allowed.');
-          const execution = this.preflight(parent.session.sessionId, request.nodes, request.maxConcurrency);
-          return deliver([this.workflows.start(parent.session.sessionId, toolCallId, request, modelRuntime, signal, execution)]);
+          const bounded = { ...request, maxConcurrency: this.boundedMaxConcurrency(parent, request.maxConcurrency) };
+          this.assertHyp3rc0d3ChildBudget(parent, bounded.nodes.length);
+          const execution = this.preflight(parent.session.sessionId, bounded.nodes, bounded.maxConcurrency);
+          return deliver([this.workflows.start(parent.session.sessionId, toolCallId, bounded, modelRuntime, signal, execution)]);
         }
         if (input.action === 'list') return deliver(this.workflows.getWorkflows(parent.session.sessionId));
         if (!input.workflowId) throw new Error(`${input.action} requires workflowId.`);
@@ -186,6 +189,7 @@ export class AgentWorkflowCoordinator {
           if (parent.agentStrategy === 'off') throw new Error('Goal agent strategy is off; recovered workflows cannot resume.');
           const workflow = this.workflows.getWorkflow(parent.session.sessionId, input.workflowId);
           if (!workflow) throw new Error(`Unknown agent workflow ${input.workflowId}.`);
+          this.assertHyp3rc0d3ChildBudget(parent, 0);
           const execution = this.preflight(parent.session.sessionId, workflow.nodes.map((node) => node.request), workflow.maxConcurrency, workflow.execution);
           return deliver([await this.workflows.resume(parent.session.sessionId, input.workflowId, modelRuntime, execution)]);
         }
@@ -245,6 +249,25 @@ export class AgentWorkflowCoordinator {
       throw new Error(`Agent workflow node ${oversizedTask.id} requires a ${Buffer.byteLength(oversizedTask.task, 'utf8')}-byte input envelope, above the Team ${team.limits.maxMessageBytes}-byte limit. Nothing was started.`);
     }
     return { kind: 'agent-team', teamId: team.id, rootNodeId: root };
+  }
+
+  private hyp3rc0d3Active(parentSessionId: string): boolean {
+    return this.host.resolveParent(parentSessionId)?.hyp3rc0d3 === true;
+  }
+
+  private boundedMaxConcurrency(parent: ParentContext, requested: number): number {
+    return parent.hyp3rc0d3 === true ? Math.min(requested, hyp3rc0d3MaxConcurrent()) : requested;
+  }
+
+  private childCount(parentSessionId: string): number {
+    return this.teams.getTeams(parentSessionId).reduce((count, team) => count + team.nodes.filter((node) => node.depth > 0).length, 0);
+  }
+
+  private assertHyp3rc0d3ChildBudget(parent: ParentContext, incoming: number): void {
+    if (parent.hyp3rc0d3 !== true) return;
+    const used = this.childCount(parent.session.sessionId);
+    const limit = hyp3rc0d3MaxChildren();
+    if (used + incoming > limit) throw new Error(`Hyp3rc0d3 allows ${limit} child agents per session and ${used} already exist; this graph adds ${incoming}. Nothing was started.`);
   }
 
   private async launchNode(
@@ -423,6 +446,10 @@ export class AgentWorkflowCoordinator {
     signal: AbortSignal,
     attempt: number,
   ) {
+    if (this.hyp3rc0d3Active(workflow.parentSessionId)) {
+      const limit = hyp3rc0d3MaxChildren();
+      if (this.childCount(workflow.parentSessionId) >= limit) throw new Error(`Hyp3rc0d3 node limit of ${limit} child agents for this session is reached; ${node.id} was not admitted.`);
+    }
     const model = modelForAttempt(request, attempt);
     return this.teams.spawn(root, {
       task: request.task,

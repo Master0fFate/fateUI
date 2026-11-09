@@ -160,6 +160,7 @@ export const ipcChannels = {
   runtimeSendSessionMessage: 'runtime:send-session-message',
   runtimeSetModel: 'runtime:set-model',
   runtimeSetThinking: 'runtime:set-thinking',
+  runtimeSetHyp3rc0d3: 'runtime:set-hyp3rc0d3',
   runtimeRecoveryReview: 'runtime:recovery-review',
   runtimeRecoveryAcknowledge: 'runtime:recovery-acknowledge',
   runtimeSetPermission: 'runtime:set-permission',
@@ -1124,6 +1125,7 @@ export const runtimeStateSchema = z.object({
   models: z.array(modelInfoSchema).max(2_000),
   thinkingLevel: thinkingLevelSchema,
   pendingThinkingLevel: thinkingLevelSchema.nullable().optional(),
+  hyp3rc0d3: z.boolean().optional(),
   permissionLevel: permissionLevelSchema.optional(),
   providerLogin: providerLoginStateSchema.optional(),
   questionnaire: pendingQuestionnaireSchema.nullable().optional(),
@@ -1247,6 +1249,7 @@ export const subagentControlInputSchema = z.discriminatedUnion('action', [
 ]);
 export const setModelInputSchema = z.object({ provider: z.string().min(1), id: z.string().min(1) }).strict();
 export const setThinkingInputSchema = z.object({ level: thinkingLevelSchema }).strict();
+export const setHyp3rc0d3InputSchema = z.object({ enabled: z.boolean() }).strict();
 export const recoveryReviewSchema = z.object({ reasons: z.array(z.string().min(1).max(500)).max(64) }).strict();
 export type RecoveryReview = z.infer<typeof recoveryReviewSchema>;
 export const setPermissionInputSchema = z.object({ level: permissionLevelSchema }).strict();
@@ -1735,6 +1738,7 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   controlAgentTeam: (input: AgentTeamControlInput) => Promise<RuntimeState>;
   setModel: (provider: string, id: string) => Promise<RuntimeState>;
   setThinkingLevel: (level: ThinkingLevel) => Promise<RuntimeState>;
+  setHyp3rc0d3: (enabled: boolean) => Promise<RuntimeState>;
   getRecoveryReview: () => Promise<RecoveryReview>;
   acknowledgeRecovery: () => Promise<RecoveryReview>;
   setPermissionLevel: (level: PermissionLevel) => Promise<RuntimeState>;

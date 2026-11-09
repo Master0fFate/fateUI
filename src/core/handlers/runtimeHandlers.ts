@@ -4,7 +4,7 @@ import type { WorkspaceHandle } from '../workspaces/WorkspaceHandle';
 import {
   abortResultSchema, emptyInputSchema, promptAcceptanceSchema, promptInputSchema,
   queueMutationInputSchema, queueMutationResultSchema, runtimeStateSchema,
-  setModelInputSchema, setThinkingInputSchema,
+  setModelInputSchema, setThinkingInputSchema, setHyp3rc0d3InputSchema,
 } from '../../shared/contracts/ipc';
 
 /** Existing Pi admission/queue and permission rules stay in this captured runtime. */
@@ -33,6 +33,10 @@ export function createRuntimeHandlers(runtime: PiRuntimeService, resolveReferenc
       const { level } = setThinkingInputSchema.parse(input);
       return runtimeStateSchema.parse(runtime.setThinkingLevel(level));
     },
+    setHyp3rc0d3(input: unknown) {
+      const { enabled } = setHyp3rc0d3InputSchema.parse(input);
+      return runtimeStateSchema.parse(runtime.setHyp3rc0d3(enabled));
+    },
     async mutateQueue(input: unknown) {
       return queueMutationResultSchema.parse(await runtime.mutateQueuedMessage(queueMutationInputSchema.parse(input)));
     },
@@ -52,6 +56,7 @@ export function createScopedRuntimeHandlers(handle: WorkspaceHandle, authorize: 
     abort(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.abort(input), false, true); },
     setModel(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setModel(input)); },
     setThinking(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setThinking(input)); },
+    setHyp3rc0d3(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setHyp3rc0d3(input)); },
     mutateQueue(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.mutateQueue(input)); },
   };
 }

@@ -7,6 +7,7 @@ import { JsonConfigFile } from './JsonConfigFile';
 import { createLspDiagnosticsExtension, createLspTools } from './lsp/LspTools';
 import { lspWorkspaceFor } from './lsp/LspWorkspace';
 import { createContextInspectorExtension } from './context/ContextInspector';
+import { createHyp3rc0d3Extension } from './context/Hyp3rc0d3';
 import { createModelIdentityExtension } from './context/ModelIdentity';
 import { createSkillPromptExtension } from './context/SkillPromptTrim';
 import { createFateUsageExtension, usageLedgerFor } from './usage/UsageLedger';
@@ -39,7 +40,7 @@ export async function loadFateSessionExtensions(input: FateSessionExtensionsInpu
   const hooksExtension = createFateHooksExtension({ hooks, projectRoot: input.projectRoot, resolvePermissionLevel: input.resolvePermissionLevel });
   const usage = createFateUsageExtension({ ledger: usageLedgerFor(input.dataRoot ?? fateDataRoot()), projectRoot: input.projectRoot, ...(input.dailyBudgetUsd ? { dailyBudgetUsd: input.dailyBudgetUsd } : {}) });
   return {
-    extensions: [...(hooksExtension ? [hooksExtension] : []), ...(workspace ? [createLspDiagnosticsExtension(workspace)] : []), createContextInspectorExtension(), createSkillPromptExtension(), createModelIdentityExtension(), usage],
+    extensions: [...(hooksExtension ? [hooksExtension] : []), ...(workspace ? [createLspDiagnosticsExtension(workspace)] : []), createContextInspectorExtension(), createSkillPromptExtension(), createModelIdentityExtension(), createHyp3rc0d3Extension(), usage],
     lspTools: workspace ? createLspTools(workspace) : [],
   };
 }

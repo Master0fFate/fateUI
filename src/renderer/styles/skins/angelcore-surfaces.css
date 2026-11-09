@@ -28,6 +28,7 @@
 :root[data-skin][data-skin-styled] .model-setting :is(strong, span, input, button) { font-family: var(--font-interface); }
 :root[data-skin][data-skin-styled] .model-transition-copy span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :root[data-skin][data-skin-styled] .model-setting-toggle { border-radius: var(--surface-control-radius); }
+:root[data-skin][data-skin-styled] .model-setting-switch-track { border-radius: var(--surface-control-radius); }
 :root[data-skin][data-skin-styled] .effort-slider-track, :root[data-skin][data-skin-styled] .effort-slider-fill { inset: 9px 0; clip-path: polygon(0 calc(50% - .5px), 100% 0, 100% 100%, 0 calc(50% + .5px)); }
 :root[data-skin][data-skin-styled] .effort-slider-fill { background: var(--theme-accent); filter: none; }
 :root[data-skin][data-skin-styled] .effort-slider-thumb { width: calc(8px + var(--heat) * 4px); height: calc(8px + var(--heat) * 4px); border: 1px solid var(--surface-background); border-radius: var(--surface-control-radius); background: var(--theme-accent); box-shadow: 0 0 0 1px var(--surface-border); animation: none; }

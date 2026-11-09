@@ -38,6 +38,7 @@ import {
   modelsDevProviderDetailSchema,
   modelsDevRemoveInputSchema,
   setThinkingInputSchema,
+  setHyp3rc0d3InputSchema,
   recoveryReviewSchema,
   type PiDesktopApi,
 } from '../shared/contracts/ipc';
@@ -77,6 +78,7 @@ export const runtimeApi = {
   controlAgentTeam: (input) => invoke(ipcChannels.runtimeControlAgentTeam, agentTeamControlInputSchema, runtimeStateSchema, input),
   setModel: (provider, id) => invoke(ipcChannels.runtimeSetModel, setModelInputSchema, runtimeStateSchema, { provider, id }),
   setThinkingLevel: (level) => invoke(ipcChannels.runtimeSetThinking, setThinkingInputSchema, runtimeStateSchema, { level }),
+  setHyp3rc0d3: (enabled) => invoke(ipcChannels.runtimeSetHyp3rc0d3, setHyp3rc0d3InputSchema, runtimeStateSchema, { enabled }),
   getRecoveryReview: () => invoke(ipcChannels.runtimeRecoveryReview, emptyInputSchema, recoveryReviewSchema),
   acknowledgeRecovery: () => invoke(ipcChannels.runtimeRecoveryAcknowledge, emptyInputSchema, recoveryReviewSchema),
   setPermissionLevel: (level) => invoke(ipcChannels.runtimeSetPermission, setPermissionInputSchema, runtimeStateSchema, { level }),

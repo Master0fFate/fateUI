@@ -94,6 +94,7 @@ export class FakePiRuntimeService {
   private activeSession = 'e2e-session-1';
   private streaming = false;
   private permissionLevel: PermissionLevel = 'edit';
+  private hyp3rc0d3 = false;
   private queuedMessages: QueuedMessage[] = [];
   private queueSequence = 0;
   private profileSequence = 0;
@@ -155,7 +156,7 @@ export class FakePiRuntimeService {
           ? [{ label: 'Overview' }, { label: 'Show all projects by recent activity, with the last active session pinned so you can resume work.' }, { label: 'Last view' }]
           : [{ label: 'Overview' }, { label: 'Recent work' }, { label: 'Last view' }],
       } } : {}),
-      thinkingLevel: 'medium', permissionLevel: this.permissionLevel,
+      thinkingLevel: 'medium', permissionLevel: this.permissionLevel, hyp3rc0d3: this.hyp3rc0d3,
       messages: historical ? [{ id: 'history-assistant', role: 'assistant', text: '**Second session** history', timestamp: 1, timelinePosition: 0 }]
         : showQuestionnaire ? [{ id: 'questionnaire-assistant', role: 'assistant', text: 'Let’s set up your dashboard.', timestamp: 1, timelinePosition: 0 }] : [],
       tools: historical ? [{ id: 'history-tool', name: 'read', input: '{"path":"README.md"}', output: 'historical output', outputTruncated: false, status: 'succeeded', startedAt: 2, updatedAt: 3, endedAt: 3, timelinePosition: 0.5 }] : [],
@@ -414,6 +415,7 @@ export class FakePiRuntimeService {
   }
   async setModel(): Promise<RuntimeState> { return this.getState(); }
   setThinkingLevel(_level: ThinkingLevel): RuntimeState { return this.getState(); }
+  setHyp3rc0d3(enabled: boolean): RuntimeState { this.hyp3rc0d3 = enabled; this.emitState(); return this.getState(); }
   async setPermissionLevel(level: PermissionLevel): Promise<RuntimeState> { const key = this.permissionKey(this.activeSession); this.permissionLevel = level; this.sessionPermissions.set(key, level); this.emitState(); return this.getState(); }
   async mutateQueuedMessage(input: QueueMutationInput): Promise<QueueMutationResult> {
     const target = this.queuedMessages.find((item) => item.id === input.id);

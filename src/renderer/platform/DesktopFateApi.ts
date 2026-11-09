@@ -150,6 +150,7 @@ export function selectDesktopMethods(bridge: DesktopOnlyApi): DesktopOnlyApi {
     setComputerUseEnabled: bridge.setComputerUseEnabled,
     setGoogleClient: bridge.setGoogleClient,
     setHooks: bridge.setHooks,
+    setHyp3rc0d3: bridge.setHyp3rc0d3,
     setLspServers: bridge.setLspServers,
     setMcpServers: bridge.setMcpServers,
     setSettings: bridge.setSettings,

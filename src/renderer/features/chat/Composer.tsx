@@ -624,6 +624,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const [compactToolbar, setCompactToolbar] = useState(false);
   const [modelBusy, setModelBusy] = useState(false);
   const [thinkingDraft, setThinkingDraft] = useState<typeof thinkingLevels[number] | null>(null);
+  const [hyp3rc0d3Busy, setHyp3rc0d3Busy] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const computerUse = useComputerUseSwitch();
   const [queueBusyId, setQueueBusyId] = useState<string | null>(null);
@@ -706,6 +707,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     models: state.runtime.models,
     thinkingLevel: state.runtime.thinkingLevel,
     pendingThinkingLevel: state.runtime.pendingThinkingLevel,
+    hyp3rc0d3: state.runtime.hyp3rc0d3,
     permissionLevel: state.runtime.permissionLevel,
     providerLogin: state.runtime.providerLogin,
     questionnaire: state.runtime.questionnaire,
@@ -760,8 +762,13 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const agentTurnedOff = currentAgentId !== null && !currentAgentEnabled;
   const nextModel = runtime.pendingModel ?? runtime.model;
   const nextThinkingLevel = thinkingDraft ?? runtime.pendingThinkingLevel ?? runtime.thinkingLevel;
+  const hyp3rc0d3 = runtime.hyp3rc0d3 === true;
+  const hyp3rc0d3Available = typeof getDesktopApiOptional()?.setHyp3rc0d3 === 'function';
   const imageCapable = connected && nextModel?.supportsImages === true;
   const reasoningCapable = connected && nextModel?.reasoning === true;
+  const hyp3rc0d3Level = runtime.pendingThinkingLevel ?? runtime.thinkingLevel;
+  const hyp3rc0d3Caption = !hyp3rc0d3Available ? 'Desktop only' : !reasoningCapable ? 'Needs reasoning' : hyp3rc0d3 ? `Reasoning ${thinkingLabel(hyp3rc0d3Level).toLowerCase()}` : 'Reasoning xhigh';
+  const hyp3rc0d3Reason = !hyp3rc0d3Available ? 'Hyp3rc0d3 needs the desktop app' : !reasoningCapable ? 'Hyp3rc0d3 needs a model that supports reasoning' : 'Plan and run the work as a dependency graph of agents';
   const permissionLevel = runtime.permissionLevel ?? 'edit';
   const permissionLabel = permissionLevel === 'read-only' ? 'Read only' : permissionLevel === 'full-access' ? 'Full access' : 'Edit files';
   const PermissionIcon = permissionLevel === 'read-only' ? Shield : permissionLevel === 'full-access' ? Zap : ShieldCheck;
@@ -2491,6 +2498,25 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     }
   };
 
+  const changeHyp3rc0d3 = async (enabled: boolean) => {
+    if (!hyp3rc0d3Available || hyp3rc0d3Busy) return;
+    const origin = useRuntimeStore.getState().runtime;
+    setHyp3rc0d3Busy(true);
+    setComposerError(null);
+    try {
+      const state = await getDesktopApi().setHyp3rc0d3(enabled);
+      if (!mounted.current) return;
+      const current = useRuntimeStore.getState().runtime;
+      const selectionIsOrigin = current.sessionId === origin.sessionId && current.project?.path === origin.project?.path;
+      const resultIsCurrent = current.sessionId === state.sessionId && current.project?.path === state.project?.path;
+      if (selectionIsOrigin || resultIsCurrent) useRuntimeStore.getState().setRuntime(state);
+    } catch (error) {
+      if (mounted.current) setComposerError(error instanceof Error ? error.message : 'The Hyp3rc0d3 mode could not be changed.');
+    } finally {
+      if (mounted.current) setHyp3rc0d3Busy(false);
+    }
+  };
+
   const changePermissionLevel = async (level: 'read-only' | 'edit' | 'full-access') => {
     if (!getFateApiOptional() || permissionBusyRef.current) return;
     const origin = useRuntimeStore.getState().runtime;
@@ -3052,15 +3078,34 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                         {reasoningMenu ? (
                           <SelectControl
                             label="Reasoning level"
-                            disabled={!reasoningCapable || modelBusy}
+                            disabled={!reasoningCapable || modelBusy || hyp3rc0d3}
                             value={reasoningCapable ? nextThinkingLevel : 'off'}
                             options={(reasoningCapable ? thinkingLevels : ['off'] as const).map((level) => ({ value: level, label: reasoningCapable ? thinkingLabel(level) : 'Not supported' }))}
                             contentClassName="model-select-content"
                             onValueChange={(value) => void changeThinking(value as typeof thinkingLevels[number])}
                           />
                         ) : (
-                          <EffortSlider levels={thinkingLevels} value={reasoningCapable ? nextThinkingLevel : 'off'} label="Reasoning level" disabled={!reasoningCapable} format={(level) => reasoningCapable ? thinkingLabel(level) : 'Not supported'} onChange={(level) => void changeThinking(level)} />
+                          <EffortSlider levels={thinkingLevels} value={reasoningCapable ? nextThinkingLevel : 'off'} label="Reasoning level" disabled={!reasoningCapable || hyp3rc0d3} format={(level) => reasoningCapable ? thinkingLabel(level) : 'Not supported'} onChange={(level) => void changeThinking(level)} />
                         )}
+                      </div>
+                      <div className="model-setting">
+                        <AppTooltip content={hyp3rc0d3Reason}>
+                          <label className="model-setting-switch">
+                            <span className="model-setting-switch-copy">
+                              <strong>Hyp3rc0d3</strong>
+                              <small>{hyp3rc0d3Caption}</small>
+                            </span>
+                            {hyp3rc0d3Busy && <LoaderCircle className="tool-spinner" size={13} aria-label="Applying settings" />}
+                            <input
+                              type="checkbox"
+                              aria-label="Hyp3rc0d3"
+                              checked={hyp3rc0d3}
+                              disabled={!connected || hyp3rc0d3Busy || !hyp3rc0d3Available || (!reasoningCapable && !hyp3rc0d3)}
+                              onChange={(event) => void changeHyp3rc0d3(event.target.checked)}
+                            />
+                            <span className="model-setting-switch-track" aria-hidden="true" />
+                          </label>
+                        </AppTooltip>
                       </div>
                     </Popover.Content>
                   </Popover.Portal>
