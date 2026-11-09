@@ -54,9 +54,9 @@ export function createScopedRuntimeHandlers(handle: WorkspaceHandle, authorize: 
         () => { admission.assertCurrent(command, authorize); }));
     },
     abort(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.abort(input), false, true); },
-    setModel(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setModel(input)); },
-    setThinking(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setThinking(input)); },
-    setHyp3rc0d3(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setHyp3rc0d3(input)); },
+    setModel(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setModel(input), false, true); },
+    setThinking(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setThinking(input), false, true); },
+    setHyp3rc0d3(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.setHyp3rc0d3(input), false, true); },
     mutateQueue(command: SessionAdmission, input: unknown) { return admission.run(command, authorize, () => handlers.mutateQueue(input)); },
   };
 }

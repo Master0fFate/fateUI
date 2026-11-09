@@ -10,7 +10,7 @@ import type { AgentTeam } from '../../shared/contracts/multiAgent';
 import type { ScopedDomainEvent } from '../events/ScopedDomainEvents';
 import type { AdmissionAuthority, SessionAdmission } from '../workspaces/WorkspaceAdmissionQueue';
 import { inspectAgentTeamChildStorage } from '../../main/pi/multi-agent/AgentTeamHistory';
-import { LifecycleRepository, type LifecycleRecord, type LifecycleRead } from './LifecycleRepository';
+import { LifecycleRepository, LifecycleStorageError, type LifecycleRecord, type LifecycleRead } from './LifecycleRepository';
 
 export interface RecoveryReviewControl {
   readonly command: SessionAdmission;
@@ -55,11 +55,14 @@ export class RecoveryCoordinator {
   private readonly blockers = new Map<string, { id: string; reason: string }[]>();
   private readonly reviewedPrincipals = new Map<string, string>();
   private readonly reviewsInFlight = new Set<string>();
+  private blockedCheckpoint: { key: string; reference: LifecycleRecord['reference']; status: LifecycleRecord['status']; checkpoint: boolean } | null = null;
+  private healing: Promise<void> | null = null;
   constructor(readonly repository: LifecycleRepository, private readonly sources: RecoverySources) {}
 
   get admissionsAllowed(): boolean { return this.startupAllowed && this.unhealthy === null && this.pending.size === 0; }
   get storageNotice(): string | null { return this.unhealthy; }
   assertAdmission(projectPath?: string, sessionId?: string | null, principalId?: string): void {
+    if (this.unhealthy) this.heal();
     if (!this.admissionsAllowed) throw new Error(`STORAGE_UNAVAILABLE: ${this.unhealthy ?? 'A required lifecycle checkpoint is pending.'}`);
     if (projectPath && sessionId) {
       const key = JSON.stringify([projectPath, sessionId]);
@@ -209,18 +212,46 @@ export class RecoveryCoordinator {
     }
   }
   record(reference: LifecycleRecord['reference'], status: LifecycleRecord['status'], checkpoint = false): Promise<void> {
-    const key = JSON.stringify([reference.projectPath, reference.sessionId, reference.runId, reference.teamId, reference.taskId, reference.goalId]);
+    const key = checkpointKey(reference);
     if (!checkpoint && this.observed.get(key) === status) return Promise.resolve();
     this.observed.set(key, status);
-    const task = this.repository.append(reference, status, checkpoint).then(() => undefined).catch(() => {
-      this.unhealthy = 'Lifecycle checkpoint could not be saved. New admissions blocked; review the storage file.';
-    });
+    const task = this.save(key, reference, status, checkpoint, !this.unhealthy);
     this.pending.add(task);
     void task.finally(() => this.pending.delete(task));
     return task;
   }
+  /** A rejected observation is never fatal by itself. Storage faults are retried,
+   * and the last rejected checkpoint is retried on the next admission attempt, so
+   * one transient write error never needs a restart. A later durable checkpoint
+   * clears the block; a health fault keeps it until the file is repaired. */
+  private async save(key: string, reference: LifecycleRecord['reference'], status: LifecycleRecord['status'],
+    checkpoint: boolean, retry: boolean): Promise<void> {
+    let fault: unknown = null;
+    for (const delay of retry ? [0, 100, 400] : [0]) {
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      try {
+        await this.repository.append(reference, status, checkpoint);
+        this.unhealthy = null;
+        this.blockedCheckpoint = null;
+        return;
+      } catch (error) {
+        if (!(error instanceof LifecycleStorageError)) return;
+        fault = error;
+      }
+    }
+    this.observed.delete(key);
+    this.blockedCheckpoint = { key, reference, status, checkpoint };
+    const health = await this.repository.read().then((read) => read.health, () => 'unavailable' as const);
+    this.unhealthy = `Lifecycle checkpoint could not be saved (${health}: ${(fault as Error).message}). New admissions blocked until a checkpoint is saved.`;
+  }
+  private heal(): void {
+    const blocked = this.blockedCheckpoint;
+    if (!blocked || this.healing) return;
+    this.healing = this.save(blocked.key, blocked.reference, blocked.status, blocked.checkpoint, true)
+      .catch(() => undefined).finally(() => { this.healing = null; });
+  }
   async flush(): Promise<void> {
-    await Promise.all([...this.pending]);
+    await Promise.all([...this.pending, ...(this.healing ? [this.healing] : [])]);
     if (this.unhealthy) throw new Error(`STORAGE_UNAVAILABLE: ${this.unhealthy}`);
   }
 
@@ -370,6 +401,9 @@ export class RecoveryCoordinator {
       return unknown('No authoritative final execution evidence.');
     } catch { return unknown('An authoritative source or worktree check failed; no replay is safe.'); }
   }
+}
+function checkpointKey(reference: LifecycleRecord['reference']): string {
+  return JSON.stringify([reference.projectPath, reference.sessionId, reference.runId, reference.teamId, reference.taskId, reference.goalId]);
 }
 function same(left: string, right: string): boolean {
   const a = path.resolve(left), b = path.resolve(right);

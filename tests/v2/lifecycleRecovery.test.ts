@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { TaskRepository } from '../../src/main/pi/tasks/TaskRepository';
 import { InMemoryGoalMaxRepository } from '../../src/main/pi/goalmaxxing/GoalMaxRepository';
 import { InMemorySessionQueueRepository } from '../../src/main/pi/SessionQueueRepository';
-import { LifecycleRepository, type LifecycleReference } from '../../src/core/recovery/LifecycleRepository';
+import { LifecycleRepository, LifecycleStorageError, type LifecycleReference } from '../../src/core/recovery/LifecycleRepository';
 import { RecoveryCoordinator, type RecoverySources } from '../../src/core/recovery/RecoveryCoordinator';
 import type { AgentTeam } from '../../src/shared/contracts/multiAgent';
 import { goalMaxStateSchema } from '../../src/shared/contracts/goalmaxxing';
@@ -473,7 +473,7 @@ describe('T28 bounded cold recovery', () => {
       await owner.ipc.abort({});
       await expect(owner.ipc.prompt({ text: 'No new work during a checkpoint.' })).rejects.toThrow('STORAGE_UNAVAILABLE');
       release(); await pending;
-      storage.mockImplementationOnce(async () => { throw new Error('Private storage fault.'); });
+      storage.mockImplementation(async () => { throw new LifecycleStorageError('Private storage fault.'); });
       await owner.core.recovery.record({ projectPath: project, sessionId }, 'failed');
       expect(() => owner.core.recovery.assertAdmission()).toThrow('STORAGE_UNAVAILABLE');
       expect((await owner.ipc.monitor({ section: 'runs', limit: 1 })).sessionId).toBe(sessionId);

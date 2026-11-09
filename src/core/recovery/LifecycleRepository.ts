@@ -31,6 +31,9 @@ const sessionReviewSchema = z.object({ version: z.literal(1), projectPath: id, s
   recordIds: z.array(id).min(1).max(512), principalId: id, at: z.number().int().nonnegative().safe(),
 }).strict();
 export type SessionReviewAck = z.infer<typeof sessionReviewSchema>;
+export class LifecycleStorageError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) { super(message, options); this.name = 'LifecycleStorageError'; }
+}
 const MAX_SESSION_REVIEW_BYTES = 64 * 1024;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_RECORDS = 512;
@@ -200,11 +203,12 @@ export class LifecycleRepository {
       const record = recordSchema.parse({ version: 1, id: randomUUID(), reference, status, checkpoint, at });
       const line = `${JSON.stringify(record)}\n`;
       const bytes = Buffer.byteLength(line);
-      if (bytes > MAX_LINE) throw new Error('STORAGE_UNAVAILABLE: lifecycle record exceeds its limit.');
+      if (bytes > MAX_LINE) throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle record exceeds its limit.');
       const current = await this.inspect();
-      if (current.health !== 'ok') throw new Error(`STORAGE_UNAVAILABLE: lifecycle ${current.health}.`);
+      if (current.health !== 'ok') throw new LifecycleStorageError(`STORAGE_UNAVAILABLE: lifecycle ${current.health}.`);
       const existing = current.records.findLast((item) => item.reference.projectPath === reference.projectPath && item.reference.sessionId === reference.sessionId
-        && item.reference.runId === reference.runId && item.reference.teamId === reference.teamId && item.reference.taskId === reference.taskId && item.reference.requestId === reference.requestId);
+        && item.reference.goalId === reference.goalId && item.reference.nodeId === reference.nodeId && item.reference.runId === reference.runId
+        && item.reference.teamId === reference.teamId && item.reference.taskId === reference.taskId && item.reference.requestId === reference.requestId);
       if (existing && ['completed', 'failed'].includes(existing.status) && status === 'running') throw new Error('A settled lifecycle reference cannot restart; use a new execution identity.');
       const stat = await fs.stat(this.file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error; });
       if (current.records.length >= this.maxRecords || (stat?.size ?? 0) + bytes > this.maxBytes) await this.compact(current.records, bytes);
@@ -213,7 +217,7 @@ export class LifecycleRepository {
         const handle = await fs.open(this.file, 'a', 0o600);
         try { await handle.writeFile(line, 'utf8'); await handle.sync(); }
         finally { await handle.close(); }
-      } catch { throw new Error('STORAGE_UNAVAILABLE: lifecycle write failed; prior records retained.'); }
+      } catch (error) { throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle write failed; prior records retained.', { cause: error }); }
       return record;
     });
     this.tail = result.then(() => undefined, () => undefined);
@@ -222,13 +226,13 @@ export class LifecycleRepository {
   private async compact(records: readonly LifecycleRecord[], incoming: number): Promise<void> {
     const kept = compactRecords(records, Math.floor(this.maxRecords / 2));
     const text = kept.map((record) => `${JSON.stringify(record)}\n`).join('');
-    if (kept.length >= this.maxRecords || Buffer.byteLength(text) + incoming > this.maxBytes) throw new Error('STORAGE_UNAVAILABLE: lifecycle quota.');
+    if (kept.length >= this.maxRecords || Buffer.byteLength(text) + incoming > this.maxBytes) throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle quota.');
     const temporary = `${this.file}.${randomUUID()}.tmp`;
     try {
       const handle = await fs.open(temporary, 'wx', 0o600);
       try { await handle.writeFile(text, 'utf8'); await handle.sync(); } finally { await handle.close(); }
       await fs.rename(temporary, this.file);
-    } catch { throw new Error('STORAGE_UNAVAILABLE: lifecycle compaction failed; prior records retained.'); }
+    } catch (error) { throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle compaction failed; prior records retained.', { cause: error }); }
     finally { await fs.rm(temporary, { force: true }).catch(() => undefined); }
   }
 }
