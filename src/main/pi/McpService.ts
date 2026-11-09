@@ -2,7 +2,6 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Type } from 'typebox';
-import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { McpServerDefinition } from '../../shared/contracts/ipc';
@@ -89,7 +88,7 @@ export function createMcpTool(servers: readonly McpServerDefinition[], fullAcces
     promptSnippet: 'List and call user-enabled MCP server tools (Full access only)',
     description: `Use an enabled MCP server. First list tools, then call a named tool. Requires Full access. Servers: ${servers.filter((server) => server.enabled).map((server) => server.name).join(', ')}`,
     parameters: Type.Object({
-      action: StringEnum(['list', 'call'] as const),
+      action: Type.Unsafe<'list' | 'call'>({ type: 'string', enum: ['list', 'call'] }),
       server: Type.String(),
       tool: Type.Optional(Type.String()),
       args: Type.Optional(Type.Record(Type.String(), Type.Unknown())),

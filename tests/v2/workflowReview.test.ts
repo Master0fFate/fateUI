@@ -10,7 +10,7 @@ import { createDesktopFatePaths } from '../../src/core/FatePaths';
 import { OwnerLock } from '../../src/core/ownership/OwnerLock';
 import { openOwnedDurableStorage } from '../../src/core/durable/OwnedDurableStorage';
 import { NativeWorkflowReviewService, inspectOwnedNativeWorkflowReview, assertNativeWorkflowIdentityNotRetired,
-  NativeWorkflowPermanentlyRetiredError } from '../../src/core/recovery/NativeWorkflowReview';
+  NativeWorkflowPermanentlyRetiredError, NativeWorkflowReviewVersionMismatchError } from '../../src/core/recovery/NativeWorkflowReview';
 import { migrationHash } from '../../src/core/storage/MigrationFiles';
 import { runCli } from '../../src/cli/main';
 import { parseCliArgs } from '../../src/cli/args';
@@ -78,6 +78,19 @@ describe('explicit native UNKNOWN workflow review', () => {
     await expect(f.service.acknowledge(plan)).resolves.toMatchObject({ status: 'acknowledged-unknown' });
     expect(await fs.readdir(f.recordRoot)).toEqual([`review-${plan.id}.json`]);
     expect(harness).not.toHaveBeenCalled(); expect(model).not.toHaveBeenCalled();
+  });
+  it('names a pre-1.5.0 receipt version mismatch with an actionable recovery error and leaves the receipt on disk', async () => {
+    const f = await fixture(); await f.create(); const plan = await f.service.prepare(); await f.service.acknowledge(plan);
+    const target = path.join(f.recordRoot, `review-${plan.id}.json`);
+    const record = JSON.parse(await fs.readFile(target, 'utf8')); record.plan.nativeSdkVersion = '1.4.0';
+    await fs.writeFile(target, JSON.stringify(record)); const before = await fs.readFile(target);
+    await expect(f.inspect()).rejects.toBeInstanceOf(NativeWorkflowReviewVersionMismatchError);
+    await expect(f.inspect()).rejects.toThrow('pi-durable 1.4.0');
+    await expect(f.inspect()).rejects.toThrow(`review-*.json under ${f.recordRoot}`);
+    await expect(f.inspect()).rejects.toThrow('stop the host');
+    await expect(f.admit(`workflow-${'f'.repeat(64)}.sqlite`)).rejects.toBeInstanceOf(NativeWorkflowReviewVersionMismatchError);
+    expect(await fs.readFile(target)).toEqual(before);
+    expect(await fs.readdir(f.recordRoot)).toEqual([`review-${plan.id}.json`]);
   });
   it('keeps retirement after missing or freshly recreated same-ID history and blocks new work on missing evidence', async () => {
     const f = await fixture(); const old = await f.create(); const plan = await f.service.prepare(); await f.service.acknowledge(plan);

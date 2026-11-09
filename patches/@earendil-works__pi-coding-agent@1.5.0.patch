@@ -1,7 +1,7 @@
 diff --git a/dist/core/package-manager.d.ts b/dist/core/package-manager.d.ts
 --- a/dist/core/package-manager.d.ts
 +++ b/dist/core/package-manager.d.ts
-@@ -67,6 +67,8 @@
+@@ -76,6 +76,8 @@
      getInstalledPath(source: string, scope: "user" | "project"): string | undefined;
  }
  interface PackageManagerOptions {
@@ -13,7 +13,7 @@ diff --git a/dist/core/package-manager.d.ts b/dist/core/package-manager.d.ts
 diff --git a/dist/core/package-manager.js b/dist/core/package-manager.js
 --- a/dist/core/package-manager.js
 +++ b/dist/core/package-manager.js
-@@ -608,6 +608,7 @@
+@@ -635,6 +635,7 @@
      cwd;
      agentDir;
      settingsManager;
@@ -21,7 +21,7 @@ diff --git a/dist/core/package-manager.js b/dist/core/package-manager.js
      builtinExtensions;
      globalNpmRoot;
      globalNpmRootCommandKey;
-@@ -616,6 +617,7 @@
+@@ -643,6 +644,7 @@
          this.cwd = resolvePath(options.cwd);
          this.agentDir = resolvePath(options.agentDir);
          this.settingsManager = options.settingsManager;
@@ -29,22 +29,18 @@ diff --git a/dist/core/package-manager.js b/dist/core/package-manager.js
          this.builtinExtensions = options.builtinExtensions ?? [];
      }
      setProgressCallback(callback) {
-@@ -2020,10 +2022,12 @@
-             prompts: join(projectBaseDir, "prompts"),
-             themes: join(projectBaseDir, "themes"),
-         };
--        const userAgentsSkillsDir = join(getHomeDir(), ".agents", "skills");
-+        const userAgentsSkillsDir = this.includeHomeAgentSkills ? join(getHomeDir(), ".agents", "skills") : null;
+@@ -2137,7 +2139,9 @@
+         const userAgentsSkillsDir = join(getHomeDir(), ".agents", "skills");
          const projectTrusted = this.settingsManager.isProjectTrusted();
          const projectAgentsSkillDirs = projectTrusted
--            ? collectAncestorAgentsSkillDirs(this.cwd).filter((dir) => resolve(dir) !== resolve(userAgentsSkillsDir))
+-            ? collectAncestorAgentsSkillDirs(this.cwd).filter((dir) => !pathsEqual(dir, userAgentsSkillsDir))
 +            ? this.includeHomeAgentSkills
-+                ? collectAncestorAgentsSkillDirs(this.cwd).filter((dir) => resolve(dir) !== resolve(userAgentsSkillsDir))
++                ? collectAncestorAgentsSkillDirs(this.cwd).filter((dir) => !pathsEqual(dir, userAgentsSkillsDir))
 +                : [join(this.cwd, ".agents", "skills")]
              : [];
          const addResources = (resourceType, paths, metadata, overrides, baseDir) => {
              const target = this.getTargetMap(accumulator, resourceType);
-@@ -2055,13 +2059,15 @@
+@@ -2169,13 +2173,15 @@
          addResources("extensions", collectAutoExtensionEntries(userDirs.extensions), userMetadata, userOverrides.extensions, globalBaseDir);
          // User skills from ~/.pi/agent/
          addResources("skills", collectAutoSkillEntries(userDirs.skills, "pi"), userMetadata, userOverrides.skills, globalBaseDir);
@@ -70,7 +66,7 @@ diff --git a/dist/core/package-manager.js b/dist/core/package-manager.js
 diff --git a/dist/core/resource-loader.d.ts b/dist/core/resource-loader.d.ts
 --- a/dist/core/resource-loader.d.ts
 +++ b/dist/core/resource-loader.d.ts
-@@ -68,6 +68,8 @@
+@@ -70,6 +70,8 @@
      content: string;
  }>;
  export interface DefaultResourceLoaderOptions {
@@ -82,7 +78,7 @@ diff --git a/dist/core/resource-loader.d.ts b/dist/core/resource-loader.d.ts
 diff --git a/dist/core/resource-loader.js b/dist/core/resource-loader.js
 --- a/dist/core/resource-loader.js
 +++ b/dist/core/resource-loader.js
-@@ -250,6 +250,7 @@
+@@ -264,6 +264,7 @@
          this.extensionFactories = factories.filter((input) => !isBuiltinExtension(input));
          this.builtinExtensions = new Map(factories.filter(isBuiltinExtension).map((input) => [input.name, input]));
          this.packageManager = new DefaultPackageManager({

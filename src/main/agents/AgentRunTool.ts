@@ -1,4 +1,3 @@
-import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import type { AgentPermission } from '../../shared/contracts/agents';
@@ -23,7 +22,7 @@ export function createRunInProjectTool(start: ProjectRunStarter): ToolDefinition
     parameters: Type.Object({
       project: Type.String({ minLength: 1, maxLength: 4096, description: 'Trusted project folder name or absolute path.' }),
       request: Type.String({ minLength: 1, maxLength: 200_000, description: 'What to do in that project.' }),
-      mode: Type.Optional(StringEnum(['turn', 'goal'] as const)),
+      mode: Type.Optional(Type.Unsafe<'turn' | 'goal'>({ type: 'string', enum: ['turn', 'goal'] })),
     }, { additionalProperties: false }),
     executionMode: 'sequential',
     execute: async (_id, params, _signal, _update, ctx) => {

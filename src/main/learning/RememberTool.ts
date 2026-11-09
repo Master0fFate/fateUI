@@ -1,4 +1,3 @@
-import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import type { LearningScope } from '../../shared/contracts/learning';
@@ -20,8 +19,8 @@ export function createRememberTool(save: RememberSaver): ToolDefinition {
     description: 'Save one fact the user stated or confirmed as a pending draft in Memory Learning. Nothing is used until the user approves it. about "user": a lasting preference about how the user likes to work, saved to their profile for every chat; set topic. about "here": something specific to this chat. In an Agent chat that is the Agent\'s own memory; in a project chat it is that project\'s briefing.',
     parameters: Type.Object({
       fact: Type.String({ minLength: 1, maxLength: 200, description: 'One short sentence in the user\'s terms.' }),
-      about: StringEnum(['user', 'here'] as const),
-      topic: Type.Optional(StringEnum(topics, { description: 'Profile section for about "user".' })),
+      about: Type.Unsafe<'user' | 'here'>({ type: 'string', enum: ['user', 'here'] }),
+      topic: Type.Optional(Type.Unsafe<ProfileTopic>({ type: 'string', enum: topics, description: 'Profile section for about "user".' })),
     }, { additionalProperties: false }),
     executionMode: 'sequential',
     execute: async (_id, params, _signal, _update, ctx) => {

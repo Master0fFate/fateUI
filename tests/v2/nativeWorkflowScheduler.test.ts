@@ -74,9 +74,9 @@ describe('native task orchestration around existing SDK child execution', () => 
     let fail = true;
     const handle = storage.handle();
     const failing = new Proxy(handle, { get(target, key) {
-      if (key === 'commit') return async (writes: readonly StorageWrite[], context: typeof ctx) => {
-        if (fail && writes.some((write) => write.type === 'task' && write.value.kind === 'fate.workflow.node' && write.value.state.status === 'terminal')) { fail = false; throw new Error('Native receipt commit lost'); }
-        return target.commit(writes, context);
+      if (key === 'commit') return async (batches: readonly (readonly StorageWrite[])[], receive: (index: number, seq: number) => void, context: typeof ctx) => {
+        if (fail && batches.some((batch) => batch.some((write) => write.type === 'task' && write.value.kind === 'fate.workflow.node' && write.value.state.status === 'terminal'))) { fail = false; throw new Error('Native receipt commit lost'); }
+        return target.commit(batches, receive, context);
       };
       const value = Reflect.get(target, key, target); return typeof value === 'function' ? value.bind(target) : value;
     } });

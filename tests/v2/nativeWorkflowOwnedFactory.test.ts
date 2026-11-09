@@ -9,7 +9,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { OwnerLock } from '../../src/core/ownership/OwnerLock';
 import { DurableStorageCloseUncertainError, openOwnedDurableStorage } from '../../src/core/durable/OwnedDurableStorage';
 import { createOwnedNativeWorkflowSchedulerFactory, NativeWorkflowScheduler, type NativeWorkflowRun } from '../../src/main/pi/durable/NativeWorkflowScheduler';
-import { NativeExecutionUnknownError } from '../../src/main/pi/durable/NativeExecutionFence';
+import { NativeExecutionFence, NativeExecutionUnknownError } from '../../src/main/pi/durable/NativeExecutionFence';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -50,14 +50,32 @@ describe('owned native workflow factory and unsafe callbacks', () => {
     const backing = new MemoryStorage();
     let failed = false;
     const unsafe: unknown[] = [];
-    const storage = wrap(backing, { commit: async (writes: readonly StorageWrite[], ctx: typeof BACKGROUND_CONTEXT) => {
-      const value = await backing.commit(writes, ctx);
+    const storage = wrap(backing, { commit: async (batches: readonly (readonly StorageWrite[])[], receive: (index: number, seq: number) => void, ctx: typeof BACKGROUND_CONTEXT) => {
+      const value = await backing.commit(batches, receive, ctx);
       if (!failed) { failed = true; throw new Error('Lost bootstrap acknowledgement'); }
       return value;
     } });
     const scope = new NativeWorkflowScheduler({ ...input, storage, assertOwnership: async () => {}, onUnsafeFailure: (error) => { unsafe.push(error); } });
     await expect(scope.run(work, new AbortController().signal)).rejects.toBeInstanceOf(NativeExecutionUnknownError);
     expect(unsafe).toHaveLength(1);
+  });
+
+  it('never opens execution when the bootstrap native fence write is refused', async () => {
+    const backing = new MemoryStorage();
+    const storage = wrap(backing, { commit: async (batches: readonly (readonly StorageWrite[])[], receive: (index: number, seq: number) => void, ctx: typeof BACKGROUND_CONTEXT) =>
+      ({ ...await backing.commit(batches, receive, ctx), refused: new Error('Synthetic refused bootstrap fence write') }), close: async () => {} });
+    const scope = new NativeWorkflowScheduler({ ...input, storage, assertOwnership: async () => {} });
+    await expect(scope.run(work, new AbortController().signal)).rejects.toBeInstanceOf(NativeExecutionUnknownError);
+    expect((await backing.scanTasks({}, 10, undefined, BACKGROUND_CONTEXT)).items).toEqual([]);
+  });
+
+  it('poisons the fence when a guarded commit resolves a refusal and returns the result unchanged', async () => {
+    const refusal = new Error('Synthetic refused native commit');
+    const result = { stored: 1, refused: refusal };
+    const storage = wrap(new MemoryStorage(), { commit: async () => result });
+    const fence = new NativeExecutionFence(async () => {});
+    await expect(fence.guardStorage(storage).commit([], () => {}, BACKGROUND_CONTEXT)).resolves.toBe(result);
+    await expect(fence.assertAdmission()).rejects.toBeInstanceOf(NativeExecutionUnknownError);
   });
 
   it('does not classify pre-admission invalid input or normal pre-admission cancellation as unsafe', async () => {

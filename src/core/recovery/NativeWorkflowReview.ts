@@ -45,6 +45,13 @@ export class NativeWorkflowPermanentlyRetiredError extends Error {
   readonly code = 'NATIVE_WORKFLOW_PERMANENTLY_RETIRED';
   constructor() { super('This historical workflow identity is permanently retired with outcome UNKNOWN. Only a new explicit user request may create different work.'); }
 }
+export class NativeWorkflowReviewVersionMismatchError extends Error {
+  readonly code = 'NATIVE_WORKFLOW_REVIEW_VERSION_MISMATCH';
+  constructor(received: string, installed: string, records: string) {
+    super(`Workflow review receipts (review-*.json under ${records}) were written by pi-durable ${received}, but this build uses ${installed}. The SDK version changed, so the older receipt is invalid and no automatic repair exists. Manual recovery: stop the host, confirm the retained workflow evidence is still on disk, move the stale review-*.json receipt aside under ${records}, then re-run the stopped-owner review so a fresh receipt is prepared under ${installed}.`);
+    this.name = 'NativeWorkflowReviewVersionMismatchError';
+  }
+}
 function resource(paths: FatePaths): string { return paths.profileKind === 'server' ? path.dirname(paths.dataRoot) : paths.dataRoot; }
 function recordsRoot(paths: FatePaths): string { return path.join(paths.dataRoot, 'workflow-reviews', 'v1'); }
 function dataDirectory(paths: FatePaths): string { return path.join(paths.dataRoot, 'durable', 'v1'); }
@@ -100,6 +107,24 @@ function validatePlan(raw: NativeWorkflowReviewPlan): NativeWorkflowReviewPlan {
   }
   return plan;
 }
+const installedNativeSdkVersion = packageMetadata.dependencies['@earendil-works/pi-durable'];
+function receiptVersion(raw: unknown): string | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const plan = (raw as Record<string, unknown>).plan;
+  if (plan === null || typeof plan !== 'object' || Array.isArray(plan)) return undefined;
+  const version = (plan as Record<string, unknown>).nativeSdkVersion;
+  return typeof version === 'string' ? version : undefined;
+}
+function parseReceipt(raw: unknown, records: string): Receipt {
+  const parsed = receiptSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  const received = receiptVersion(raw);
+  if (received !== undefined && received !== installedNativeSdkVersion
+    && parsed.error.issues.some((issue) => issue.code === 'invalid_literal' && issue.path.at(-1) === 'nativeSdkVersion')) {
+    throw new NativeWorkflowReviewVersionMismatchError(received, installedNativeSdkVersion, records);
+  }
+  throw parsed.error;
+}
 async function receipts(options: OwnedWorkflowReviewOptions): Promise<Receipt[]> {
   await assertOwner(options);
   const root = recordsRoot(options.paths);
@@ -113,7 +138,7 @@ async function receipts(options: OwnedWorkflowReviewOptions): Promise<Receipt[]>
     if (found.length >= MAX_FILES || !entry.isFile() || !recordName.test(entry.name)) throw new Error('Workflow review records are incomplete, unsafe, or unsupported.');
     receiptBytes += (await fs.lstat(path.join(root, entry.name))).size;
     if (receiptBytes > 32 * 1024 * 1024) throw new Error('Workflow review record inventory exceeds its byte quota.');
-    const record = receiptSchema.parse(await readMigrationJson(path.join(root, entry.name), 8 * 1024 * 1024));
+    const record = parseReceipt(await readMigrationJson(path.join(root, entry.name), 8 * 1024 * 1024), root);
     validatePlan(record.plan);
     if (entry.name !== `review-${record.plan.id}.json` || record.planDigest !== migrationHash(JSON.stringify(record.plan))
       || JSON.stringify(record.plan.profile) !== JSON.stringify(expectedProfile)) throw new Error('Workflow review receipt identity or integrity is invalid.');
@@ -167,6 +192,7 @@ async function inspectReviewWithinScope(options: OwnedWorkflowReviewOptions): Pr
     return { ...scanned, blocked, acknowledgedGraphs, explicitWorkOnly: acknowledgedGraphs > 0, reviewHealth: 'ok',
       eligibleForAcknowledgment: !scanned.uncertainProfile && blocked.length > 0 && blocked.every((block) => Boolean(block.workflowId && block.parentSessionId && block.cwd && reasonCode(block.reason))) };
   } catch (error) {
+    if (error instanceof NativeWorkflowReviewVersionMismatchError) throw error;
     // A lost owner must not be converted to a benign inspection result.
     await assertOwner(options);
     return { blocked: [...scanned.blocked, { filename: recordsRoot(options.paths), reason: 'Workflow review evidence is invalid, changed, or incomplete; stopped-owner review is required.' }],

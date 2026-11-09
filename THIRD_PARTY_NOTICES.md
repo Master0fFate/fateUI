@@ -8,7 +8,7 @@ Fate UI bundles local Fontsource assets, including Roboto Flex (`@fontsource-var
 
 ## Pi native runtime
 
-Fate UI includes and interoperates with `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord`, all pinned to `1.4.0`, from the [Pi repository](https://github.com/earendil-works/pi). Each exact published package declares MIT. The full terms below were verified against [the upstream license at release commit 4a080252f06caf63a525d7873c5d94d3c23887e0](https://github.com/earendil-works/pi/blob/4a080252f06caf63a525d7873c5d94d3c23887e0/LICENSE). Fate carries two scoped SDK patches described in [SDK compatibility](docs/sdk-compatibility.md). Pi is distributed under the following MIT License:
+Fate UI includes and interoperates with `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, and `@earendil-works/chord`, all pinned to `1.5.0`, from the [Pi repository](https://github.com/earendil-works/pi). Each exact published package declares MIT. The full terms below were verified against [the upstream license at release commit f9a26365568127461c47a07a37dcb42c140a3ac5](https://github.com/earendil-works/pi/blob/f9a26365568127461c47a07a37dcb42c140a3ac5/LICENSE). Fate carries two scoped SDK patches described in [SDK compatibility](docs/sdk-compatibility.md). Pi is distributed under the following MIT License:
 
 ```text
 MIT License

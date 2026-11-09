@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { StringEnum } from '@earendil-works/pi-ai';
 import { defineTool, type AgentToolUpdateCallback, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { z } from 'zod';
@@ -277,7 +276,7 @@ export function createGoogleTools(account: GoogleAccount, host: GoogleToolHost):
       promptGuidelines: GUIDELINES,
       description: 'Create, update or delete one event on the primary Google Calendar. The user sees the exact change and must approve it; waits up to 30 minutes. Recurring events are not supported. Attendees are never notified. Times are YYYY-MM-DD for all-day events or RFC 3339 with an offset.',
       parameters: Type.Object({
-        action: StringEnum(['create', 'update', 'delete'] as const),
+        action: Type.Unsafe<'create' | 'update' | 'delete'>({ type: 'string', enum: ['create', 'update', 'delete'] }),
         eventId: Type.Optional(Type.String({ minLength: 1, maxLength: 1024, description: 'Required for update and delete.' })),
         summary: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
         start: Type.Optional(Type.String({ minLength: 10, maxLength: 40 })),

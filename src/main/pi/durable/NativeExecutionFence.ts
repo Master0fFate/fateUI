@@ -61,9 +61,10 @@ export async function inspectNativeExecutionBeforeOpen(storage: Storage, context
   if (state?.state === 'UNKNOWN') throw new NativeExecutionUnknownError(state.reason);
   if (state?.state === 'active' || taskIds.length > 0 || submissionIds.length > 0) {
     const value: NativeExecutionFenceState = { state: 'UNKNOWN', reason: 'Execution was interrupted before a quiescent durable receipt. Historical UNKNOWN is retained; automatic replay is prohibited.', taskIds, submissionIds };
-    await storage.commit([record === undefined
+    const refused = (await storage.commit([[record === undefined
       ? { type: 'document.create', record: { ...address, id: await storage.mintId<DocumentId>() }, content: { kind: 'base', version: 1, value } }
-      : { type: 'document.change', id: record.id, content: { kind: 'base', version: 1, value } }], context);
+      : { type: 'document.change', id: record.id, content: { kind: 'base', version: 1, value } }]], () => {}, context)).refused;
+    if (refused !== undefined) throw refused;
     throw new NativeExecutionUnknownError(value.reason);
   }
   if (record !== undefined && await storage.conversation(ROOT_CONVERSATION_ID, context)) {
@@ -75,7 +76,8 @@ export async function inspectNativeExecutionBeforeOpen(storage: Storage, context
     if ((await storage.scanConversations({}, 1, undefined, context)).items.length > 0) {
       throw new NativeExecutionUnknownError('This store was not created by the Fate native adapter. Explicit migration review is required; legacy JSONL sessions are not imported or rewritten.');
     }
-    await storage.commit([{ type: 'document.create', record: { ...address, id: await storage.mintId<DocumentId>() }, content: { kind: 'base', version: 1, value: { state: 'idle' } } }], context);
+    const refused = (await storage.commit([[{ type: 'document.create', record: { ...address, id: await storage.mintId<DocumentId>() }, content: { kind: 'base', version: 1, value: { state: 'idle' } } }]], () => {}, context)).refused;
+    if (refused !== undefined) throw refused;
   }
 }
 
@@ -115,8 +117,11 @@ export class NativeExecutionFence {
     return new Proxy(storage, { get: (target, property) => {
       const value: unknown = Reflect.get(target, property, target);
       if (property === 'commit') return async (...args: Parameters<Storage['commit']>) => {
-        try { return await target.commit(...args); }
+        let result: Awaited<ReturnType<Storage['commit']>>;
+        try { result = await target.commit(...args); }
         catch (error) { this.poison('A native storage commit has an unknown outcome; the execution is fenced.'); throw error; }
+        if (result.refused !== undefined) this.poison('A native storage commit was refused; its outcome is uncertain and the execution is fenced.');
+        return result;
       };
       return typeof value === 'function' ? value.bind(target) : value;
     } });

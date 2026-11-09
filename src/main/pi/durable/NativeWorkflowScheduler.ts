@@ -215,7 +215,7 @@ export class NativeWorkflowScheduler {
         },
       });
       registry.install(defineExtension({ name: 'fate.workflow', tasks: [graphTask, nodeTask] }));
-      const harness = await Harness.open(storage, { models: this.options.models, registry, onReport: report }, BACKGROUND_CONTEXT);
+      const harness = await Harness.open(storage, { models: this.options.models, registry, onReport: (value) => report(value.error, value) }, BACKGROUND_CONTEXT);
       this.#harness = harness;
       fence.bind(harness);
       const root = await harness.root(BACKGROUND_CONTEXT, { agent: { cwd: this.options.cwd, tools: [] } });
