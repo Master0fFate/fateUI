@@ -6,7 +6,7 @@ describe('SubagentProtocol tool schemas', () => {
     expect(workflowParameters).toMatchObject({
       type: 'object',
       required: ['action'],
-      properties: { action: { type: 'string', enum: ['start', 'list', 'status', 'cancel', 'resume'] } },
+      properties: { action: { type: 'string', enum: ['start', 'list', 'status', 'results', 'cancel', 'resume', 'finalize'] } },
       additionalProperties: false,
     });
     expect(workflowParameters).not.toHaveProperty('anyOf');

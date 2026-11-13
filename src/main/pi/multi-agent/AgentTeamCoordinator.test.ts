@@ -187,7 +187,7 @@ describe('AgentTeamCoordinator spawn preflight', () => {
     await expectRejectedSpawn({ [field as string]: value }, new RegExp(`${field} must be one of`));
   });
 
-  it('preserves the exact authenticated provider/model and explicit thinking without widening default authority', async () => {
+  it('preserves the exact authenticated provider/model and thinking while inheriting caller authority', async () => {
     const selected = { ...model, provider: 'authenticated-provider', id: 'vendor/model-v2' };
     const modelRuntime = runtime();
     vi.mocked(modelRuntime.getAvailable).mockResolvedValue([model, selected] as unknown as Awaited<ReturnType<ModelRuntime['getAvailable']>>);
@@ -196,7 +196,7 @@ describe('AgentTeamCoordinator spawn preflight', () => {
       task: 'inspect', model: { provider: selected.provider, id: selected.id }, thinkingLevel: 'high', tools: ['read'],
     }, 'exact-model-spawn', modelRuntime);
     await settle();
-    expect(createdInputs[0]).toMatchObject({ model: selected, thinkingLevel: 'high', permissionLevel: 'read-only', toolNames: ['read'] });
+    expect(createdInputs[0]).toMatchObject({ model: selected, thinkingLevel: 'high', permissionLevel: 'full-access', toolNames: ['read'] });
     expect(createdInputs[0]?.model).toBe(selected);
   });
 
@@ -244,7 +244,7 @@ describe('AgentTeamCoordinator spawn preflight', () => {
       task: 'inspect', model: { provider: model.provider, id: model.id }, tools: [], ...(thinkingLevel ? { thinkingLevel } : {}),
     }, 'no-thinking-spawn', modelRuntime);
     await settle();
-    expect(createdInputs[0]).toMatchObject({ thinkingLevel: 'off', toolNames: [], permissionLevel: 'read-only' });
+    expect(createdInputs[0]).toMatchObject({ thinkingLevel: 'off', toolNames: [], permissionLevel: 'full-access' });
   });
 });
 

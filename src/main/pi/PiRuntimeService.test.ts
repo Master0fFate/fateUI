@@ -3319,7 +3319,7 @@ describe('PiRuntimeService', () => {
     await service.dispose();
   });
 
-  it('queues immediate child notifications as follow-ups while streaming and leaves next-turn notifications passive', async () => {
+  it('keeps immediate child notifications passive while streaming and leaves next-turn notifications passive', async () => {
     const fake = fixture();
     const service = new PiRuntimeService(fake.adapter);
     await service.openProject({ path: '/project', name: 'project', trusted: true });
@@ -3334,7 +3334,7 @@ describe('PiRuntimeService', () => {
 
     expect(fake.session.sendCustomMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({
       customType: 'fate-subagent-notification', details: { runIds: ['run-1'] },
-    }), { triggerTurn: true, deliverAs: 'followUp' });
+    }), { triggerTurn: false });
     expect(fake.session.sendCustomMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
       customType: 'fate-subagent-notification', details: { runIds: ['run-2'] },
     }), { triggerTurn: false, deliverAs: 'nextTurn' });

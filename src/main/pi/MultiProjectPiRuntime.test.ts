@@ -41,7 +41,7 @@ function makeFakeRuntime(): AgentSessionRuntime {
   const session = {
     sessionId: 'session-1', sessionFile: undefined as string | undefined, model, thinkingLevel: 'medium', messages: [] as unknown[],
     agent: { state: { model, thinkingLevel: 'medium', messages: [], tools: [] }, subscribe: vi.fn(() => () => undefined), streamFunction: vi.fn() },
-    sessionManager: { getLeafId: vi.fn(() => 'leaf-1'), getBranch: vi.fn(() => []), getSessionName: vi.fn(() => undefined), appendSessionInfo: vi.fn(), appendCustomEntry: vi.fn() },
+    sessionManager: { getLeafId: vi.fn(() => 'leaf-1'), getBranch: vi.fn(() => []), getEntries: vi.fn(() => []), getSessionName: vi.fn(() => undefined), appendSessionInfo: vi.fn(), appendCustomEntry: vi.fn() },
     resourceLoader: { getSkills: () => ({ skills: [], diagnostics: [] }) },
     get isStreaming() { return false; },
     bindExtensions: vi.fn(async () => undefined),

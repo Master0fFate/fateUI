@@ -18,7 +18,7 @@ const modelRuntime = {
   getModel: vi.fn((provider: string, id: string) => [model, fallback].find((candidate) => candidate.provider === provider && candidate.id === id)),
 } as unknown as ModelRuntime;
 
-type PlannedResult = { status: 'completed' | 'failed'; text?: string; usage?: Partial<ReturnType<typeof emptyUsage>>; hold?: boolean; missingEnvelope?: boolean; resultTransportError?: string };
+type PlannedResult = { status: 'completed' | 'failed'; text?: string; usage?: Partial<ReturnType<typeof emptyUsage>>; hold?: boolean; missingEnvelope?: boolean; resultTransportError?: string; retainOutcome?: boolean };
 
 function harness(plans: PlannedResult[]) {
   let sequence = 0;
@@ -47,13 +47,14 @@ function harness(plans: PlannedResult[]) {
     }]),
     inspectNode: vi.fn((_root: string, target: string) => {
       if (target === 'root-node') return { teamId: 'team-1', node: { id: 'root-node', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' } };
-      return { teamId: 'team-1', node: nodes.get(target) };
+      return { teamId: 'team-1', node: nodes.get(target), resources: { turnActive: false, leaseHeld: false, streaming: false } };
     }),
     spawn: vi.fn(async (_root: string, input: any, _operationId: string, _runtime: ModelRuntime, _signal: AbortSignal, options: any) => {
       spawnInputs.push(structuredClone(input));
-      spawnOptions.push(structuredClone(options));
+      spawnOptions.push({ ...options });
       const plan = plans.shift() ?? { status: 'completed', text: 'ok' };
       const nodeId = `node-${++sequence}`;
+      const taskId = `task-${sequence}`;
       const selectedModel = input.model?.id === 'fallback' ? fallback : model;
       const node = {
         id: nodeId, depth: 1, path: `/root/${nodeId}`, handle: nodeId, displayName: input.name,
@@ -62,8 +63,16 @@ function harness(plans: PlannedResult[]) {
         usage: { ...emptyUsage(), turns: 1, ...(plan.usage ?? {}) },
       };
       nodes.set(nodeId, node);
-      let resolve!: (value: any) => void;
-      const promise = new Promise<any>((done) => { resolve = done; });
+      let settle!: (value: any) => void;
+      const promise = new Promise<any>((done) => { settle = done; });
+      const resolve = (value: any) => {
+        if (plan.retainOutcome !== false) options.onInitialTaskOutcome({
+          status: value.task.status,
+          ...(value.envelope ? { result: value.envelope.content } : {}),
+          ...(value.task.error ? { error: value.task.error } : {}),
+        });
+        settle(value);
+      };
       settlements.set(nodeId, { promise, resolve });
       if (!plan.hold) queueMicrotask(() => {
         node.status = plan.status === 'completed' ? 'ready' : 'failed';
@@ -78,9 +87,12 @@ function harness(plans: PlannedResult[]) {
           ...(plan.missingEnvelope ? {} : { envelope: { content: plan.text ?? '(no text output)' } }),
         });
       });
-      return { nodeId, path: node.path, handle: node.handle, status: node.status };
+      return { nodeId, taskId, path: node.path, handle: node.handle, status: node.status };
     }),
-    waitForTaskSettlement: vi.fn(async (_root: string, nodeId: string) => settlements.get(nodeId)!.promise),
+    waitForTaskSettlement: vi.fn(async (_root: string, nodeId: string, _timeout: number, _signal: AbortSignal, taskId?: string) => {
+      if (taskId !== `task-${nodeId.slice(5)}`) throw new Error('Unknown task');
+      return settlements.get(nodeId)!.promise;
+    }),
     subscribeNodeActivity: vi.fn((_root: string, nodeId: string, listener: () => void) => {
       let listeners = activityListeners.get(nodeId);
       if (!listeners) {
@@ -350,7 +362,7 @@ describe('AgentWorkflowCoordinator', () => {
 
   it('reports missing result transport as explicit non-retryable failure and applies dependency policy', async () => {
     const run = harness([
-      { status: 'completed', text: 'must not be trusted after transport failure', resultTransportError: 'FINAL_ANSWER transport failed after execution.' },
+      { status: 'completed', text: 'must not be trusted after transport failure', resultTransportError: 'FINAL_ANSWER transport failed after execution.', retainOutcome: false },
       { status: 'completed', text: 'ran under dependencyFailure=run' },
     ]);
     await execute(run.tool, 'missing-result', {
