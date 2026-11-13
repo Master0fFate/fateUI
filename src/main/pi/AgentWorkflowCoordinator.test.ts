@@ -43,11 +43,11 @@ function harness(plans: PlannedResult[]) {
     selectedTeamId: vi.fn(() => 'team-1'),
     getTeams: vi.fn(() => [{
       id: 'team-1', rootNodeId: 'root-node', selected: true, limits: { maxNodes: 16, maxActiveTurns: 3, maxMessages: 256, maxMessageBytes: 32 * 1024 },
-      nodes: [{ id: 'root-node', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' }, ...nodes.values()],
+      nodes: [{ id: 'root-node', path: '/root', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' }, ...nodes.values()],
       tasks, envelopes, operationReceipts,
     }]),
     inspectNode: vi.fn((_root: string, target: string) => {
-      if (target === 'root-node') return { teamId: 'team-1', node: { id: 'root-node', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' } };
+      if (target === 'root-node') return { teamId: 'team-1', node: { id: 'root-node', path: '/root', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' } };
       return { teamId: 'team-1', node: nodes.get(target), resources: { turnActive: false, leaseHeld: false, streaming: false } };
     }),
     spawn: vi.fn(async (_root: string, input: any, _operationId: string, _runtime: ModelRuntime, _signal: AbortSignal, options: any) => {
@@ -539,10 +539,10 @@ describe('AgentWorkflowCoordinator', () => {
     vi.mocked(resumed.teams.rootNodeId).mockReturnValue('selected-root');
     vi.mocked(resumed.teams.getTeams).mockImplementation(() => [{
       id: 'team-1', rootNodeId: 'root-node', selected: false, limits: { maxNodes: 16, maxActiveTurns: 3, maxMessages: 256, maxMessageBytes: 32 * 1024 },
-      nodes: [{ id: 'root-node', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' }], tasks: [], envelopes: [], operationReceipts: [],
+      nodes: [{ id: 'root-node', path: '/root', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' }], tasks: [], envelopes: [], operationReceipts: [],
     }, {
       id: 'team-2', rootNodeId: 'selected-root', selected: true, limits: { maxNodes: 16, maxActiveTurns: 3, maxMessages: 256, maxMessageBytes: 32 * 1024 },
-      nodes: [{ id: 'selected-root', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' }], tasks: [], envelopes: [], operationReceipts: [],
+      nodes: [{ id: 'selected-root', path: '/root', depth: 0, handle: 'root', displayName: 'Root', status: 'ready' }], tasks: [], envelopes: [], operationReceipts: [],
     }] as never);
     (resumed.session.sessionManager.getBranch as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => [{
       type: 'custom', customType: 'fate-subagent-workflow', data: { kind: 'fate-subagent-workflow-snapshot', version: 1, workflow: snapshot },
