@@ -300,6 +300,8 @@ async function sendMessage(page: Page, value: string, reply: string): Promise<vo
     return state.messages.some((message) => message.role === 'assistant' && message.text === expected);
   }, reply), READY).toBe(true);
   await expect.poll(() => page.evaluate(() => window.piDesktop.getRuntimeState().then((state) => state.activeSessionRunning ?? state.streaming)), READY).toBe(false);
+  const scrollbar = page.getByRole('scrollbar', { name: 'Conversation scroll position' });
+  if (await scrollbar.isVisible()) await scrollbar.press('End');
   await expect(page.getByText(reply, { exact: true }).first()).toBeVisible();
 }
 

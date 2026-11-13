@@ -698,6 +698,8 @@ export function createNetworkDispatcher(options: NetworkDispatcherOptions) {
         currentGeneration: current(context.identity, handle.id) === handle ? handle.generation : -1,
         controlGeneration: control.hasControl(context.identity, handle.id, command.controlGeneration) ? command.controlGeneration : null,
         permission: permission(context.identity, context.workspace, 'prompt') });
+      try { core.recovery.assertAdmission(); }
+      catch { throw new JournalRejected('STORAGE_UNAVAILABLE'); }
       let runtimeEntered = false;
       const result = await handle.admission.run(command, authorize, async ({ sessionId }) => {
         if (sessionId !== context.session.sessionId) throw new ProtocolFault('STALE_SESSION');
