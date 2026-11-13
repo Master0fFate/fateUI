@@ -47,7 +47,8 @@ async function fixture() {
   const admission = new WorkspaceAdmissionQueue(runtime, 3);
   const handle = { id: workspaceId, generation: 3, root, files, runtime, admission } as unknown as WorkspaceHandle;
   const core = { events: new WorkspaceEventHub(new ScopedDomainEvents(), epoch), workspaces: { resolve: () => handle }, runtime: { workspaceOrigin: () => ({ workspaceId, workspaceGeneration: 3 }),
-    peekWorkspace: () => runtime }, sessionPermissions: { assertHealthy: () => undefined } } as unknown as FateCore;
+    peekWorkspace: () => runtime }, sessionPermissions: { assertHealthy: () => undefined },
+    recovery: { assertAdmission: () => undefined } } as unknown as FateCore;
   let live = true;
   const identity = createAuthenticatedServerContext({ principalId, clientId, expiresAt: now + 3600_000 }, null);
   const foreign = createAuthenticatedServerContext({ principalId, clientId: '80000000-0000-4000-8000-000000000008', expiresAt: now + 3600_000 }, null);

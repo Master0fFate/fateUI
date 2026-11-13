@@ -180,7 +180,7 @@ export async function createCommonAdapterParityHarness(mode: ParityTransport, te
     const ipc = new CoreIpcAdapter(owner as unknown as ConstructorParameters<typeof CoreIpcAdapter>[0], registry, () => trustedSender)
       .forInvocation(() => documentCurrent);
     const journal = new CommandJournal({ root: path.join(scratch, 'command-journal'), serverEpoch: parityIds.epoch, now: () => parityTime });
-    const core = { events, workspaces: registry, runtime: owner, sessionPermissions: { assertHealthy: () => {
+    const core = { events, workspaces: registry, runtime: owner, recovery: { assertAdmission: () => undefined }, sessionPermissions: { assertHealthy: () => {
       if (!permissionHealthy) throw new Error('Synthetic permission store unavailable');
     } } } as unknown as FateCore;
     const network = createNetworkDispatcher({ core, tickets: liveTickets, journal, serverEpoch: parityIds.epoch,

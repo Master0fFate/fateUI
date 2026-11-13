@@ -52,9 +52,10 @@ function networkFixture(mayTakeOver?: () => boolean, journal?: CommandJournal) {
     project: { path: root, name: 'Synthetic control workspace', trusted: true }, sessionId, sessionFile: null,
     streaming: false, model: null, models: [], thinkingLevel: 'medium' as const, permissionLevel: 'edit' as const,
     messages: [], error: null, sessionOperation: false, eventCursor: 0 }) } satisfies Pick<WorkspaceHandle['runtime'], 'getState' | 'prompt'>;
-  const admission = new WorkspaceAdmissionQueue(runtime, 3, () => {
+  const assertAdmission = () => {
     if (!storageOpen) throw new Error('STORAGE_UNAVAILABLE: a required lifecycle checkpoint is pending.');
-  });
+  };
+  const admission = new WorkspaceAdmissionQueue(runtime, 3, assertAdmission);
   const handle = { id: workspaceId, generation: 3, root, runtime, files: { getRoot: () => root }, admission } as unknown as WorkspaceHandle;
   const tickets = { isLive: (context: unknown) => live.has(context as typeof a),
     isMember: (context: unknown, requestedRoot: string) => live.has(context as typeof a) && requestedRoot === root } as unknown as ClientTickets;
@@ -62,7 +63,7 @@ function networkFixture(mayTakeOver?: () => boolean, journal?: CommandJournal) {
     if (!live.has(context as typeof a) || id !== workspaceId || generation !== 3) throw new Error('Not a member.');
     return handle;
   } }, runtime: { workspaceOrigin: () => ({ workspaceId, workspaceGeneration: 3 }), peekWorkspace: () => handle.runtime },
-  sessionPermissions: { assertHealthy: () => undefined } } as unknown as FateCore;
+  sessionPermissions: { assertHealthy: () => undefined }, recovery: { assertAdmission } } as unknown as FateCore;
   const service = createNetworkDispatcher({ core, tickets, journal: journal ?? {} as CommandJournal, serverEpoch: epoch,
     registeredRoots: [root], hostId: principalId, appVersion: '2.0.0', now: () => now,
     ...(mayTakeOver ? { mayTakeOver } : {}) });
