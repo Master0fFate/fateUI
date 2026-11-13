@@ -527,6 +527,7 @@ describe('AgentWorkflowCoordinator', () => {
     });
     const workflowId = (started.details as { workflowIds: string[] }).workflowIds[0]!;
     await vi.waitFor(() => expect(active.teams.spawn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(active.coordinator.getWorkflowViews('parent-1')[0]?.nodes[0]?.runId).toBe('node-1'));
     await execute(active.tool, 'cancel', { action: 'cancel', workflowId, reason: 'Stop graph' });
     expect(active.interrupt).toHaveBeenCalledWith('root-node', 'node-1', 'Stop graph');
     expect(active.release).toHaveBeenCalledWith('root-node', 'node-1', true);
@@ -573,13 +574,23 @@ describe('AgentWorkflowCoordinator', () => {
     const run = harness([{ status: 'completed', hold: true }]);
     await execute(run.tool, 'cancel-error-start', { action: 'start', nodes: [{ id: 'held', task: 'Wait' }] });
     await vi.waitFor(() => expect(run.teams.spawn).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(run.coordinator.getWorkflowViews('parent-1')[0]?.nodes[0]?.runId).toBe('node-1'));
     const interrupt = run.interrupt.getMockImplementation()!;
     run.interrupt.mockImplementation(async (...args: Parameters<typeof interrupt>) => {
       await interrupt(...args);
       throw new Error('interrupt failed after settlement');
     });
     const workflowId = run.coordinator.getWorkflowViews('parent-1')[0]!.id;
-    await expect(execute(run.tool, 'cancel-error', { action: 'cancel', workflowId })).rejects.toThrow('interrupt failed after settlement');
+    await expect(execute(run.tool, 'cancel-error', { action: 'cancel', workflowId })).rejects.toMatchObject({
+      name: 'AggregateError',
+      errors: expect.arrayContaining([expect.objectContaining({
+        name: 'AggregateError',
+        errors: expect.arrayContaining([expect.objectContaining({
+          name: 'AggregateError',
+          errors: expect.arrayContaining([expect.objectContaining({ message: 'interrupt failed after settlement' })]),
+        })]),
+      })]),
+    });
   });
 
   it('recycles real Team capacity across a sequential graph larger than sixteen nodes', async () => {
