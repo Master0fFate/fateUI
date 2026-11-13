@@ -285,13 +285,17 @@ export default function (pi) {
 async function sendMessage(page: Page, value: string, reply: string): Promise<void> {
   const composer = page.getByRole('textbox', { name: 'Message Pi', exact: true });
   await composer.fill(value);
-  await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  try { await expect(composer).toHaveValue(''); }
-  catch (error) {
+  try {
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await expect(composer).toHaveValue('');
+  } catch (error) {
     const state = await page.evaluate(async () => {
       const runtime = await window.piDesktop.getRuntimeState();
+      const button = document.querySelector<HTMLButtonElement>('.send-button');
       return { status: runtime.status, error: runtime.error, streaming: runtime.streaming, activeSessionRunning: runtime.activeSessionRunning,
-        model: runtime.model, messages: runtime.messages.slice(-2).map((message) => ({ role: message.role, text: message.text.slice(0, 500) })) };
+        model: runtime.model, messages: runtime.messages.slice(-2).map((message) => ({ role: message.role, text: message.text.slice(0, 500) })),
+        composerError: document.querySelector('.composer-error')?.textContent?.slice(0, 500),
+        sendButton: button ? { disabled: button.disabled, label: button.getAttribute('aria-label'), mode: button.dataset.mode } : null };
     });
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nComposer send state: ${JSON.stringify(state)}`, { cause: error });
   }
@@ -612,7 +616,19 @@ test('production workflow results retain full large outcomes and errors across r
     launched = await launchProduction(fixture);
     application = launched.application;
     page = launched.page;
-    await page.evaluate((id) => window.piDesktop.switchSession(id), sessionId);
+    await page.bringToFront();
+    const sessions = await page.evaluate(() => window.piDesktop.listSessions());
+    const saved = sessions.find((session) => session.id === sessionId);
+    expect(saved).toBeDefined();
+    expect(sessions.filter((session) => session.title === saved!.title)).toHaveLength(1);
+    const row = page.locator('.session-row').filter({ has: page.getByText(saved!.title, { exact: true }) });
+    await expect(row).toHaveCount(1);
+    if (await row.getAttribute('aria-current') !== 'page') await row.locator('button.session-open, button.session-preview-open').click();
+    await expect(row).toHaveAttribute('aria-current', 'page');
+    await expect.poll(() => page.evaluate(() => window.piDesktop.getRuntimeState().then((state) => state.sessionId)), READY).toBe(sessionId);
+    const scrollbar = page.getByRole('scrollbar', { name: 'Conversation scroll position' });
+    if (await scrollbar.isVisible()) await scrollbar.press('End');
+    await expect(page.getByText('e2e-results:unknown-node', { exact: true })).toBeVisible(READY);
     const afterRestart = await retrieveResults(page, recordsPath, 'restart-full', { action: 'results', workflowId: workflow.id });
     expect(afterRestart.error).toBe(false);
     expect(JSON.parse(afterRestart.text)).toEqual(retained);
