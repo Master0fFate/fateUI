@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { AgentSession, ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import type { PiEvent } from '../../shared/contracts/ipc';
+import { AGENT_TEAM_MAX_WAIT_MS } from '../../shared/contracts/multiAgent';
 import { emptyUsage, type SubagentChildSessionFactory } from './SubagentSessionFactory';
 import type { SubagentWorkflow } from './SubagentWorkflow';
 import { AgentWorkflowCoordinator } from './AgentWorkflowCoordinator';
@@ -23,7 +24,7 @@ type PlannedResult = { status: 'completed' | 'failed'; text?: string; usage?: Pa
 function harness(plans: PlannedResult[]) {
   let sequence = 0;
   const nodes = new Map<string, any>();
-  const settlements = new Map<string, { promise: Promise<any>; resolve: (value: any) => void }>();
+  const settlements = new Map<string, { promise: Promise<any>; resolve: (value: any) => void; value?: any }>();
   const activityListeners = new Map<string, Set<() => void>>();
   const spawnInputs: any[] = [];
   const spawnOptions: any[] = [];
@@ -65,18 +66,23 @@ function harness(plans: PlannedResult[]) {
       nodes.set(nodeId, node);
       let settle!: (value: any) => void;
       const promise = new Promise<any>((done) => { settle = done; });
-      const resolve = (value: any) => {
-        if (plan.retainOutcome !== false) options.onInitialTaskOutcome({
-          status: value.task.status,
-          ...(value.envelope ? { result: value.envelope.content } : {}),
-          ...(value.task.error ? { error: value.task.error } : {}),
-        });
-        settle(value);
+      const settlement: { promise: Promise<any>; resolve: (value: any) => void; value?: any } = {
+        promise,
+        resolve: (value: any) => {
+          if (settlement.value) return;
+          settlement.value = value;
+          if (plan.retainOutcome !== false) options.onInitialTaskOutcome({
+            status: value.task.status,
+            ...(value.envelope ? { result: value.envelope.content } : {}),
+            ...(value.task.error ? { error: value.task.error } : {}),
+          });
+          settle(value);
+        },
       };
-      settlements.set(nodeId, { promise, resolve });
+      settlements.set(nodeId, settlement);
       if (!plan.hold) queueMicrotask(() => {
         node.status = plan.status === 'completed' ? 'ready' : 'failed';
-        resolve({
+        settlement.resolve({
           task: {
             status: plan.status === 'completed' ? 'completed' : 'failed',
             ...(plan.status === 'failed' ? { error: plan.text ?? 'failed' } : {}),
@@ -89,9 +95,29 @@ function harness(plans: PlannedResult[]) {
       });
       return { nodeId, taskId, path: node.path, handle: node.handle, status: node.status };
     }),
-    waitForTaskSettlement: vi.fn(async (_root: string, nodeId: string, _timeout: number, _signal: AbortSignal, taskId?: string) => {
+    waitForTaskSettlement: vi.fn(async (_root: string, nodeId: string, timeout: number, signal?: AbortSignal, taskId?: string) => {
       if (taskId !== `task-${nodeId.slice(5)}`) throw new Error('Unknown task');
-      return settlements.get(nodeId)!.promise;
+      const settlement = settlements.get(nodeId)!;
+      if (settlement.value) return settlement.value;
+      const bounded = Math.max(0, Math.min(AGENT_TEAM_MAX_WAIT_MS + 60_000, timeout));
+      if (bounded === 0) return null;
+      return new Promise((resolve, reject) => {
+        let finished = false;
+        const finish = () => {
+          if (finished) return false;
+          finished = true;
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', abort);
+          return true;
+        };
+        const abort = () => {
+          if (finish()) reject(Object.assign(new Error('Agent task settlement wait aborted.'), { name: 'AbortError' }));
+        };
+        const timer = setTimeout(() => { if (finish()) resolve(null); }, bounded);
+        settlement.promise.then((value) => { if (finish()) resolve(value); });
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
+      });
     }),
     subscribeNodeActivity: vi.fn((_root: string, nodeId: string, listener: () => void) => {
       let listeners = activityListeners.get(nodeId);
