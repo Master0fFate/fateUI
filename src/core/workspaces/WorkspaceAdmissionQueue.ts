@@ -39,7 +39,8 @@ export class WorkspaceAdmissionQueue<Runtime extends RuntimeSelectionView = Runt
   private revision = 0;
 
   constructor(private readonly runtime: Runtime, private readonly generation: number,
-    private readonly assertStorageAdmission: (sessionId: string | null, principalId?: string) => void = () => undefined) {
+    private readonly assertStorageAdmission: (sessionId: string | null, principalId?: string) => void = () => undefined,
+    private readonly waitForStorageAdmission: () => Promise<void> | undefined = () => undefined) {
     this.selected = runtime.getState(false).sessionId;
   }
 
@@ -76,6 +77,16 @@ export class WorkspaceAdmissionQueue<Runtime extends RuntimeSelectionView = Runt
   run<T>(command: SessionAdmission, authorize: () => AdmissionAuthority,
     perform: (captured: { runtime: Runtime; sessionId: string | null }) => T | Promise<T>,
     select = false, allowStop = false): Promise<T> {
+    if (!allowStop) {
+      const pending = this.waitForStorageAdmission();
+      if (pending) return pending.then(() => this.enqueue(command, authorize, perform, select, allowStop));
+    }
+    return this.enqueue(command, authorize, perform, select, allowStop);
+  }
+
+  private enqueue<T>(command: SessionAdmission, authorize: () => AdmissionAuthority,
+    perform: (captured: { runtime: Runtime; sessionId: string | null }) => T | Promise<T>,
+    select: boolean, allowStop: boolean): Promise<T> {
     if (!allowStop) {
       try { this.assertStorageAdmission(select ? null : command.expectedSessionId, authorize().principalId); }
       catch (error) { return Promise.reject(error); }

@@ -2,7 +2,7 @@
 
 Fate UI exposes one canonical agent lifecycle; there is no selectable Legacy/Agent Teams protocol mode. A root can create children, and children can create grandchildren within the same provider-neutral Team executor. The **Agents** inspector shows the tree, task state, profile/model, usage, messages, and writer ownership. It also lets you message, follow up with, interrupt, or close agents. Conversations and events persist under `~/.pi/fateGUI/agent-teams/`; after restart, in-flight work is marked interrupted and remains visible through the same lifecycle. Team structure, task, and message-envelope changes are saved immediately; tool calls, model replies, and model errors are saved at most once per second, so a crash can drop up to one second of those activity rows.
 
-`agent_workflow` schedules dependency graphs through that same Team executor rather than a separate child-session engine. A paused saved workflow never resumes implicitly: explicitly resume it to admit its remaining work through the current executor. Saved standalone records from the former engine remain historical and read-only, except that their display names can still be renamed. Their persisted source identities and archive data are preserved.
+`agent_workflow` schedules dependency graphs through that same Team executor rather than a separate child-session engine. Workflow workers retain the ordinary child-scoped collaboration tools: they can communicate, delegate, and synthesize their descendants' results before their graph node completes. A paused saved workflow never resumes implicitly: explicitly resume it to admit its remaining work through the current executor. Saved standalone records from the former engine remain historical and read-only, except that their display names can still be renamed. Their persisted source identities and archive data are preserved.
 
 A small dependency workflow looks like this:
 
@@ -29,19 +29,47 @@ A small dependency workflow looks like this:
 }
 ```
 
-`includeDependencyResults` transfers bounded result **text** as untrusted evidence; it does not copy files or integrate an isolated worktree. Files written in a shared checkout are already shared, while worktree changes require explicit review and integration as described below. Positive runtime and idle thresholds are advisory inspector checkpoints, not termination clocks. A positive workflow mailbox TTL keeps a successfully settled Team node available for `followup_task`; Team owns expiry and resets the idle deadline after an accepted follow-up. Zero disables retention and releases capacity after safe settlement.
+`includeDependencyResults` transfers dependency result **text** as untrusted evidence; it does not copy files or integrate an isolated worktree. Files written in a shared checkout are already shared, while worktree changes require explicit review and integration as described below. Positive runtime and idle thresholds are advisory inspector checkpoints, not termination clocks. A positive workflow mailbox TTL keeps a successfully settled Team node available for `followup_task`; Team owns expiry and resets the idle deadline after an accepted follow-up. Zero disables retention and releases capacity after safe settlement.
 
-Teams nest agents up to depth 16. There is no cap on agent count or concurrent turns per team, and `agent_workflow` runs every ready node in parallel unless `maxConcurrency` says otherwise. Writer leases are **per checkout**: shared-checkout writers serialize, while agents in separate worktrees can write concurrently. Descendant permissions and ordinary tools can only narrow the direct caller's authority.
+Teams nest agents up to depth 16. There is no cap on agent count or concurrent turns per team. `agent_workflow` defaults to `maxConcurrency: 256`; an explicit value controls that graph's parallelism. The existing native Durable graph format admits up to 256 nodes per graph; that is separate from Team count and the legacy scheduler. Writer leases are **per checkout**: shared-checkout writers serialize, while agents in separate worktrees can write concurrently. Omitted child permissions inherit the direct caller's effective authority, narrowed by the current root and Goal policy. Explicit permissions and ordinary tools can only narrow that authority.
+
+### Hyp3rc0d3
+
+Open **Model and reasoning settings** and toggle **Hyp3rc0d3** beside Reasoning. A prompt beginning with `hypercode:` or `hyp3rc0d3:` also enables it when that prompt is admitted. Empty, rejected, or extension-handled prompts do not enable it.
+
+The mode supports reasoning and non-reasoning models without changing the selected model or effort. It uses direct execution for small work and staged, parallel agent graphs when delegation helps. Plans can evolve into further graphs rather than requiring one complete upfront graph. Missing decisions can be clarified while independent work continues.
+
+The setting persists in the session's existing JSONL metadata. Switching sessions, eviction, restart, or navigating an older conversation branch does not undo it. Forks and clones inherit the source's current setting; independent new sessions start off. Disabling the mode persists and affects future orchestration; it does not cancel already-admitted graphs.
+
+Hyp3rc0d3 adds no concurrency clamp, retained-child quota, mandatory model capability, budget, timeout, or approval gate. Caller-selected `maxConcurrency`, ordinary permissions, Goal strategy, workspace preference, and the underlying executor's existing contracts still apply.
 
 ### Getting results back
 
-A settled agent's final answer stays readable after the agent is released. `wait_agent` returns the latest answer of each child that changed, and `inspect_agent` returns it for any owned descendant, so results never depend on a notification having been delivered. In `agent_workflow`, the graph-level `notifyParent` sends one message when the graph settles and includes the result text of every node that has no `notifyParent` of its own; a node-level `notifyParent` delivers that node's answer separately as it settles. `read_monitor_dashboard` stays lifecycle metadata only.
+Before a final report on delegated work, `agent_workflow` action `finalize` checks all teams and workflows in the root session. It returns `wait`, `yield`, `needs_attention`, or `ready` with task outcomes and workflow result references. Use bounded `wait_agent` calls with `stateOnly: true` for active direct children; this ignores mailbox-only activity while they remain busy. A writer-lease yield is a progress-only turn, not a final report. Review paused or unresolved work explicitly; after reviewing an interrupted agent, use `followup_task` or close or release it. Collect the required results and recheck after further delegation. This is cooperative guidance, not a lifecycle lock.
+
+A settled agent's final answer stays readable after the agent is released. `wait_agent` returns the latest answer of each child that changed, and `inspect_agent` returns it for any owned descendant. `agent_workflow` keeps full workflow-node outcomes independently of bounded Team message envelopes and notification previews. `list` and `status` remain lightweight metadata; use `results` for retained output, including after reopening the saved session:
+
+```json
+{
+  "action": "results",
+  "workflowId": "workflow-id",
+  "nodeIds": ["inspect"],
+  "textOffset": 0,
+  "textLength": 12000
+}
+```
+
+Node selection and text ranges are optional. Omit `textLength` to retrieve the full remainder; there is no imposed result-page size. Offsets use UTF-16 character positions. Each node includes `result`, `error`, their original lengths, and `resultRange`/`errorRange` with `nextOffset` for continuation. `null` means absent; `""` means present but empty. Unknown node IDs are reported rather than silently omitted. Historical text already truncated by an older version cannot be reconstructed.
+
+Graph-level `notifyParent` sends one completion preview for nodes with no notification of their own; node-level notifications deliver their previews individually. Omitted graph notification defaults to `immediate` in Hyp3rc0d3 and remains `never` otherwise. Explicit `never` and `next-turn` are preserved. Immediate completions arriving during an active parent turn are attached as context after its current tool results without starting another turn; idle parents can still be awakened. Delivery diagnostics appear in `results.notificationDeliveryErrors` and tool status summaries without changing successful execution into a failure or retry. `read_monitor_dashboard` stays lifecycle metadata only.
+
+Routing uses only configured models and attempts. `maxAttempts` defaults to one. Explicitly requesting more permits whole-task retries after confirmed failures, so file changes and other effects may repeat; a completed task is not rerun merely because result delivery failed.
 
 A `thinkingLevel` the selected model does not support is clamped to the nearest supported level instead of rejecting the launch.
 
 ### Global workspace preference
 
-Set the workspace policy once in **Settings → Agent → Agents**. It applies across projects and newly created agents; there is no manual team setup in **Run → Agents**.
+Set the workspace policy once in **Settings → AI settings → Agent workspaces**. It applies across projects and newly created agents; there is no manual team setup in **Run → Agents**.
 
 - **Prefer isolated worktrees** starts on. New agents use separate Git checkouts by default. Turn it off to prefer sharing the direct parent's checkout. Those checkouts are ordinary Git worktrees created under the project's own `.fate/worktrees/` directory (excluded through `.git/info/exclude`); the server profile stores them under its data root.
 - **Strict mode** starts off. With it off, the parent can explicitly choose the other mode for a particular task. With it on, Fate refuses incompatible launches and resumed turns in the backend; an agent cannot change this policy through a team tool.

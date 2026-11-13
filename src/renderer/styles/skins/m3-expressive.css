@@ -117,6 +117,7 @@
 :root[data-skin="m3-expressive"] .effort-slider:hover .effort-slider-thumb, :root[data-skin="m3-expressive"] .effort-slider:focus-visible .effort-slider-thumb { transform: translate(-50%, -50%) scaleX(1.4); }
 :root[data-skin="m3-expressive"] .effort-slider-value { font-weight: 600; letter-spacing: .02em; text-transform: none; }
 :root[data-skin="m3-expressive"] .model-setting-toggle { border-radius: 50%; }
+:root[data-skin="m3-expressive"] .hyp3rc0d3-toggle { padding-inline-start: 10px; font-size: 10px; }
 :root[data-skin="m3-expressive"] .composer-toolbar :is(.composer-project-button, .composer-branch) { min-height: 34px; padding-inline: 12px; border-radius: 24px; background: var(--theme-raised); }
 :root[data-skin="m3-expressive"] .composer-toolbar button:is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button, .learning-indicator) { display: grid; box-sizing: border-box; flex: 0 0 var(--m3-action-size); width: var(--m3-action-size); min-width: var(--m3-action-size); height: var(--m3-action-size); min-height: var(--m3-action-size); place-items: center; border-radius: 50%; background: var(--theme-raised); padding: 0; }
 :root[data-skin="m3-expressive"] .composer-toolbar .tooltip-trigger:has(> :is(.composer-icon-action, .composer-tools-toggle, .permission-toggle, .voice-button, .learning-indicator)) { flex: 0 0 var(--m3-action-size); min-width: var(--m3-action-size); }

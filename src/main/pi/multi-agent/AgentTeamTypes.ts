@@ -14,6 +14,13 @@ export interface LiveMessageReply {
   createdAt: number;
 }
 
+export interface AgentTaskOutcome {
+  status: 'completed' | 'failed' | 'interrupted' | 'cancelled';
+  result?: string;
+  error?: string;
+  executionUnknown?: boolean;
+}
+
 export interface AgentNodeRuntime {
   session: AgentSession | null;
   sessionFile?: string;
@@ -25,6 +32,7 @@ export interface AgentNodeRuntime {
   initialPrompt?: string;
   /** Abort signal for the prevalidated initial task. */
   initialSignal?: AbortSignal;
+  initialTaskOutcome?: { taskId: string; callback: (outcome: AgentTaskOutcome) => void };
   turn?: Promise<void>;
   /** Identity fence for the executable turn currently owning `turn` and `lease`. */
   turnId?: string;
@@ -54,6 +62,7 @@ export interface AgentTeamRuntime {
 
 export interface SpawnAgentOptions {
   allowDelegation?: boolean;
+  onInitialTaskOutcome?: (outcome: AgentTaskOutcome) => void;
   bypassGoalPolicy?: boolean;
   /** Persist the result without notifying the requester when false. Defaults to true. */
   deliverFinalAnswer?: boolean;

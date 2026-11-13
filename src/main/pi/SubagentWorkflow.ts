@@ -12,6 +12,7 @@ import { allocateSubagentIdentity, ensureSubagentIdentity } from '../../shared/s
 import { nativeWorkflowValue, type NativeWorkflowScheduler, type NativeWorkflowNodeResult } from './durable/NativeWorkflowScheduler';
 import { safeText } from './PiEventNormalizer';
 import { emptyUsage, addUsage } from './SubagentSessionFactory';
+import type { AgentTaskOutcome } from './multi-agent/AgentTeamTypes';
 import {
   deterministicWorkflowId,
   normalizeWorkflowStart,
@@ -42,6 +43,45 @@ export interface SubagentWorkflowExecutionBinding {
   rootNodeId: string;
 }
 
+export interface WorkflowNotificationDeliveryError {
+  nodeId?: string;
+  phase: 'team-result' | 'node-notification' | 'workflow-notification';
+  error: string;
+  timestamp: number;
+}
+
+export interface SubagentWorkflowRun extends SubagentRun {
+  retainedOutcome?: Pick<AgentTaskOutcome, 'result' | 'error'>;
+  notificationDeliveryErrors?: WorkflowNotificationDeliveryError[];
+}
+
+export interface WorkflowTextRange {
+  offset: number;
+  length: number;
+  nextOffset: number | null;
+}
+
+export interface WorkflowResults {
+  workflowId: string;
+  status: SubagentWorkflowStatus;
+  notificationDeliveryErrors: WorkflowNotificationDeliveryError[];
+  nodes: {
+    id: string;
+    status: SubagentWorkflowNodeStatus;
+    runId: string | null;
+    result: string | null;
+    error: string | null;
+    resultLength: number | null;
+    errorLength: number | null;
+    resultRange: WorkflowTextRange | null;
+    errorRange: WorkflowTextRange | null;
+  }[];
+}
+
+type WorkflowPresentation = Pick<SubagentWorkflow, 'id' | 'status' | 'notificationDeliveryErrors'> & {
+  nodes: readonly Pick<SubagentWorkflowView['nodes'][number], 'id' | 'status' | 'handle' | 'displayName' | 'runId' | 'dependsOn' | 'error'>[];
+};
+
 export interface SubagentWorkflow {
   id: string;
   parentSessionId: string;
@@ -56,6 +96,7 @@ export interface SubagentWorkflow {
   usage: SubagentUsage;
   nodes: SubagentWorkflowNode[];
   livenessReports?: SubagentWorkflowLivenessReport[];
+  notificationDeliveryErrors?: WorkflowNotificationDeliveryError[];
   createdAt: number;
   updatedAt: number;
   endedAt?: number;
@@ -76,7 +117,7 @@ interface WorkflowHost {
     request: WorkflowNodeRequest,
     modelRuntime: ModelRuntime,
     signal: AbortSignal,
-  ) => Promise<{ runId: string; completion: Promise<SubagentRun> }>;
+  ) => Promise<{ runId: string; completion: Promise<SubagentWorkflowRun> }>;
   cancelRuns: (parentSessionId: string, runIds: string[], reason: string) => Promise<void>;
   executionConcurrency?: (workflow: SubagentWorkflow) => number;
   usedHandles: (parentSessionId: string) => string[];
@@ -102,6 +143,7 @@ function cloneWorkflow(workflow: SubagentWorkflow): SubagentWorkflow {
     usage: { ...workflow.usage },
     ...(workflow.budget ? { budget: { ...workflow.budget } } : {}),
     ...(workflow.livenessReports ? { livenessReports: workflow.livenessReports.map((report) => structuredClone(report)) } : {}),
+    ...(workflow.notificationDeliveryErrors ? { notificationDeliveryErrors: workflow.notificationDeliveryErrors.map((error) => ({ ...error })) } : {}),
     nodes: workflow.nodes.map((node) => ({
       ...node,
       dependsOn: [...node.dependsOn],
@@ -182,6 +224,37 @@ function workflowResultsText(workflow: SubagentWorkflow): string {
   return `\n\nResults of nodes without their own notifyParent:\n\n${sections.join('\n\n')}`;
 }
 
+function textSlice(text: string | undefined, offset: number, length?: number): { text: string | null; length: number | null; range: WorkflowTextRange | null } {
+  if (text === undefined) return { text: null, length: null, range: null };
+  const start = Math.min(offset, text.length);
+  const returnedLength = length === undefined ? text.length - start : Math.min(length, text.length - start);
+  const end = start + returnedLength;
+  return { text: text.slice(start, end), length: text.length, range: { offset: start, length: returnedLength, nextOffset: end < text.length ? end : null } };
+}
+
+function nativeRun(result: NativeWorkflowNodeResult): SubagentWorkflowRun | undefined {
+  if (result.value?.run === undefined) return undefined;
+  const run: SubagentWorkflowRun = subagentRunSchema.parse(result.value.run);
+  const outcome = result.value.retainedOutcome;
+  if (outcome !== undefined) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)
+      || (outcome.result !== undefined && typeof outcome.result !== 'string')
+      || (outcome.error !== undefined && typeof outcome.error !== 'string')) throw new Error('Native workflow retained outcome is invalid.');
+    run.retainedOutcome = {
+      ...(typeof outcome.result === 'string' ? { result: outcome.result } : {}),
+      ...(typeof outcome.error === 'string' ? { error: outcome.error } : {}),
+    };
+  }
+  if (Array.isArray(result.value.notificationDeliveryErrors)) run.notificationDeliveryErrors = result.value.notificationDeliveryErrors as unknown as WorkflowNotificationDeliveryError[];
+  return run;
+}
+
+function applyRunOutcome(node: SubagentWorkflowNode, run: SubagentWorkflowRun): void {
+  const outcome = run.retainedOutcome ?? run;
+  if (outcome.result === undefined) delete node.result; else node.result = outcome.result;
+  if (outcome.error === undefined) delete node.error; else node.error = outcome.error;
+}
+
 export class SubagentWorkflowEngine {
   private readonly workflowsByParent = new Map<string, Map<string, SubagentWorkflow>>();
   private readonly active = new Map<string, ActiveWorkflow>();
@@ -197,6 +270,49 @@ export class SubagentWorkflowEngine {
   getWorkflow(parentSessionId: string, workflowId: string): SubagentWorkflow | undefined {
     const workflow = this.workflowsByParent.get(parentSessionId)?.get(workflowId);
     return workflow ? cloneWorkflow(workflow) : undefined;
+  }
+
+  getWorkflowViews(parentSessionId: string): SubagentWorkflowView[] {
+    return [...(this.workflowsByParent.get(parentSessionId)?.values() ?? [])]
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .map(workflowView);
+  }
+
+  getWorkflowSummaries(parentSessionId: string) {
+    return [...(this.workflowsByParent.get(parentSessionId)?.values() ?? [])]
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .map((workflow) => this.summary(workflow));
+  }
+
+  getWorkflowSummary(parentSessionId: string, workflowId: string) {
+    return this.summary(this.requireWorkflow(parentSessionId, workflowId));
+  }
+
+  results(parentSessionId: string, workflowId: string, nodeIds?: string[], textOffset = 0, textLength?: number): WorkflowResults {
+    for (const [name, value] of [['textOffset', textOffset], ['textLength', textLength]] as const) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`${name} must be a nonnegative safe integer.`);
+    }
+    const workflow = this.requireWorkflow(parentSessionId, workflowId);
+    const selected = nodeIds === undefined ? undefined : new Set(nodeIds);
+    if (selected) {
+      const known = new Set(workflow.nodes.map((node) => node.id));
+      for (const id of selected) if (!known.has(id)) throw new Error(`Unknown workflow node ${id} in ${workflowId}.`);
+    }
+    return {
+      workflowId: workflow.id,
+      status: workflow.status,
+      notificationDeliveryErrors: (workflow.notificationDeliveryErrors ?? []).map((error) => ({ ...error })),
+      nodes: workflow.nodes.filter((node) => selected === undefined || selected.has(node.id)).map((node) => {
+        const result = textSlice(node.result, textOffset, textLength);
+        const error = textSlice(node.error, textOffset, textLength);
+        return {
+          id: node.id, status: node.status, runId: node.runId ?? null,
+          result: result.text, error: error.text,
+          resultLength: result.length, errorLength: error.length,
+          resultRange: result.range, errorRange: error.range,
+        };
+      }),
+    };
   }
 
   hasActive(parentSessionId: string): boolean {
@@ -308,6 +424,10 @@ export class SubagentWorkflowEngine {
   async cancel(parentSessionId: string, workflowId: string, reason = 'Workflow cancelled by the parent orchestrator.', suppressNotification = false): Promise<SubagentWorkflow> {
     const workflow = this.requireWorkflow(parentSessionId, workflowId);
     const active = this.active.get(this.key(parentSessionId, workflowId));
+    if (workflow.status !== 'running' && workflow.status !== 'paused') {
+      if (active) await active.promise;
+      return cloneWorkflow(workflow);
+    }
     if (active && suppressNotification) active.suppressNotification = true;
     active?.controller.abort(reason);
     const cancelledAt = Date.now();
@@ -325,15 +445,21 @@ export class SubagentWorkflowEngine {
     }
     this.store(workflow);
     const runningIds = workflow.nodes.flatMap((node) => node.status === 'running' && node.runId ? [node.runId] : []);
-    await this.host.cancelRuns(parentSessionId, runningIds, reason);
-    if (active) await active.promise.catch(() => undefined);
-    else if (workflow.status === 'cancelled') await this.notify(workflow);
+    const settlement = await Promise.allSettled([
+      Promise.resolve().then(() => this.host.cancelRuns(parentSessionId, runningIds, reason)),
+      ...(active ? [active.promise] : []),
+    ]);
+    const failures = settlement.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
+    if (failures.length) throw new AggregateError(failures, `Workflow ${workflowId} cancellation cleanup failed.`);
+    if (!active && workflow.status === 'cancelled' && !suppressNotification) await this.notify(workflow);
     return cloneWorkflow(this.requireWorkflow(parentSessionId, workflowId));
   }
 
   async cancelParent(parentSessionId: string): Promise<void> {
     const workflows = this.getWorkflows(parentSessionId).filter((workflow) => workflow.status === 'running');
-    await Promise.all(workflows.map((workflow) => this.cancel(parentSessionId, workflow.id, 'Workflow cancelled with its parent Pi session.', true)));
+    const outcomes = await Promise.allSettled(workflows.map((workflow) => this.cancel(parentSessionId, workflow.id, 'Workflow cancelled with its parent Pi session.', true)));
+    const failures = outcomes.flatMap((outcome) => outcome.status === 'rejected' ? [outcome.reason] : []);
+    if (failures.length) throw new AggregateError(failures, 'Workflow cancellation cleanup failed.');
   }
 
   releaseParent(parentSessionId: string): void {
@@ -358,7 +484,7 @@ export class SubagentWorkflowEngine {
           task: node.request.task,
           ...(node.request.agent ? { agent: node.request.agent } : {}),
           ...(node.request.role ? { role: node.request.role } : {}),
-          permission: node.request.permissionLevel,
+          ...(node.request.permissionLevel === undefined ? {} : { permission: node.request.permissionLevel }),
           ...(node.request.model ? { model: node.request.model } : {}),
           ...(node.request.thinkingLevel ? { thinkingLevel: node.request.thinkingLevel } : {}),
           ...(node.request.tools ? { tools: node.request.tools } : {}),
@@ -424,7 +550,7 @@ export class SubagentWorkflowEngine {
     this.workflowsByParent.set(parentSessionId, new Map([...latest.values()].map((workflow) => [workflow.id, workflow])));
   }
 
-  format(workflows: readonly SubagentWorkflow[]): string {
+  format(workflows: readonly WorkflowPresentation[]): string {
     if (!workflows.length) return 'No subagent workflows are recorded for this parent session.';
     return workflows.map((workflow) => {
       const counts = workflow.nodes.reduce<Record<string, number>>((result, node) => {
@@ -432,12 +558,14 @@ export class SubagentWorkflowEngine {
         return result;
       }, {});
       const nodes = workflow.nodes.map((node) => `  - @${node.handle ?? node.id} · ${node.displayName ?? node.id}: ${node.status}${node.runId ? ` · internal:${node.runId}` : ''}${node.dependsOn.length ? ` · after ${node.dependsOn.join(',')}` : ''}${node.error ? `\n    ${safeText(node.error, 4_000)}` : ''}`);
-      return `- ${workflow.id} · ${workflow.status} · ${Object.entries(counts).map(([status, count]) => `${status}:${count}`).join(' ')}\n${nodes.join('\n')}`;
+      const delivery = workflow.notificationDeliveryErrors?.map((error) => `  notification ${error.phase}${error.nodeId ? ` (${error.nodeId})` : ''}: ${safeText(error.error, 4_000)}`).join('\n');
+      return `- ${workflow.id} · ${workflow.status} · ${Object.entries(counts).map(([status, count]) => `${status}:${count}`).join(' ')}\n${nodes.join('\n')}${delivery ? `\n${delivery}` : ''}`;
     }).join('\n');
   }
 
   private async execute(workflow: SubagentWorkflow, modelRuntime: ModelRuntime, signal: AbortSignal): Promise<SubagentWorkflow> {
     const nodesById = new Map(workflow.nodes.map((node) => [node.id, node]));
+    const running = new Map<string, Promise<void>>();
     let softTurnThreshold = workflow.budget?.maxTurns;
     const reportedResources = new Set<string>();
     const hasLiveWork = () => workflow.status === 'running'
@@ -558,11 +686,11 @@ export class SubagentWorkflowEngine {
           if (projected.has(result.id)) return;
           const node = nodesById.get(result.id);
           if (!node) throw new Error('Native workflow projected an unknown node.');
-          if (result.value?.run !== undefined) {
-            const run = subagentRunSchema.parse(result.value.run);
+          const run = nativeRun(result);
+          if (run) {
             node.runId = run.id;
-            if (run.result === undefined) delete node.result; else node.result = run.result;
-            if (run.error === undefined) delete node.error; else node.error = run.error;
+            applyRunOutcome(node, run);
+            if (run.notificationDeliveryErrors?.length) (workflow.notificationDeliveryErrors ??= []).push(...run.notificationDeliveryErrors);
             node.endedAt = run.endedAt ?? Date.now();
             workflow.usage = addUsage(workflow.usage, run.usage);
           } else {
@@ -591,17 +719,22 @@ export class SubagentWorkflowEngine {
             for (const [dependencyId, result] of Object.entries(dependencies)) {
               const dependency = dependencyView.nodes.find((candidate) => candidate.id === dependencyId)!;
               dependency.status = result.status;
-              if (result.value?.run !== undefined) {
-                const run = subagentRunSchema.parse(result.value.run);
-                if (run.result === undefined) delete dependency.result; else dependency.result = run.result;
-                if (run.error === undefined) delete dependency.error; else dependency.error = run.error;
-              } else if (result.error !== undefined) dependency.error = result.error;
+              const run = nativeRun(result);
+              if (run) applyRunOutcome(dependency, run);
+              else if (result.error !== undefined) dependency.error = result.error;
             }
             const request = { ...node.request, task: dependencyContext(dependencyView, node) };
             const child = await this.host.launchNode(workflow, node, request, modelRuntime, nativeSignal);
             node.runId = child.runId; workflow.updatedAt = Date.now(); this.store(workflow);
-            const run = await child.completion;
-            return { id, status: run.status === 'completed' ? 'completed' : run.status === 'cancelled' ? 'cancelled' : 'error', value: { run: nativeWorkflowValue(run) } };
+            const { retainedOutcome, notificationDeliveryErrors, ...run } = await child.completion;
+            return {
+              id, status: run.status === 'completed' ? 'completed' : run.status === 'cancelled' ? 'cancelled' : 'error',
+              value: {
+                run: nativeWorkflowValue(run),
+                ...(retainedOutcome === undefined ? {} : { retainedOutcome: nativeWorkflowValue(retainedOutcome) }),
+                ...(notificationDeliveryErrors === undefined ? {} : { notificationDeliveryErrors: notificationDeliveryErrors.map((error) => nativeWorkflowValue(error)) }),
+              },
+            };
           },
           settled: projectResult,
         }, signal);
@@ -609,7 +742,6 @@ export class SubagentWorkflowEngine {
         // manufacture a completed workflow with still-running UI nodes.
         for (const result of Object.values(graph.nodes)) projectResult(result);
       } else {
-      const running = new Map<string, Promise<void>>();
       while (workflow.nodes.some((node) => !terminalNode(node.status))) {
         if (signal.aborted) throw Object.assign(new Error(String(signal.reason || 'Workflow cancelled.')), { name: 'AbortError' });
 
@@ -635,7 +767,7 @@ export class SubagentWorkflowEngine {
           workflow.updatedAt = node.startedAt;
           this.store(workflow);
           const request = { ...node.request, task: dependencyContext(workflow, node) };
-          let completion: Promise<SubagentRun>;
+          let completion: Promise<SubagentWorkflowRun>;
           try {
             const child = await this.host.launchNode(workflow, node, request, modelRuntime, signal);
             node.runId = child.runId;
@@ -654,10 +786,8 @@ export class SubagentWorkflowEngine {
           const task = completion
             .then((run) => {
               node.runId = run.id;
-              if (run.result === undefined) delete node.result;
-              else node.result = run.result;
-              if (run.error === undefined) delete node.error;
-              else node.error = run.error;
+              applyRunOutcome(node, run);
+              if (run.notificationDeliveryErrors?.length) (workflow.notificationDeliveryErrors ??= []).push(...run.notificationDeliveryErrors);
               node.status = run.status === 'completed' ? 'completed' : run.status === 'cancelled' ? 'cancelled' : 'error';
               node.endedAt = run.endedAt ?? Date.now();
               workflow.usage = addUsage(workflow.usage, run.usage);
@@ -695,6 +825,7 @@ export class SubagentWorkflowEngine {
       await this.notify(workflow);
       return cloneWorkflow(workflow);
     } catch (error) {
+      await Promise.allSettled(running.values());
       const cancelled = signal.aborted || (error instanceof Error && error.name === 'AbortError');
       for (const node of workflow.nodes) {
         if (node.status !== 'pending' && node.status !== 'running') continue;
@@ -715,13 +846,24 @@ export class SubagentWorkflowEngine {
   private async notify(workflow: SubagentWorkflow): Promise<void> {
     if (workflow.notification === 'never' || this.notificationsSuppressed(workflow.parentSessionId, workflow.id)) return;
     const runIds = workflow.nodes.flatMap((node) => node.runId ? [node.runId] : []);
-    await this.host.notify(
+    await Promise.resolve().then(() => this.host.notify(
       workflow.parentSessionId,
       workflow.notification,
-      `Subagent workflow ${workflow.id} settled as ${workflow.status}. ${workflow.nodes.filter((node) => node.status === 'completed').length}/${workflow.nodes.length} nodes completed.${workflowResultsText(workflow)}`,
+      `Subagent workflow ${workflow.id} settled as ${workflow.status}. ${workflow.nodes.filter((node) => node.status === 'completed').length}/${workflow.nodes.length} nodes completed. Retrieve retained output with agent_workflow action=results workflowId=${workflow.id}; notification text is only a preview.${workflowResultsText(workflow)}`,
       runIds,
       workflow.id,
-    ).catch(() => undefined);
+    )).catch((error: unknown) => {
+      (workflow.notificationDeliveryErrors ??= []).push({ phase: 'workflow-notification', error: error instanceof Error ? error.message : String(error), timestamp: Date.now() });
+      workflow.updatedAt = Date.now();
+      this.store(workflow);
+    });
+  }
+
+  private summary(workflow: SubagentWorkflow) {
+    return {
+      ...workflowView(workflow),
+      ...(workflow.notificationDeliveryErrors ? { notificationDeliveryErrors: workflow.notificationDeliveryErrors.map((error) => ({ ...error })) } : {}),
+    };
   }
 
   private store(workflow: SubagentWorkflow): void {

@@ -61,6 +61,10 @@ export class RecoveryCoordinator {
 
   get admissionsAllowed(): boolean { return this.startupAllowed && this.unhealthy === null && this.pending.size === 0; }
   get storageNotice(): string | null { return this.unhealthy; }
+  waitForPendingAdmissions(): Promise<void> | undefined {
+    if (!this.startupAllowed || this.unhealthy || this.pending.size === 0) return undefined;
+    return Promise.all([...this.pending]).then(() => this.waitForPendingAdmissions());
+  }
   assertAdmission(projectPath?: string, sessionId?: string | null, principalId?: string): void {
     if (this.unhealthy) this.heal();
     if (!this.admissionsAllowed) throw new Error(`STORAGE_UNAVAILABLE: ${this.unhealthy ?? 'A required lifecycle checkpoint is pending.'}`);

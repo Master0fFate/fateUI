@@ -50,7 +50,7 @@ describe('Agents sidebar', () => {
     mount();
     fireEvent.click(await screen.findByRole('button', { name: 'New agent' }));
     expect(useAgentsStore.getState().editing).toBe('new');
-    expect(useUiStore.getState()).toMatchObject({ settingsOpen: true, settingsSectionRequest: 'agent' });
+    expect(useUiStore.getState()).toMatchObject({ settingsOpen: true, settingsSectionRequest: 'saved-agents' });
     fireEvent.click(screen.getByRole('button', { name: 'Edit agent: Reviewer' }));
     expect(useAgentsStore.getState().editing).toBe(agentId);
     fireEvent.click(screen.getByRole('button', { name: 'Turn off: Reviewer' }));

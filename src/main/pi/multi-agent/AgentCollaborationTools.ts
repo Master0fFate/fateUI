@@ -22,7 +22,7 @@ const spawnParameters = Type.Object({
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   role: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   agent: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
-  permission: Type.Optional(enumString(permissions, 'Same-or-narrower authority.')),
+  permission: Type.Optional(enumString(permissions, 'Omission inherits the caller authority; an explicit permission can only narrow it.')),
   model: Type.Optional(modelSelectionSchema),
   thinkingLevel: Type.Optional(enumString(thinkingLevels, 'Independent child reasoning effort.')),
   tools: Type.Optional(Type.Array(enumString(childToolNames, 'Ordinary child tool.'), { maxItems: childToolNames.length })),
@@ -66,7 +66,7 @@ export function createAgentCollaborationTools(
   const caller = (sessionId: string, requestedTeamId?: string) => callerNodeId ?? coordinator.rootNodeId(sessionId, requestedTeamId);
   const workspacePolicyTool = defineTool({
     name: 'get_agent_workspace_policy', label: 'Get Agent workspace policy', promptSnippet: 'Inspect the current global Agent workspace policy',
-    description: 'Read the live global preference for future Agent Team executable admissions. Omitted spawn workspace uses preferredMode, except that a child of an agent in an isolated worktree stays in that worktree; strict policy rejects incompatible requested modes. Change it only in Settings > Agent.',
+    description: 'Read the live global preference for future Agent Team executable admissions. Omitted spawn workspace uses preferredMode, except that a child of an agent in an isolated worktree stays in that worktree; strict policy rejects incompatible requested modes. Change it only in Settings > AI settings.',
     parameters: Type.Object({}, { additionalProperties: false }), executionMode: 'parallel',
     execute: async () => {
       const policy = coordinator.getWorkspacePolicy();
@@ -114,8 +114,8 @@ export function createAgentCollaborationTools(
   return [
     defineTool({
       name: 'spawn_agent', label: 'Spawn agent', promptSnippet: 'Create one direct child agent',
-      description: 'Create a direct child in the current agent tree and start its initial task. Omit workspace to use the live global preference, or, when you already work in an isolated worktree, to keep the child in your worktree; an explicit mode overrides only when global strict mode is off. Worktrees are not security sandboxes. Depth, total nodes, active turns, authority, context, and per-checkout writer leases are enforced atomically.',
-      promptGuidelines: ['Delegate one bounded outcome.', 'Omit workspace to use the global preference; if you already work in an isolated worktree, an omitted workspace keeps the child in your worktree, and you request mode worktree to give it its own. When policy is soft, shared children inherit the caller checkout and isolated worktrees require parent review; strict policy rejects an incompatible explicit mode.', 'Worktrees start from committed files; uncommitted parent changes stay behind. Choose shared explicitly if the task needs those files and strict policy permits it.', 'Capacity errors are explicit; wait for existing work and retry.'],
+      description: 'Create a direct child in the current agent tree and start its initial task. Omit workspace to use the live global preference, or, when you already work in an isolated worktree, to keep the child in your worktree; an explicit mode overrides only when global strict mode is off. Omitted permission inherits the caller authority. Worktrees are not security sandboxes. Existing depth, authority, context, and per-checkout writer ownership apply; there is no fixed agent-count or concurrent-turn ceiling.',
+      promptGuidelines: ['Delegate one bounded outcome. Before a root final report after delegation, call agent_workflow action finalize (discover it with tool_search if needed), collect and synthesize all recursive results, and recheck after further work; do not finish until ready. Use bounded wait_agent with stateOnly:true rather than status polling; review paused or unresolved work explicitly. Delayed notifications warrant user updates only for material changes.', 'Omit workspace to use the global preference; if you already work in an isolated worktree, an omitted workspace keeps the child in your worktree, and you request mode worktree to give it its own. When policy is soft, shared children inherit the caller checkout and isolated worktrees require parent review; strict policy rejects an incompatible explicit mode.', 'Worktrees start from committed files; uncommitted parent changes stay behind. Choose shared explicitly if the task needs those files and strict policy permits it.', 'If wait_agent reports blocked-by-caller-turn for a shared-checkout writer child, finish your current turn to yield its writer lease; automatic child joining resumes you for synthesis.'],
       parameters: spawnParameters, executionMode: 'sequential',
       execute: async (toolCallId, params, signal, _onUpdate, ctx) => {
         const receipt = await coordinator.spawn(caller(ctx.sessionManager.getSessionId(), params.teamId), params, toolCallId, modelRuntime, signal);
@@ -155,14 +155,15 @@ export function createAgentCollaborationTools(
     }),
     defineTool({
       name: 'wait_agent', label: 'Wait for agents', promptSnippet: 'Wait for bounded team activity',
-      description: 'Wait for mailbox activity or direct-child state changes. It returns changed paths together with the latest final answer of each settled child, so results survive release and a notifyParent of never.',
+      description: 'Wait for mailbox activity or direct-child state changes. Set stateOnly to ignore mailbox-only activity while children are busy. It returns changed paths together with the latest final answer of each settled child, so results survive release and a notifyParent of never.',
       parameters: Type.Object({
         teamId,
         targets: Type.Array(target, { minItems: 1, maxItems: 16 }),
         timeoutSeconds: Type.Optional(Type.Number({ minimum: 0, maximum: 300, default: 30 })),
+        stateOnly: Type.Optional(Type.Boolean({ default: false, description: 'Ignore mailbox-only activity while watched children remain busy.' })),
       }, { additionalProperties: false }), executionMode: 'sequential',
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-        const result = await coordinator.wait(caller(ctx.sessionManager.getSessionId(), params.teamId), params.targets, (params.timeoutSeconds ?? 30) * 1_000, signal);
+        const result = await coordinator.wait(caller(ctx.sessionManager.getSessionId(), params.teamId), params.targets, (params.timeoutSeconds ?? 30) * 1_000, signal, params.stateOnly === true);
         const ownerId = caller(ctx.sessionManager.getSessionId(), params.teamId);
         const results = result.changed.flatMap((item) => {
           const latest = coordinator.latestResult(ownerId, item.path);

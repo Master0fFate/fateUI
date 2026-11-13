@@ -307,8 +307,8 @@ function ChatImage({ src, alt = '' }: { src?: string | undefined; alt?: string |
 function safeMarkdownUrl(url: string, key: string): string {
   const trimmed = url.trim();
   if (trimmed.startsWith('fate-agent:')) return trimmed;
-  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(trimmed)) return trimmed.length <= MAX_INLINE_IMAGE_URL_LENGTH ? trimmed : '';
-  if (/^blob:/i.test(trimmed) || trimmed.startsWith('#')) return trimmed;
+  if (key === 'src' && /^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(trimmed)) return trimmed.length <= MAX_INLINE_IMAGE_URL_LENGTH ? trimmed : '';
+  if ((key === 'src' && /^blob:/i.test(trimmed)) || trimmed.startsWith('#')) return trimmed;
   if (key === 'src' && isLocalImageReference(trimmed)) return trimmed;
   if (key !== 'src') {
     const browserUrl = normalizeBrowserWebUrl(trimmed);

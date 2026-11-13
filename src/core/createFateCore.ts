@@ -331,7 +331,8 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
     owned.push(() => events.dispose());
     workspaces = options.workspaceRegistration && options.workspaceMembership
       ? new WorkspaceRegistry({ projects, runtime, paths, registration: options.workspaceRegistration, isMember: options.workspaceMembership, checkoutOwnership,
-        assertStorageAdmission: (root, sessionId, principalId) => recoveryGate?.assertAdmission(root, sessionId, principalId) }) : null;
+        assertStorageAdmission: (root, sessionId, principalId) => recoveryGate?.assertAdmission(root, sessionId, principalId),
+        waitForStorageAdmission: () => recoveryGate?.waitForPendingAdmissions() }) : null;
     const registry = workspaces;
     if (registry) owned.push(() => registry.dispose());
     await settings.load();

@@ -1345,7 +1345,7 @@ test('first launch, project, prompt, tool, diff, Git graph, worktrees, and sessi
     await interfaceFontSelect.click();
     await page.getByRole('option', { name: /JetBrains Mono/ }).click();
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.interfaceFont)).toBe('jetbrains-mono');
-    await settingsDialog.getByRole('tab', { name: /Agent/ }).click();
+    await settingsDialog.getByRole('tab', { name: 'AI settings' }).click();
     const monoNavMetrics = await settingsDialog.locator('.settings-nav small').evaluateAll((elements) => elements.map((element) => ({
       text: element.textContent ?? '',
       clientWidth: element.clientWidth,
@@ -1470,7 +1470,7 @@ test('first launch, project, prompt, tool, diff, Git graph, worktrees, and sessi
     await settingsDialog.getByRole('checkbox', { name: /Music player/ }).click();
     await settingsDialog.getByRole('button', { name: 'Save changes' }).click();
     await expect(settingsDialog.getByRole('status')).toContainText('Settings saved');
-    await settingsDialog.getByRole('tab', { name: /Agent/ }).click();
+    await settingsDialog.getByRole('tab', { name: 'AI settings' }).click();
     await expect(settingsDialog.getByRole('combobox', { name: 'Default provider' })).toContainText('Test');
     await page.screenshot({ path: await evidenceOutputPath('pi-desktop-settings-models.png') });
     await settingsDialog.getByRole('tab', { name: /System/ }).click();

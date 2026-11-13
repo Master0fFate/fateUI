@@ -799,7 +799,7 @@ export class FilesystemService {
   }
 
   // Origin is host-adapter context, not an authority field accepted from the wire.
-  async revealLink(reference: string, origin: HostFileReference['origin'] = 'local'): Promise<{ opened: boolean; error?: string }> {
+  async revealLink(reference: string, origin: HostFileReference['origin'] = 'local', confirmOutside?: (absolute: string) => Promise<boolean>): Promise<{ opened: boolean; error?: string }> {
     const actions = this.requireLocalFileActions(origin);
     const operation = this.rootOperation();
     let decoded: string;
@@ -824,9 +824,17 @@ export class FilesystemService {
     // Absolute links may use a project alias, such as macOS /var versus /private/var.
     const absolute = path.normalize(await fs.realpath(candidate));
     this.assertRootOperation(operation);
-    this.ensureConfined(absolute);
+    const relative = path.relative(operation.root, absolute);
+    const outside = relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+    if (outside && (!path.isAbsolute(decoded) || !confirmOutside)) this.ensureConfined(absolute);
     if (!(await fs.stat(absolute)).isFile()) invalidPath('The file link does not point to a file.');
     this.assertRootOperation(operation);
+    if (outside) {
+      if (!await confirmOutside!(absolute)) return { opened: false };
+      this.assertRootOperation(operation);
+      if (path.normalize(await fs.realpath(candidate)) !== absolute || !(await fs.stat(absolute)).isFile()) invalidPath('The file link changed while awaiting confirmation.');
+      this.assertRootOperation(operation);
+    }
     const releaseExternalOpen = this.beginExternalOpen();
     try {
       await actions.showItemInFolder({ origin, path: absolute });

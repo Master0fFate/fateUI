@@ -1,75 +1,99 @@
-import { clampThinkingLevel } from '@earendil-works/pi-ai';
-import type { AgentSession, InlineExtension } from '@earendil-works/pi-coding-agent';
-import type { ThinkingLevel } from '../../../shared/contracts/ipc';
+import type { InlineExtension } from '@earendil-works/pi-coding-agent';
 
-type Hyp3rc0d3Model = NonNullable<AgentSession['model']>;
+export const HYP3RC0D3_CUSTOM_TYPE = 'fate-hyp3rc0d3';
 
-const ENABLED = new Set<string>();
-const MAX_CONCURRENT_ENV = 'FATE_HYP3RC0D3_MAX_CONCURRENT_AGENTS';
-const MAX_CHILDREN_ENV = 'FATE_HYP3RC0D3_MAX_CHILD_AGENTS';
-const DEFAULT_MAX_CONCURRENT = 16;
-const DEFAULT_MAX_CHILDREN = 1_000;
-
-function positiveIntFromEnv(name: string, fallback: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const value = Number(raw);
-  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+interface SessionMode {
+  enabled: boolean;
+  revision: number;
+  preparing: Set<symbol>;
 }
 
-export function hyp3rc0d3MaxConcurrent(): number {
-  return positiveIntFromEnv(MAX_CONCURRENT_ENV, DEFAULT_MAX_CONCURRENT);
+const SESSIONS = new Map<string, SessionMode>();
+
+export function hyp3rc0d3EntryEnabled(entry: unknown): boolean | undefined {
+  if (!entry || typeof entry !== 'object') return undefined;
+  const value = entry as Record<string, unknown>;
+  if (value.type !== 'custom' || value.customType !== HYP3RC0D3_CUSTOM_TYPE || !value.data || typeof value.data !== 'object') return undefined;
+  const data = value.data as Record<string, unknown>;
+  return data.version === 1 && typeof data.enabled === 'boolean' ? data.enabled : undefined;
 }
 
-export function hyp3rc0d3MaxChildren(): number {
-  return positiveIntFromEnv(MAX_CHILDREN_ENV, DEFAULT_MAX_CHILDREN);
+export function readHyp3rc0d3Session(entries: readonly unknown[]): boolean {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const enabled = hyp3rc0d3EntryEnabled(entries[index]);
+    if (enabled !== undefined) return enabled;
+  }
+  return false;
+}
+
+export function hydrateHyp3rc0d3Session(sessionId: string, enabled: boolean): void {
+  if (!SESSIONS.has(sessionId)) SESSIONS.set(sessionId, { enabled, revision: 0, preparing: new Set() });
 }
 
 export function isHyp3rc0d3(sessionId: string | null | undefined): boolean {
-  return sessionId ? ENABLED.has(sessionId) : false;
+  return sessionId ? SESSIONS.get(sessionId)?.enabled === true : false;
 }
 
 export function setHyp3rc0d3Session(sessionId: string, enabled: boolean): void {
-  if (enabled) ENABLED.add(sessionId);
-  else ENABLED.delete(sessionId);
+  hydrateHyp3rc0d3Session(sessionId, enabled);
+  const state = SESSIONS.get(sessionId)!;
+  state.revision += 1;
+  state.preparing.clear();
+  state.enabled = enabled;
+}
+
+export function prepareHyp3rc0d3Session(sessionId: string): { prepare(): void; commit(persist: () => void): void; cancel(): void } {
+  hydrateHyp3rc0d3Session(sessionId, false);
+  const state = SESSIONS.get(sessionId)!;
+  const revision = state.revision;
+  const token = Symbol();
+  let cancelled = false;
+  const current = () => !cancelled && SESSIONS.get(sessionId) === state && state.revision === revision;
+  return {
+    prepare() {
+      if (current()) state.preparing.add(token);
+    },
+    commit(persist) {
+      if (!current()) return;
+      persist();
+      state.enabled = true;
+      state.preparing.delete(token);
+      cancelled = true;
+    },
+    cancel() {
+      cancelled = true;
+      state.preparing.delete(token);
+    },
+  };
 }
 
 export function forgetHyp3rc0d3Session(sessionId: string): void {
-  ENABLED.delete(sessionId);
+  SESSIONS.delete(sessionId);
 }
 
-export function hyp3rc0d3ThinkingLevel(model: Hyp3rc0d3Model): ThinkingLevel {
-  return clampThinkingLevel(model, 'xhigh');
-}
+function hyp3rc0d3Guidance(): string {
+  return `Hyp3rc0d3 mode is on for this session.
 
-function hyp3rc0d3Guidance(level: ThinkingLevel | null): string {
-  const maxConcurrent = hyp3rc0d3MaxConcurrent();
-  const maxChildren = hyp3rc0d3MaxChildren();
-  const pinned = level && level !== 'off' ? ` Reasoning effort is pinned to ${level}, so spend that effort on structure rather than on length.` : '';
-  return `Hyp3rc0d3 mode is on for this session.${pinned}
+Adapt the workflow to the task. Answer greetings, simple questions, and small bounded changes directly. For unfamiliar code, scout the relevant files, callers, installed versions, and current documentation first, then use the findings to stage a dependency graph for substantive work. Run independent work in parallel and sequence work that depends on earlier findings. Continue with new graphs when discoveries change the plan; a single upfront graph is not a requirement.
 
-Plan before acting. Write a dependency graph whose nodes each own one bounded outcome, add an edge only where a node needs another node's result, and include the verification the work needs. Dispatch the graph with one agent_workflow call instead of describing the plan in this conversation or calling spawn_agent once per piece.
+Use agent_workflow for coordinated graphs. If it is not declared, discover it with tool_search using query "agent_workflow". If delegation is unavailable in this session, continue useful work directly and explain the unavailable capability instead of stalling or claiming agents ran. Use the exact available agent and model catalog, choosing the agent, model, and effort appropriate to each task. Preserve the user's selected root effort. Follow the active Goal strategy and existing permission policy; give each node the authority it needs within that policy rather than silently narrowing it or bypassing it.
 
-Every node brief must stand alone: the task, the areas or files in scope, the outcome you will accept, and how the node proves its own result. A node cannot see this conversation, your reasoning, or another node's work unless its brief says so.
+Each node brief must be self-contained: objective, relevant context, exact scope and file ownership, expected outcome, needed authority, and verification. Nodes do not see this conversation or each other's work automatically. Add dependsOn where a result is needed and set includeDependencyResults to true to deliver that result. Keep concurrent writes disjoint or order them explicitly.
 
-Keep results inside the workflow. Read them with agent_workflow status, and rely on the graph-level notifyParent instead of copying node answers into this conversation.
+Use existing collaboration tools to inspect progress, communicate findings, and reuse suitable agents. Use agent_workflow status for progress and agent_workflow results with workflowId, nodeIds, textOffset, and textLength to retrieve retained result text, including further ranges when needed. Keep intermediate dumps inside the workflow. Prefer notifyParent "immediate" for completion delivery unless the task calls for different timing. For delegated work call agent_workflow action finalize immediately before the final report, discovering it with tool_search if needed. Do not issue final completion until ready; collect and synthesize all required results and ranges, and recheck after further delegation. For wait use bounded wait_agent with stateOnly:true, not repeated status polling. For a blocked writer lease yield a brief progress-only turn and continue on automatic join. Review paused or unresolved work explicitly. Delayed notifications warrant a user update only for material changes, never repeated already-incorporated replies.
 
-When nodes write, keep their files disjoint: different files, different directories, or an explicit order in dependsOn. Two nodes touch the same file only when one depends on the other.
-
-At most ${maxConcurrent} nodes run at a time and this session admits at most ${maxChildren} child agents in total. Set maxConcurrency within that, and continue a larger plan in further agent_workflow calls instead of raising either number.
-
-Do not ask the user anything while the graph runs. If a node needs a decision its brief does not cover, end that node, finish the rest, and report the open question once at the end.`;
+Integrate changes into the actual owning workspace using the available workspace tools; a child report or isolated checkout is not an integrated result. Review the combined outcome and run task-appropriate verification against the integrated work. Ask a focused question when a missing decision genuinely blocks safe progress. Finish with concise evidence of what changed, what verification showed, and any remaining blocker, not a transcript of node replies.`;
 }
 
 export function createHyp3rc0d3Extension(): InlineExtension {
   return {
-    name: 'fate-hyp3rc0d3',
+    name: HYP3RC0D3_CUSTOM_TYPE,
     hidden: true,
     factory(pi) {
       pi.on('before_agent_start', (event, ctx) => {
-        if (!isHyp3rc0d3(ctx.sessionManager.getSessionId())) return undefined;
-        const level = ctx.model ? hyp3rc0d3ThinkingLevel(ctx.model) : null;
-        return { systemPrompt: `${event.systemPrompt}\n\n${hyp3rc0d3Guidance(level)}\n` };
+        const state = SESSIONS.get(ctx.sessionManager.getSessionId());
+        if (!state?.enabled && !state?.preparing.size) return undefined;
+        return { systemPrompt: `${event.systemPrompt}\n\n${hyp3rc0d3Guidance()}\n` };
       });
     },
   };

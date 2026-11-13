@@ -276,6 +276,7 @@ export const ipcChannels = {
   filesRead: 'files:read',
   filesOpen: 'files:open',
   filesRevealLink: 'files:reveal-link',
+  filesShowLinkContextMenu: 'files:show-link-context-menu',
   gitStatus: 'git:status',
   gitDiff: 'git:diff',
   gitCombinedDiff: 'git:combined-diff',
@@ -1786,6 +1787,7 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   readFile: (path: string) => Promise<FilePreview>;
   openFile: (path: string) => Promise<{ opened: boolean; error?: string | undefined }>;
   revealFileLink: (path: string) => Promise<{ opened: boolean; error?: string | undefined }>;
+  showFileLinkContextMenu: (path: string) => Promise<boolean>;
   getGitStatus: () => Promise<GitStatus>;
   getGitDiff: (path: string) => Promise<GitDiff>;
   getGitCombinedDiff: () => Promise<GitCombinedDiff>;

@@ -93,7 +93,7 @@ export function AgentMentionLink({ href, children, node: _node, onClick, onConte
       try {
         if (!hasCapability('localFileOpen') || !getFateApiOptional() || typeof getDesktopApiOptional()?.revealFileLink !== 'function') throw new Error(unavailableExplanation.localFileOpen);
         const result = await getDesktopApi().revealFileLink(href);
-        if (!result.opened) throw new Error(result.error ?? 'The file could not be located.');
+        if (!result.opened && result.error) throw new Error(result.error);
       } catch (error) {
         useUiStore.getState().showToast({ kind: 'error', title: 'Could not open file link', message: error instanceof Error ? error.message : String(error) });
       }
@@ -103,6 +103,15 @@ export function AgentMentionLink({ href, children, node: _node, onClick, onConte
       if (event.defaultPrevented) return;
       event.preventDefault();
       void reveal();
+    }} onContextMenu={(event) => {
+      onContextMenu?.(event);
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      if (hasCapability('localFileOpen') && typeof getDesktopApiOptional()?.showFileLinkContextMenu === 'function') {
+        void getDesktopApi().showFileLinkContextMenu(href).then((selected) => { if (selected) void reveal(); }).catch((error: unknown) => {
+          useUiStore.getState().showToast({ kind: 'error', title: 'Could not open file link', message: error instanceof Error ? error.message : String(error) });
+        });
+      }
     }} onAuxClick={(event) => {
       onAuxClick?.(event);
       if (event.defaultPrevented || event.button !== 1) return;

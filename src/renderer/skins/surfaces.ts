@@ -19,6 +19,7 @@ export const skinSurfaceSelectors: Record<Exclude<SkinSurfaceName, 'global'>, st
   settings: '.settings-dialog',
   dialogs: ':where([role="dialog"], [role="alertdialog"], [role="menu"], .custom-select-content)',
   modelPicker: '.model-popover, .model-select-content, .provider-dialog-content',
+  hyp3rc0d3: '.hyp3rc0d3-toggle',
   tooltips: '.tooltip, [role="tooltip"]',
   files: '.files-panel',
   changes: '.changes-panel',

@@ -22,6 +22,7 @@ export interface WorkspaceRegistryOptions {
   readonly makeAdmission?: (runtime: WorkspaceHandle['runtime'], generation: number) => WorkspaceAdmissionPort<WorkspaceHandle['runtime']>;
   /** Host-only storage/recovery fence. Never sourced from a request. */
   readonly assertStorageAdmission?: (root?: string, sessionId?: string | null, principalId?: string) => void;
+  readonly waitForStorageAdmission?: () => Promise<void> | undefined;
   readonly maxWorkspaces?: number;
 }
 
@@ -90,7 +91,8 @@ export class WorkspaceRegistry {
         ? new GitService(files, path.join(this.options.paths.dataRoot, 'worktrees'), this.options.paths.attachmentRoot, this.options.checkoutOwnership)
         : new GitService(files, undefined, undefined, this.options.checkoutOwnership), runtime,
       admission: this.options.makeAdmission?.(runtime, generation) ?? new WorkspaceAdmissionQueue(runtime, generation,
-        (sessionId, principalId) => this.options.assertStorageAdmission?.(root, sessionId, principalId)),
+        (sessionId, principalId) => this.options.assertStorageAdmission?.(root, sessionId, principalId),
+        () => this.options.waitForStorageAdmission?.()),
     });
     runtime.setSelectionListener((sessionId) => handle.admission.observeSelection(sessionId));
     this.byRoot.set(root, handle);

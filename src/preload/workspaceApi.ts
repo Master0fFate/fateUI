@@ -77,6 +77,7 @@ export const workspaceApi = {
   searchFiles: (query, limit = 300) => invoke(ipcChannels.filesSearch, fileSearchInputSchema, fileSearchResultSchema, { query, limit }),
   readFile: (path) => invoke(ipcChannels.filesRead, filePathInputSchema, filePreviewSchema, { path }),
   revealFileLink: (path) => invoke(ipcChannels.filesRevealLink, filePathInputSchema, openFileResultSchema, { path }),
+  showFileLinkContextMenu: async (path) => (await invoke(ipcChannels.filesShowLinkContextMenu, filePathInputSchema, openFileResultSchema, { path })).opened,
   openFile: (path) => invoke(ipcChannels.filesOpen, filePathInputSchema, openFileResultSchema, { path }),
   getGitStatus: () => invoke(ipcChannels.gitStatus, emptyInputSchema, gitStatusSchema),
   getGitDiff: (path) => invoke(ipcChannels.gitDiff, filePathInputSchema, gitDiffSchema, { path }),

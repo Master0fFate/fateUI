@@ -19,7 +19,10 @@ export function createRuntimeHandlers(runtime: PiRuntimeService, resolveReferenc
         })) : undefined;
       if (runtime.getState(false).sessionId !== expectedSessionId) throw new WorkspaceAdmissionError('STALE_SESSION');
       reauthorize?.();
-      return promptAcceptanceSchema.parse(await runtime.prompt({ ...parsed, ...(sessionReferences ? { sessionReferences } : {}) }));
+      const prompt = { ...parsed, ...(sessionReferences ? { sessionReferences } : {}) };
+      return promptAcceptanceSchema.parse(await (/^\/reload$/iu.test(parsed.text)
+        ? runtime.prompt(prompt, false, false, undefined, reauthorize)
+        : runtime.prompt(prompt)));
     },
     async abort(input: unknown) {
       emptyInputSchema.parse(input);
@@ -33,9 +36,9 @@ export function createRuntimeHandlers(runtime: PiRuntimeService, resolveReferenc
       const { level } = setThinkingInputSchema.parse(input);
       return runtimeStateSchema.parse(runtime.setThinkingLevel(level));
     },
-    setHyp3rc0d3(input: unknown) {
+    async setHyp3rc0d3(input: unknown) {
       const { enabled } = setHyp3rc0d3InputSchema.parse(input);
-      return runtimeStateSchema.parse(runtime.setHyp3rc0d3(enabled));
+      return runtimeStateSchema.parse(await runtime.setHyp3rc0d3(enabled));
     },
     async mutateQueue(input: unknown) {
       return queueMutationResultSchema.parse(await runtime.mutateQueuedMessage(queueMutationInputSchema.parse(input)));

@@ -8,6 +8,7 @@ import {
   Brain,
   CheckCircle2,
   CircleAlert,
+  Cpu,
   Gauge,
   GitBranch,
   Folder,
@@ -88,7 +89,8 @@ const sections = [
   { id: 'general', label: 'General', icon: SlidersHorizontal },
   { id: 'skins', label: 'Skins', icon: Palette },
   { id: 'compaction', label: 'Compaction', icon: Rows3 },
-  { id: 'agent', label: 'Agent', icon: Bot },
+  { id: 'ai', label: 'AI settings', icon: Cpu },
+  { id: 'saved-agents', label: 'Saved agents', icon: Bot },
   { id: 'mcp', label: 'MCP', icon: GitBranch },
   { id: 'hooks', label: 'Hooks', icon: Webhook },
   { id: 'code', label: 'Code Intelligence', icon: Braces },
@@ -109,7 +111,11 @@ export const formatProviderName = (provider: string) => providerNames[provider.t
 
 export const groupModelsByProvider = (models: readonly ModelInfo[]) => {
   const grouped = new Map<string, ModelInfo[]>();
-  for (const model of models) grouped.set(model.provider, [...(grouped.get(model.provider) ?? []), model]);
+  for (const model of models) {
+    const providerModels = grouped.get(model.provider);
+    if (providerModels) providerModels.push(model);
+    else grouped.set(model.provider, [model]);
+  }
   return [...grouped.entries()]
     .map(([provider, providerModels]) => ({
       provider,
@@ -767,47 +773,16 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                 </div>
               )}
 
-              {activeSection === 'agent' && (
-                <div className="settings-panel" role="tabpanel" id="settings-panel-agent" aria-labelledby="settings-tab-agent">
-                  <section className="workspace-preference" aria-label="Agent workspace policy">
-                    <div className="settings-title"><div><h3>Agents</h3><p>Fate UI uses one unified agent system. Set the workspace preference for all newly created agents.</p></div><span className="workspace-preference-scope">Global</span></div>
-                    <div className="workspace-preference-options" role="radiogroup" aria-label="Preferred workspace">
-                      {([
-                        { mode: 'shared', title: 'Shared checkout', description: 'Work directly in the parent’s files.', Icon: Folder },
-                        { mode: 'worktree', title: 'Isolated worktree', description: 'A separate branch for each agent.', Icon: GitBranch },
-                      ] as const).map(({ mode, title, description, Icon }) => (
-                        <label className="workspace-preference-option" key={mode} data-selected={workspacePolicy.preferredMode === mode}>
-                          <input type="radio" name="agent-workspace-preference" aria-label={title} checked={workspacePolicy.preferredMode === mode} onChange={() => setSettings({ ...settings, agentWorkspace: { ...workspacePolicy, preferredMode: mode } })} />
-                          <span className="workspace-preference-option-heading"><Icon size={18} aria-hidden="true" /><span className="workspace-preference-radio" aria-hidden="true" /></span>
-                          <strong>{title}</strong><small>{description}</small>
-                        </label>
-                      ))}
-                    </div>
-                    <label className="settings-toggle workspace-preference-strict">
-                      <div><strong><ShieldCheck size={14} aria-hidden="true" />Strict mode</strong><small>{workspacePolicy.strict ? 'The agent must use your preferred mode.' : 'The agent can choose the other mode when needed.'}</small></div>
-                      <input type="checkbox" aria-label="Strict workspace mode" checked={workspacePolicy.strict} onChange={(event) => setSettings({ ...settings, agentWorkspace: { ...workspacePolicy, strict: event.target.checked } })} />
-                      <span aria-hidden="true" />
-                    </label>
-                    <div className="workspace-preference-footer">
-                      <span>{workspacePolicy.strict ? 'Required' : 'Preferred'}: {workspacePolicy.preferredMode === 'worktree' ? 'isolated worktree' : 'shared checkout'}</span>
-                      <details className="workspace-preference-details"><summary>How it works</summary><p>Applies after saving to all newly created agents. Strict mode also applies to resumed work; running work stays in place.</p><p>No project restart is needed for workspace policy changes. Worktrees start from committed files, not uncommitted changes, and are not security sandboxes.</p></details>
-                    </div>
-                  </section>
-                  <GoogleSettings />
+              {activeSection === 'saved-agents' && (
+                <div className="settings-panel" role="tabpanel" id="settings-panel-saved-agents" aria-labelledby="settings-tab-saved-agents">
                   <SavedAgentsSettings compact={appearance.compactMode} />
-                  <div className="settings-title settings-title--spaced"><div><h3>Pi tools and budget</h3></div></div>
-                  <label className="settings-toggle">
-                    <div><strong>Codemode</strong><small>Lets the model script several tools in one call. Applies to new sessions.</small></div>
-                    <input type="checkbox" aria-label="Enable Pi codemode" checked={settings.piCodemode} onChange={(event) => setSettings({ ...settings, piCodemode: event.target.checked })} />
-                    <span aria-hidden="true" />
-                  </label>
-                  <label className="settings-toggle">
-                    <div><strong>Web search</strong><small>Sends search queries to Parallel (search.parallel.ai). Turning it on applies to new sessions.</small></div>
-                    <input type="checkbox" aria-label="Enable web search" checked={settings.webSearchEnabled} onChange={(event) => setSettings({ ...settings, webSearchEnabled: event.target.checked })} />
-                    <span aria-hidden="true" />
-                  </label>
-                  <label className="settings-input-row"><span>Daily budget (USD)</span><input aria-label="Daily budget in USD" inputMode="decimal" value={settings.dailyBudgetUsd ?? ''} placeholder="No limit" onChange={(event) => { const value = Number(event.target.value); setSettings({ ...settings, dailyBudgetUsd: event.target.value.trim() === '' || !Number.isFinite(value) || value < 0 ? null : value }); }} /></label>
-                  <div className="settings-title settings-title--spaced"><div><h3>Agent defaults</h3><p>Fallbacks for the first Pi session opened in a project. Later sessions inherit the active composer settings.</p></div></div>
+                  <GoogleSettings />
+                </div>
+              )}
+
+              {activeSection === 'ai' && (
+                <div className="settings-panel" role="tabpanel" id="settings-panel-ai" aria-labelledby="settings-tab-ai">
+                  <div className="settings-title"><div><h3>Session defaults</h3><p>Fallbacks for the first Pi session opened in a project. Later sessions inherit the active composer settings.</p></div></div>
                   <div className="settings-model-picker">
                     <div className="settings-model-heading"><div><strong>Default model</strong></div>{selectedProvider && <span>{formatProviderName(selectedProvider)}</span>}</div>
                     <div className="settings-model-controls">
@@ -853,6 +828,43 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   <div className="settings-group">
                     <div className="settings-select-row"><div><strong>Thinking level</strong><small>Initial reasoning effort when a project starts without an active session.</small></div><SelectControl compact={appearance.compactMode} label="Default thinking level" value={settings.thinkingLevel} className="settings-thinking-select" options={['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map((level) => ({ value: level, label: level === 'xhigh' ? 'Extra high' : `${level[0]?.toUpperCase() ?? ''}${level.slice(1)}` }))} onValueChange={(value) => setSettings({ ...settings, thinkingLevel: value as AppSettings['thinkingLevel'] })} /></div>
                   </div>
+
+                  <div className="settings-title settings-title--spaced"><div><h3>Tools and budget</h3></div></div>
+                  <label className="settings-toggle">
+                    <div><strong>Codemode</strong><small>Lets the model script several tools in one call. Applies to new sessions.</small></div>
+                    <input type="checkbox" aria-label="Enable Pi codemode" checked={settings.piCodemode} onChange={(event) => setSettings({ ...settings, piCodemode: event.target.checked })} />
+                    <span aria-hidden="true" />
+                  </label>
+                  <label className="settings-toggle">
+                    <div><strong>Web search</strong><small>Sends search queries to Parallel (search.parallel.ai). Turning it on applies to new sessions.</small></div>
+                    <input type="checkbox" aria-label="Enable web search" checked={settings.webSearchEnabled} onChange={(event) => setSettings({ ...settings, webSearchEnabled: event.target.checked })} />
+                    <span aria-hidden="true" />
+                  </label>
+                  <label className="settings-input-row"><span>Daily budget (USD)</span><input aria-label="Daily budget in USD" inputMode="decimal" value={settings.dailyBudgetUsd ?? ''} placeholder="No limit" onChange={(event) => { const value = Number(event.target.value); setSettings({ ...settings, dailyBudgetUsd: event.target.value.trim() === '' || !Number.isFinite(value) || value < 0 ? null : value }); }} /></label>
+                  <section className="workspace-preference" aria-label="Agent workspace policy">
+                    <div className="settings-title settings-title--spaced"><div><h3>Agent workspaces</h3><p>Workspace preference for newly created agents.</p></div><span className="workspace-preference-scope">Global</span></div>
+                    <div className="workspace-preference-options" role="radiogroup" aria-label="Preferred workspace">
+                      {([
+                        { mode: 'shared', title: 'Shared checkout', description: 'Work directly in the parent’s files.', Icon: Folder },
+                        { mode: 'worktree', title: 'Isolated worktree', description: 'A separate branch for each agent.', Icon: GitBranch },
+                      ] as const).map(({ mode, title, description, Icon }) => (
+                        <label className="workspace-preference-option" key={mode} data-selected={workspacePolicy.preferredMode === mode}>
+                          <input type="radio" name="agent-workspace-preference" aria-label={title} checked={workspacePolicy.preferredMode === mode} onChange={() => setSettings({ ...settings, agentWorkspace: { ...workspacePolicy, preferredMode: mode } })} />
+                          <span className="workspace-preference-option-heading"><Icon size={18} aria-hidden="true" /><span className="workspace-preference-radio" aria-hidden="true" /></span>
+                          <strong>{title}</strong><small>{description}</small>
+                        </label>
+                      ))}
+                    </div>
+                    <label className="settings-toggle workspace-preference-strict">
+                      <div><strong><ShieldCheck size={14} aria-hidden="true" />Strict mode</strong><small>{workspacePolicy.strict ? 'The agent must use your preferred mode.' : 'The agent can choose the other mode when needed.'}</small></div>
+                      <input type="checkbox" aria-label="Strict workspace mode" checked={workspacePolicy.strict} onChange={(event) => setSettings({ ...settings, agentWorkspace: { ...workspacePolicy, strict: event.target.checked } })} />
+                      <span aria-hidden="true" />
+                    </label>
+                    <div className="workspace-preference-footer">
+                      <span>{workspacePolicy.strict ? 'Required' : 'Preferred'}: {workspacePolicy.preferredMode === 'worktree' ? 'isolated worktree' : 'shared checkout'}</span>
+                      <details className="workspace-preference-details"><summary>How it works</summary><p>Applies after saving to all newly created agents. Strict mode also applies to resumed work; running work stays in place.</p><p>No project restart is needed for workspace policy changes. Worktrees start from committed files, not uncommitted changes, and are not security sandboxes.</p></details>
+                    </div>
+                  </section>
 
                   <div className="settings-title settings-title--spaced"><div><h3>Image generation</h3><p>Independent from the chat model.</p></div></div>
                   <div className="image-provider-config">

@@ -1,6 +1,7 @@
 import { open, type FileHandle } from 'node:fs/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { sessionProjectMatches } from './SessionProjectIdentity';
+import { hyp3rc0d3EntryEnabled } from './context/Hyp3rc0d3';
 
 export type SnapshotRecord = Record<string, unknown>;
 
@@ -161,6 +162,7 @@ export class OversizedRecordFields {
   private readonly validator = new JsonLineValidator();
   private fields: SnapshotRecord = {};
   private readonly seenRoutingFields = new Set<string>();
+  private readonly seenMessageRoutingFields = new Set<string>();
   private ambiguousRouting = false;
   private depth = 0;
   private insideString = false;
@@ -205,7 +207,13 @@ export class OversizedRecordFields {
             this.seenRoutingFields.add(decoded);
           }
         }
-        else if (this.capture === 'message-key') this.messageKey = decoded;
+        else if (this.capture === 'message-key') {
+          this.messageKey = decoded;
+          if (decoded === 'role' || decoded === 'content') {
+            if (this.seenMessageRoutingFields.has(decoded)) this.ambiguousRouting = true;
+            this.seenMessageRoutingFields.add(decoded);
+          }
+        }
         else if (this.capture === 'value' && this.key && scalarFields.has(this.key)) this.fields[this.key] = decoded;
         else if (this.capture === 'message-value' && this.messageKey === 'role') this.fields.messageRole = decoded;
       }
@@ -320,6 +328,7 @@ function childStateKey(entry: SnapshotRecord): { key: string; version: number } 
 }
 
 export interface ReadSessionSnapshot {
+  hyp3rc0d3: boolean;
   entries: SnapshotRecord[];
   branch: SnapshotRecord[];
   /** null means a later session_info explicitly cleared the name. */
@@ -432,6 +441,7 @@ export async function readSessionSnapshot(filePath: string, sessionId: string, e
     let indexBytes = 0;
     const header = { value: null as SnapshotRecord | null };
     let name: string | null | undefined;
+    let hyp3rc0d3 = false;
     let firstMessage: string | undefined;
     let messageCount = 0;
     let lastActivityTime: number | undefined;
@@ -460,6 +470,8 @@ export async function readSessionSnapshot(filePath: string, sessionId: string, e
             throw new SessionSnapshotLimitError('has an entry identifier that exceeds the reader limit');
           }
           if (indexed.length >= MAX_INDEX_ENTRIES) throw new SessionSnapshotLimitError(`has more than ${MAX_INDEX_ENTRIES.toLocaleString()} entries`);
+          const mode = hyp3rc0d3EntryEnabled(parsed);
+          if (mode !== undefined) hyp3rc0d3 = mode;
           const value = retainFullFile && !oversized ? parsed : compactEntry(parsed, extensionBudget);
           if (parsed.customType === 'fate-saved-agent-v1' && value.data === undefined) {
             throw new SessionSnapshotLimitError('has saved-agent metadata that exceeds the reader budget');
@@ -480,11 +492,13 @@ export async function readSessionSnapshot(filePath: string, sessionId: string, e
           }
           if (value.type === 'message') {
             const message = record(parsed.message) ? parsed.message : null;
-            const text = message?.role === 'user' || message?.role === 'assistant' ? messageText(message.content) : '';
-            if (text) messageCount += 1;
-            if (message?.role === 'user' && !firstMessage) firstMessage = text || undefined;
-            if (message?.role === 'user' || message?.role === 'assistant') {
-              const timestamp = typeof message.timestamp === 'number' ? message.timestamp
+            const role = message?.role ?? (oversized ? parsed.messageRole : undefined);
+            const conversationMessage = role === 'user' || role === 'assistant';
+            const text = conversationMessage && message ? messageText(message.content) : '';
+            if (text || oversized && conversationMessage) messageCount += 1;
+            if (role === 'user' && !firstMessage) firstMessage = text || undefined;
+            if (conversationMessage) {
+              const timestamp = typeof message?.timestamp === 'number' ? message.timestamp
                 : typeof parsed.timestamp === 'string' ? Date.parse(parsed.timestamp) : NaN;
               if (Number.isFinite(timestamp) && Math.abs(timestamp) <= 8.64e15) {
                 lastActivityTime = Math.max(lastActivityTime ?? Number.NEGATIVE_INFINITY, timestamp);
@@ -610,6 +624,7 @@ export async function readSessionSnapshot(filePath: string, sessionId: string, e
       childBytes += item.byteLength;
     }
     return {
+      hyp3rc0d3,
       entries: indexed.map((item) => item.value),
       branch: branchIndexes.map((index) => indexed[index]!.value),
       ...(name === undefined ? {} : { name }),

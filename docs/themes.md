@@ -44,4 +44,6 @@ The `id` is lowercase letters, digits, and hyphens (`[a-z0-9][a-z0-9-]`, 2–48 
 
 Themes made before these two tokens existed still load. Fate UI uses `accentSoft` for `currentSession` and `raised` for `lastActiveSession` until you add explicit values.
 
+Everything that carries colour reads these tokens rather than fixed values, including the Hyp3rc0d3 toggle in the model picker: its glyphs are painted with a ramp built from `accent`, `accentHover`, `success`, `warning` and `danger`, so a palette change repaints it without touching the skin.
+
 Themes Pi already knows about are picked up automatically too, including any a project keeps under its own `.pi` resources once you trust it, so the palette you run in the terminal Pi carries over.

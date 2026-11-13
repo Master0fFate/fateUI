@@ -74,7 +74,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   },
   edit: (editing) => {
     set({ editing });
-    useUiStore.getState().openSettingsSection('agent');
+    useUiStore.getState().openSettingsSection('saved-agents');
   },
 }));
 

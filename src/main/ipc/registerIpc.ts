@@ -1217,9 +1217,40 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedFileHandlers(workspace, authorize).search(input)) : desktopFiles.search(input));
   handle(ipcChannels.filesRead, (event, input) => core
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedFileHandlers(workspace, authorize).readDesktop(input)) : desktopFiles.read(input));
-  handle(ipcChannels.filesRevealLink, async (_event, input) => {
+  handle(ipcChannels.filesRevealLink, async (event, input) => {
     const parsed = filePathInputSchema.parse(input);
-    return openFileResultSchema.parse(await files.revealLink(parsed.path));
+    const owner = ownerWindow(event), documentIsCurrent = invocationGuards.get(event) ?? (() => false);
+    const generation = connections?.state.generation;
+    const current = () => documentIsCurrent() && (!connections || connections.isLocal && connections.state.generation === generation);
+    return openFileResultSchema.parse(await files.revealLink(parsed.path, 'local', async (absolute) => {
+      if (!current()) return false;
+      const result = await dialog.showMessageBox(owner, {
+        type: 'question',
+        title: 'Show outside file',
+        message: 'Show this file outside the active project?',
+        detail: absolute,
+        buttons: ['Cancel', 'Show in folder'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      return result.response === 1 && current();
+    }));
+  });
+  handle(ipcChannels.filesShowLinkContextMenu, async (event, input) => {
+    const { path: reference } = filePathInputSchema.parse(input);
+    const owner = ownerWindow(event), documentIsCurrent = invocationGuards.get(event) ?? (() => false);
+    const generation = connections?.state.generation, root = files.getRootOrNull();
+    const current = () => documentIsCurrent() && files.getRootOrNull() === root
+      && (!connections || connections.isLocal && connections.state.generation === generation);
+    let selected = false;
+    await new Promise<void>((resolve) => {
+      Menu.buildFromTemplate([
+        { label: 'Show in folder', click: () => { selected = true; } },
+        { label: 'Copy link', click: () => { if (current()) clipboard.writeText(reference); } },
+      ]).popup({ window: owner, callback: resolve });
+    });
+    return openFileResultSchema.parse({ opened: selected && current() });
   });
   handle(ipcChannels.filesOpen, async (_event, input) => {
     const parsed = filePathInputSchema.parse(input);

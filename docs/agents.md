@@ -4,7 +4,7 @@ An **Agent** is a saved persona with exactly one ongoing conversation of its own
 
 ## Use an Agent
 
-1. Select **Agents** in the sidebar and **+** to create one. The editor opens in **Settings → Agent → Saved agents**: name, avatar, model, thinking level, permission, tone, Skills and instructions. Select **Save agent**.
+1. Select **Agents** in the sidebar and **+** to create one. The editor opens in **Settings → Saved agents**: name, avatar, model, thinking level, permission, tone, Skills and instructions. Select **Save agent**.
 2. Click the Agent in the sidebar. Its conversation opens in the main pane and the sidebar stays on **Agents**. There is one conversation per Agent; it is not listed under any project.
 3. Ask for work in a project, for example “check why the build fails in fateUI”. The Agent starts a **run** with the `run_in_project` tool and answers right away. When the run finishes, its result is posted into the Agent's conversation and the Agent continues from there. The Agent is an orchestrator: it delegates every task, either to a run in your project or to a spawned child agent with its own model and effort, replies immediately with a short line such as “Let me get that task started for you”, and reports results when they land.
 
@@ -53,7 +53,7 @@ An Agent can read your Gmail and your primary Google Calendar, and send mail or 
 1. In Google Cloud Console, create a project and enable the **Gmail API** and the **Google Calendar API**.
 2. On the OAuth consent screen, choose External, add your address as a test user, then publish the app to **In production**. In Testing, Google ends the sign-in every 7 days. Google shows an unverified-app warning at sign-in; the app is your own.
 3. Create an OAuth client of type **Desktop app**.
-4. In **Settings → Agent → Google**, paste the client ID and secret, select **Save client**, then **Connect**. Your browser opens Google's sign-in. Fate UI asks only to read Gmail and Calendar events.
+4. In **Settings → Saved agents → Google**, paste the client ID and secret, select **Save client**, then **Connect**. Your browser opens Google's sign-in. Fate UI asks only to read Gmail and Calendar events.
 5. To let Agents send mail and change events, select **Allow sending**. Google asks for those two permissions.
 6. Turn on **Google** on the card of each Agent that should use it.
 
@@ -73,7 +73,7 @@ An Agent can read your Gmail and your primary Google Calendar, and send mail or 
 - **Full access** adds shell commands and MCP servers, for that Agent only. Choose it per Agent; existing Agents keep their permission.
 - Agent Teams children in a run are capped at the run's permission.
 - The browser is available only in the Agent's own conversation while it is the selected conversation. Runs do not use the browser.
-- The Agent's conversation and its runs have `web_search` and `web_fetch` at every permission level, and the Agent uses them before the browser for simple lookups. Search queries go to Parallel; **Settings → Agent → Web search** turns search off. See [Web search and fetch](features.md#web-search-and-fetch).
+- The Agent's conversation and its runs have `web_search` and `web_fetch` at every permission level, and the Agent uses them before the browser for simple lookups. Search queries go to Parallel; **Settings → AI settings → Web search** turns search off. See [Web search and fetch](features.md#web-search-and-fetch).
 - User-installed Pi extensions and project-local code are not loaded into Agent conversations or runs.
 - A run stops after 30 minutes. At most four runs are active at once, and a project keeps at most four live conversations; when they are full, the run fails instead of closing your work. Interrupted runs are not replayed.
 - **Turn off** on an Agent's row stops its conversation for real: any reply in progress is aborted, the session process ends, its runs are cancelled and nothing can be sent into the chat until you turn it back on. The saved conversation is kept and readable.

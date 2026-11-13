@@ -54,7 +54,11 @@ export interface RequestedTask {
   workspace?: AgentWorkspaceRequest;
 }
 
-export interface WorkflowNodeRequest extends RequestedTask {
+interface InheritedTaskRequest extends Omit<RequestedTask, 'permissionLevel'> {
+  permissionLevel?: PermissionLevel;
+}
+
+export interface WorkflowNodeRequest extends InheritedTaskRequest {
   id: string;
   dependsOn: string[];
   includeDependencyResults: boolean;
@@ -100,7 +104,7 @@ const routingSchema = Type.Object({
 export const taskOptions = {
   agent: Type.Optional(Type.String({ minLength: 1, maxLength: 100, description: 'Exact reusable agent selector from subagent_catalog. Omit for an unopinionated direct child.' })),
   role: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: '^[^\\u0000-\\u001F\\u007F]+$', description: 'Arbitrary delegated role label. Fate applies no built-in role policy or scenario behavior.' })),
-  permission: Type.Optional(stringEnum(permissions, 'Child authority. It can only narrow the parent session authority.')),
+  permission: Type.Optional(stringEnum(permissions, 'Child authority. Omission inherits the caller; explicit authority can only narrow it.')),
   model: Type.Optional(modelSelectionSchema),
   thinkingLevel: Type.Optional(stringEnum(thinkingLevels, 'Independent reasoning effort. Non-reasoning models use off.')),
   tools: Type.Optional(Type.Array(stringEnum(childToolNames, 'Exact Fate-owned child tool to enable.'), {
@@ -136,12 +140,15 @@ const workflowNodeSchema = Type.Object({
 }, { additionalProperties: false });
 
 export const workflowParameters = Type.Object({
-  action: stringEnum(['start', 'list', 'status', 'cancel', 'resume'] as const, 'Workflow operation. start requires nodes; status/cancel/resume require workflowId.'),
+  action: stringEnum(['start', 'list', 'status', 'results', 'cancel', 'resume', 'finalize'] as const, 'Workflow operation. finalize checks root-wide readiness; start requires nodes; status/results/cancel/resume require workflowId.'),
   nodes: Type.Optional(Type.Array(workflowNodeSchema, { minItems: 1, description: 'Required when action is start.' })),
   maxConcurrency: Type.Optional(Type.Integer({ minimum: 1, default: DEFAULT_RUNNING_CONCURRENCY })),
-  notifyParent: Type.Optional(stringEnum(notificationModes, 'Workflow-level notification after all nodes settle. The message includes the result text of every node whose own notifyParent is never; next-turn queues it as context and immediate also wakes the parent.', 'never')),
+  notifyParent: Type.Optional(stringEnum(notificationModes, 'Workflow-level notification after all nodes settle. The message previews nodes whose own notifyParent is never; results retrieves retained output. next-turn queues context and immediate also wakes the parent.', 'never')),
   budget: Type.Optional(budgetSchema),
-  workflowId: Type.Optional(Type.String({ minLength: 1, maxLength: 100, description: 'Required when action is status, cancel, or resume.' })),
+  workflowId: Type.Optional(Type.String({ minLength: 1, maxLength: 100, description: 'Required when action is status, results, cancel, or resume.' })),
+  nodeIds: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 80 }), { description: 'For results, select exact node IDs. Omit for all nodes; unknown IDs are errors.' })),
+  textOffset: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'For results, UTF-16 character offset into each result and error. Defaults to zero.' })),
+  textLength: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'For results, characters to return from each result and error. Omit for the full remainder.' })),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: 'Optional cancellation reason when action is cancel.' })),
 }, { additionalProperties: false });
 
@@ -152,8 +159,8 @@ export const catalogParameters = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, default: 200 })),
 }, { additionalProperties: false });
 
-function normalizePermission(value: unknown): PermissionLevel {
-  return typeof value === 'string' && (permissions as readonly string[]).includes(value) ? value as PermissionLevel : 'read-only';
+function normalizePermission(value: unknown): PermissionLevel | undefined {
+  return typeof value === 'string' && (permissions as readonly string[]).includes(value) ? value as PermissionLevel : undefined;
 }
 
 function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefined {
@@ -199,7 +206,7 @@ function normalizeBudget(value: unknown): SubagentBudget | undefined | null {
   return Object.keys(budget).length ? budget : undefined;
 }
 
-function normalizeTask(candidate: Record<string, unknown>, managed: boolean): RequestedTask | null {
+function normalizeTask(candidate: Record<string, unknown>, managed: boolean): InheritedTaskRequest | null {
   const task = candidate.task;
   if (typeof task !== 'string' || !task.trim()) return null;
   const timeoutMs = normalizeDurationMs(candidate.timeoutSeconds, DEFAULT_TIMEOUT_SECONDS);
@@ -213,6 +220,8 @@ function normalizeTask(candidate: Record<string, unknown>, managed: boolean): Re
   if (candidate.role !== undefined && !role) return null;
   const instructions = typeof candidate.instructions === 'string' && candidate.instructions.trim() ? candidate.instructions.trim() : undefined;
   if (candidate.instructions !== undefined && !instructions) return null;
+  const permissionLevel = normalizePermission(candidate.permission);
+  if (candidate.permission !== undefined && permissionLevel === undefined) return null;
   const model = normalizeModel(candidate.model);
   if (candidate.model !== undefined && !model) return null;
   const thinkingLevel = normalizeThinkingLevel(candidate.thinkingLevel);
@@ -282,7 +291,7 @@ function normalizeTask(candidate: Record<string, unknown>, managed: boolean): Re
     task: task.trim(),
     ...(agent ? { agent } : {}),
     ...(role ? { role } : {}),
-    permissionLevel: normalizePermission(candidate.permission),
+    ...(permissionLevel === undefined ? {} : { permissionLevel }),
     ...(model ? { model } : {}),
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(tools === undefined ? {} : { tools }),
@@ -308,7 +317,9 @@ export function normalizeLaunchRequests(value: unknown, managed: boolean): Reque
   if (hasSingle === hasParallel) return null;
   const raw = hasSingle ? [{ ...input, task: input.task }] : input.tasks as unknown[];
   const requests = raw.flatMap((item) => item && typeof item === 'object' && !Array.isArray(item) ? [normalizeTask(item as Record<string, unknown>, managed)] : [null]);
-  return requests.length && requests.every((item): item is RequestedTask => item !== null) ? requests : null;
+  return requests.length && requests.every((item): item is InheritedTaskRequest => item !== null)
+    ? requests.map((request) => ({ ...request, permissionLevel: request.permissionLevel ?? 'read-only' }))
+    : null;
 }
 
 export function normalizeWorkflowStart(value: unknown): WorkflowStartRequest | null {

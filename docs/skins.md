@@ -134,6 +134,7 @@ The only supported `appearance` keys are `interfaceFont`, `codeFont`, `compactMo
 | `music` | Dock, transport, local/remote source input, populated playlist |
 | `settings`, `dialogs` | Settings sections, selectors, general popovers/dialogs and confirmations |
 | `modelPicker`, `tooltips` | Model/reasoning/provider pickers, the reasoning effort slider, options, app tooltips and native-title tooltips |
+| `hyp3rc0d3` | The Hyp3rc0d3 chip beside the `Reasoning` disclosure |
 | `files`, `changes` | File tree, preview chrome, review controls, Git rows |
 | `browser` | Tab strip, new/close tab buttons, address field, Back/Forward/Reload, local-file/annotation/device controls; not the Chromium page itself |
 | `learning`, `automations` | Memory library/review forms; `automations` remains a legacy pack key with no current UI target |
@@ -145,6 +146,16 @@ The composer keeps Memory, its tools menu, model selection, and send/stop contro
 ### Reasoning effort slider
 
 The model popover shows reasoning as a slider by default; the arrow on the `Reasoning` row switches to the dropdown menu and back, and that choice persists. The slider is a pointer-driven control, not a native range input: the thumb follows the pointer, snaps to the nearest level on release, and the keyboard moves one level per arrow key. Hooks: `.effort-slider` (the `role="slider"` element; `data-dragging` while the pointer is down, `data-level` with the selected index, `data-max` at the top level, `aria-disabled` when the next model has no reasoning), `.effort-slider-rail`, `.effort-slider-track` (the empty wedge), `.effort-slider-fill` (the filled wedge, masked to `--effort`), `.effort-slider-thumb`, `.effort-slider-value` (the level name floating above the thumb), and `.model-setting-toggle` (the arrow, `aria-expanded` when the menu is shown). Two registered custom properties drive the look and animate between levels: `--effort` (percentage along the rail) and `--heat` (0 to 1), so a skin can scale size, glow, or colour with the selected level. Version 2 packs get `controlRadius` applied to the thumb and toggle through `--surface-control-radius`, and colours always come from the palette.
+
+### Hyp3rc0d3 chip
+
+Hyp3rc0d3 is a text button on the `Reasoning` row, immediately left of the slider/dropdown arrow. It reads as plain theme text while off; while on the glyphs carry a static hue ramp, so each theme tints the word with its own accent, success, warning and danger colours. There is no background panel and no animation. Turning it on does not change the reasoning level — every level works, and the slider stays where you put it.
+
+Hooks: `.hyp3rc0d3-toggle` (`aria-pressed` reflects the state, `data-active` is present only while on, `disabled` when the next model has no reasoning or the host cannot change it). One property drives the look: `--hyp3rc0d3-ramp`, the gradient painted through the text, defaulting to `accent`, `accentHover`, `success`, `warning` and `danger`.
+
+Reduced motion, Performance mode and Holy Shit mode strip painted backgrounds, so there the word falls back to the solid palette accent instead of a ramp. Nothing runs while the popover is closed.
+
+Skins style it through the `hyp3rc0d3` surface entry: `padding` sets its hit area and `controlRadius` shapes the focus ring, while colours always come from the palette. Angelcore sets it in its interface type with tighter padding; M3 Expressive widens it.
 
 ### Questionnaire field
 

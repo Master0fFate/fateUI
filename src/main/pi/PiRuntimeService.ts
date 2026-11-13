@@ -7,11 +7,12 @@ import { projectLearningKey } from '../learning/LearningRepository';
 import { createRememberTool } from '../learning/RememberTool';
 import { fateProviderStoragePaths } from './FateProviderStorage';
 import { ProviderFileSync } from './ProviderFileSync';
+import { providerLoginDeviceId } from './ProviderLoginDeviceId';
 import { piPromptDisposition, type PiPromptDisposition } from './PiSdkCompatibility';
 import { McpConfigService } from './McpConfigService';
 import { createMcpTool } from './McpService';
 import { loadFateSessionExtensions } from './FateSessionExtensions';
-import { forgetHyp3rc0d3Session, hyp3rc0d3ThinkingLevel, isHyp3rc0d3, setHyp3rc0d3Session } from './context/Hyp3rc0d3';
+import { forgetHyp3rc0d3Session, hydrateHyp3rc0d3Session, isHyp3rc0d3, prepareHyp3rc0d3Session, readHyp3rc0d3Session, setHyp3rc0d3Session } from './context/Hyp3rc0d3';
 import { createPullRequestTools } from './git/PullRequestTools';
 import { createBranchTools } from './git/BranchTools';
 import { GitService } from '../git/GitService';
@@ -26,6 +27,7 @@ import {
   type CreateAgentSessionRuntimeFactory,
   type ToolDefinition,
   DefaultPackageManager,
+  CredentialSynchronizationError,
   ModelRuntime,
   defineTool,
   SessionManager,
@@ -100,7 +102,7 @@ import { expandMultipleSkillCommands, parseCompactCommand, promoteInlineResource
 import { createPiExtensionUiBridge, emptyExtensionUiState, type ExtensionNoticeLevel, type PiExtensionUiBridge } from './PiExtensionUi';
 import { QuestionnaireCoordinator } from './QuestionnaireCoordinator';
 import { PiDesktopError, authRequiredError, normalizeError } from './errors';
-import { defaultSessionsRoot, isSafeSessionPath, PiSessionRepository, sessionDisplayTitle, type SessionSnapshot } from './PiSessionRepository';
+import { defaultSessionsRoot, isSafeSessionPath, persistHyp3rc0d3Session, PiSessionRepository, sessionDisplayTitle, type SessionSnapshot } from './PiSessionRepository';
 import { prepareFateProviderStorage } from './FateProviderStorage';
 import { ModelsDevService } from './modelsdev/ModelsDevService';
 import { ModelsDevStore } from './modelsdev/ModelsDevStore';
@@ -190,11 +192,12 @@ const MAX_LIVE_RUNTIME_SLOTS = 4;
 const MAX_SESSION_ATTENTION_ENTRIES = 1_000;
 const MAX_MANUAL_SESSION_NAME_CLAIMS = 5_000;
 const MAX_COLD_PENDING_MODELS = 1_000;
-const HYP3RC0D3_KEYWORD = /^\s*hyp3rc0d3:\s*/iu;
+const HYP3RC0D3_KEYWORD = /^\s*(?:hyp3rc0d3|hypercode):\s*/iu;
 const MAX_TOKEN_USAGE_HISTORY = 120;
 const MAX_TOKEN_TELEMETRY_COST = 1_000_000_000;
 
 type SessionModel = NonNullable<AgentSession['model']>;
+
 interface StagedModel {
   token: string;
   model: SessionModel;
@@ -486,6 +489,8 @@ interface RuntimeSlot {
   /** Per-runtime handle the root attestation sink reads; assigned when the slot is created. */
   attestationHandle?: { slot: RuntimeSlot | null };
   stateError: AppError | null;
+  reloadError: AppError | null;
+  reloadRevision: number;
   contextUsageEstimate: number | null;
   pendingModel: StagedModel | null;
   pendingThinkingLevel: StagedThinkingLevel | null;
@@ -572,6 +577,7 @@ function goalObservationFromRuntimeTool(tool: RuntimeTool): GoalMaxRuntimeChildO
 
 const toolAccessBySession = new WeakMap<AgentSession, ProjectToolAccess & { permissionLevel: PermissionLevel; assertExecutionAdmission?: () => void }>();
 const ownedCustomToolsBySession = new WeakMap<AgentSession, readonly ToolDefinition[]>();
+const extensionCommandRunIds = new WeakMap<AgentSession, string>();
 
 export function assertOwnedToolDefinitions(
   session: Pick<AgentSession, 'getToolDefinition'>,
@@ -1334,13 +1340,13 @@ export class PiRuntimeService {
   /** A selected saved transcript rendered from JSONL without a live Pi agent. */
   private coldSession: ColdSessionState | null = null;
   private readonly liveSlots = new Set<RuntimeSlot>();
+  private readonly hyp3rc0d3Forks = new WeakMap<AgentSessionRuntime, { source: AgentSession; apply(session: AgentSession): void }>();
   private resourceCache: { projectPath: string; commands: NonNullable<RuntimeState['commands']>; skills: NonNullable<RuntimeState['skills']> } | null = null;
   private readonly pendingDisposals = new Set<Promise<void>>();
   private readonly sessionAttention = new Map<string, SessionAttentionRecord>();
   private readonly manualSessionNames = new Set<string>();
   private readonly coldPendingModels = new Map<string, ModelInfo>();
   private readonly coldPendingThinkingLevels = new Map<string, ThinkingLevel>();
-  private readonly hyp3rc0d3PriorLevels = new Map<string, ThinkingLevel>();
   private modelRuntime: ModelRuntime | null = null;
   private models: ModelInfo[] = [];
   private fallbackPermissionLevel: PermissionLevel = 'full-access';
@@ -1386,6 +1392,7 @@ export class PiRuntimeService {
   private promptIdentityContext: { key: string; value: Promise<ProjectIdentityContext | null> } | null = null;
   private providerLogin: ProviderLoginState = { status: 'idle', providers: [], providerId: null, providerName: null, method: null, prompt: null, message: null, deviceCode: null };
   private providerLoginAbort: AbortController | null = null;
+  private providerLoginRevision = 0;
   /** Canceled SDK work still owns credential storage until its promise settles. */
   private providerLoginSettlement: Promise<void> | null = null;
   private executionAdmissionGuard: () => void = () => undefined;
@@ -1995,8 +2002,8 @@ export class PiRuntimeService {
   /** Set a lightweight focused-project snapshot without starting Pi. */
   setProjectPreview(project: ProjectState | null, sessions: SessionSummary[] = [], announce = false): RuntimeState {
     if (this.liveSlots.size > 0) throw new PiDesktopError({ code: 'RUN_ACTIVE', message: 'Cannot replace a live Pi project with a preview.', retryable: true });
+    this.clearColdSession();
     this.project = project;
-    this.coldSession = null;
     this.status = 'disconnected';
     this.models = [];
     this.sessions = sessions.slice(0, 1_000);
@@ -2337,8 +2344,24 @@ export class PiRuntimeService {
   async prompt(input: PromptInput, skipCommandExpansion = false, preparedPrompt = false, replayedMessage?: QueuedMessageRecord,
     assertAdmission?: () => void): Promise<PromptAcceptance> {
     if (this.hostStopping) throw new Error('The core is shutting down; prompts are closed.');
+    if (!skipCommandExpansion && !preparedPrompt && !replayedMessage && /^\/reload$/iu.test(input.text.trim())) {
+      if (input.images?.length || input.browserAnnotations?.length || input.sessionReferences?.length || input.learning?.pins.length) {
+        throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Send /reload without attachments or selected learning.', retryable: true });
+      }
+      const sessionId = this.selectedSessionId;
+      const initialization = this.initialization;
+      const selectionGeneration = this.coldSelectionGeneration;
+      assertAdmission?.();
+      await this.materializeColdSession();
+      if (initialization !== this.initialization || selectionGeneration !== this.coldSelectionGeneration || sessionId !== this.selectedSessionId) throw this.replacementSuperseded();
+      await this.reloadSession(this.selectedSlot, assertAdmission);
+      return { accepted: true, runId: randomUUID() };
+    }
     if (this.status === 'auth-required') throw new PiDesktopError(this.stateError ?? authRequiredError());
+    const sessionId = this.selectedSessionId;
+    const hyp3rc0d3 = sessionId && !replayedMessage && HYP3RC0D3_KEYWORD.test(input.text) ? prepareHyp3rc0d3Session(sessionId) : null;
     await this.materializeColdSession();
+    if (hyp3rc0d3 && this.selectedSessionId !== sessionId) throw this.replacementSuperseded();
     this.requireSession();
     this.cancelPromptOptimization();
     if (!skipCommandExpansion && !preparedPrompt && !replayedMessage) {
@@ -2352,21 +2375,70 @@ export class PiRuntimeService {
         return this.startCompactCommand(compact.instructions);
       }
     }
-    return this.promptSlot(this.selectedSlot!, input, skipCommandExpansion, preparedPrompt, replayedMessage, assertAdmission ? { assertAdmission } : {});
+    return this.promptSlot(this.selectedSlot!, input, skipCommandExpansion, preparedPrompt, replayedMessage, { ...(assertAdmission ? { assertAdmission } : {}), hyp3rc0d3 });
+  }
+
+  private async reloadSession(slot: RuntimeSlot | null, assertAdmission?: () => void, commandRunId?: string): Promise<void> {
+    const session = this.requireRuntimeIdleSession('reloading resources', true);
+    const initialization = this.initialization;
+    const selectionGeneration = this.coldSelectionGeneration;
+    const sessionGeneration = slot?.sessionGeneration;
+    const assertTarget = () => {
+      if (this.hostStopping || initialization !== this.initialization || selectionGeneration !== this.coldSelectionGeneration
+        || !slot || slot.disposed || this.selectedSlot !== slot || sessionGeneration !== slot.sessionGeneration || slot.runtime.session !== session) throw this.replacementSuperseded();
+      this.assertPermissionAdmission(slot, true);
+      assertAdmission?.();
+    };
+    const assertIdle = () => {
+      if (slot?.activeRunId !== null && slot?.activeRunId !== commandRunId
+        || this.sessionHasActiveWork(session) || session.isIdle === false || this.hasActiveAgentWork(session.sessionId) || this.goalMax.hasRunnableGoal(session.sessionId)) {
+        throw this.activeOperationError('reloading resources');
+      }
+    };
+    assertTarget();
+    assertIdle();
+    await this.runReplacement(async (_runtime, currentSlot) => {
+      assertTarget();
+      if (currentSlot !== slot) throw this.replacementSuperseded();
+      assertIdle();
+      currentSlot.reloadRevision += 1;
+      const applyPolicy = () => {
+        assertTarget();
+        assertOwnedToolDefinitions(session, ownedCustomToolsBySession.get(session) ?? []);
+        this.applyGoalAgentPolicy(currentSlot, session, this.project ? this.goalMax.get(this.project.path, session.sessionId) : null);
+      };
+      currentSlot.reloadError = { code: 'RUN_ACTIVE', message: 'Resources are reloading. Wait for /reload to finish.', retryable: true };
+      try {
+        currentSlot.extensionUi?.clear();
+        await session.reload({ beforeSessionStart: applyPolicy });
+        applyPolicy();
+        if (this.modelRuntime) {
+          const available = await this.modelRuntime.getAvailable();
+          assertTarget();
+          this.publishModelCatalog(available);
+        }
+        currentSlot.reloadError = null;
+        this.emitSystemMessage('Resources reloaded.', 'info');
+      } catch (error) {
+        const failure = normalizeError(error);
+        currentSlot.reloadError = { code: 'PI_RUNTIME_ERROR', message: `Resource reload failed. Fix the resource error and send /reload to retry. ${failure.message}`, retryable: true };
+        throw new PiDesktopError(currentSlot.reloadError);
+      }
+    }, false);
   }
 
   private async promptSlot(slot: RuntimeSlot, input: PromptInput, skipCommandExpansion: boolean, preparedPrompt: boolean, replayedMessage: QueuedMessageRecord | undefined,
-    options: { assertAdmission?: () => void; pinned?: boolean }): Promise<PromptAcceptance> {
+    options: { assertAdmission?: () => void; pinned?: boolean; hyp3rc0d3?: ReturnType<typeof prepareHyp3rc0d3Session> | null }): Promise<PromptAcceptance> {
     if (this.hostStopping) throw new Error('The core is shutting down; prompts are closed.');
     const session = slot.runtime.session;
     const hyp3rc0d3Match = HYP3RC0D3_KEYWORD.exec(input.text);
+    const pendingHyp3rc0d3 = options.hyp3rc0d3 === undefined
+      ? hyp3rc0d3Match && !replayedMessage ? prepareHyp3rc0d3Session(session.sessionId) : null
+      : options.hyp3rc0d3;
     if (hyp3rc0d3Match) {
       const text = input.text.slice(hyp3rc0d3Match[0].length);
       if (!text.trim()) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Add a message after the Hyp3rc0d3 keyword.', retryable: true });
-      this.rememberHyp3rc0d3PriorLevel(session.sessionId, slot.pendingThinkingLevel?.level ?? session.thinkingLevel);
-      setHyp3rc0d3Session(session.sessionId, true);
       input = { ...input, text };
-      if (this.selectedSlot === slot) this.emitState();
     }
     const agentPreset = getAgentSessionPreset(session);
     const workspacePolicy = this.agentWorkspacePolicySource();
@@ -2374,6 +2446,12 @@ export class PiRuntimeService {
     if (agentPreset && !agentPreset.runId && this.agentSessionGate) await this.agentSessionGate(agentPreset.agentId);
     const targeted = () => options.pinned === true || this.selectedSlot === slot;
     const promptEpoch = slot.promptEpoch;
+    const reloadRevision = slot.reloadRevision;
+    const assertPromptResources = () => {
+      if (this.replacementActive || reloadRevision !== slot.reloadRevision) {
+        throw new PiDesktopError({ code: 'RUN_ACTIVE', message: 'Resources changed or are reloading. Send this prompt again after /reload finishes.', retryable: true });
+      }
+    };
     const draftText = replayedMessage?.text ?? input.text;
     // Prompt preparation can await attachments while Pi begins a continuation.
     // Keep that initial observation so the later guard can preserve user intent.
@@ -2430,6 +2508,8 @@ export class PiRuntimeService {
       && (initialization !== this.initialization || slot.disposed || !targeted() || slot.runtime.session !== session)
     ) throw this.replacementSuperseded();
     if (slot.promptEpoch !== promptEpoch) throw this.replacementSuperseded();
+    assertPromptResources();
+    this.assertPermissionAdmission(slot);
     validatePromptImages(input.images);
     const images = input.images?.map(({ data, mimeType }) => ({ type: 'image' as const, data, mimeType }));
     // SDK input hooks can change streaming state before native admission. Reserve
@@ -2473,9 +2553,12 @@ export class PiRuntimeService {
       try {
         await this.persistQueue(slot);
         options.assertAdmission?.();
-        if (slot.disposed || !targeted() || slot.runtime.session !== session || slot.promptEpoch !== promptEpoch) throw this.replacementSuperseded();
+        if (initialization !== this.initialization || slot.disposed || !targeted() || slot.runtime.session !== session || slot.promptEpoch !== promptEpoch) throw this.replacementSuperseded();
+        pendingHyp3rc0d3?.commit(() => this.persistHyp3rc0d3(session, true));
       } catch (error) {
+        pendingHyp3rc0d3?.cancel();
         slot.heldCompactionMessages = slot.heldCompactionMessages.filter((item) => item.id !== heldRecord.id);
+        this.checkpointQueue(slot);
         throw error;
       }
       if (!replayedMessage && !options.assertAdmission && !promptStartsWithCommand) slot.freshIntentQueueIds.add(heldRecord.id);
@@ -2533,10 +2616,10 @@ export class PiRuntimeService {
         }
         try {
           if (stagedModel) await session.setModel(stagedModel.model);
+          assertPromptResources();
           // Apply reasoning after the staged model so Pi validates it against
           // the model that will actually receive the next user message.
           if (stagedThinkingLevel) session.setThinkingLevel(stagedThinkingLevel.level);
-          this.applyHyp3rc0d3Effort(session, session.model);
         } catch (error) {
           if (stagedModel) restoreStagedModel(stagedModel);
           if (stagedThinkingLevel) restoreStagedThinkingLevel(stagedThinkingLevel);
@@ -2628,6 +2711,7 @@ export class PiRuntimeService {
       }
     }
     try {
+      assertPromptResources();
       this.assertPermissionAdmission(slot);
       // Saved Agent preparation above can await disk after its outer gate.
       // Recheck immediately before the existing Pi SDK prompt admission.
@@ -2643,6 +2727,7 @@ export class PiRuntimeService {
       this.checkpointQueue(slot);
       if (this.selectedSlot === slot) this.emitState();
     } });
+    pendingHyp3rc0d3?.prepare();
     let settled = false;
     return new Promise<PromptAcceptance>((resolve) => {
       const releaseQueuedReservation = (restoreModel: boolean): void => {
@@ -2654,6 +2739,7 @@ export class PiRuntimeService {
         if (restoreModel && queuedRecord.boundThinkingLevel) restoreStagedThinkingLevel(queuedRecord.boundThinkingLevel);
       };
       const rejectReservation = (): void => {
+        pendingHyp3rc0d3?.cancel();
         if (replayedMessage) slot.freshIntentQueueIds.delete(replayedMessage.id);
         slot.learningContext?.cancel(runId);
         releaseQueuedReservation(true);
@@ -2677,6 +2763,10 @@ export class PiRuntimeService {
             catch (error) { rejectReservation(); resolve({ accepted: false, runId }); throw error; }
           }
           if (replayedMessage) slot.freshIntentQueueIds.delete(replayedMessage.id);
+          if (disposition !== 'handled') {
+            try { pendingHyp3rc0d3?.commit(() => this.persistHyp3rc0d3(session, true)); }
+            catch (error) { rejectReservation(); resolve({ accepted: false, runId }); throw error; }
+          }
           if (disposition === 'handled') {
             // An extension consumed the input without admitting a model turn.
             // Restore staged choices and discard provisional queue/learning
@@ -2724,6 +2814,10 @@ export class PiRuntimeService {
         }
         resolve({ accepted, runId });
       };
+      const extensionCommandName = !skipCommandExpansion && /^\/([^\s]+)(?:\s|$)/u.exec(promptText)?.[1];
+      if (startsRun && extensionCommandName && session.extensionRunner?.getRegisteredCommands?.().some((command) => command.invocationName === extensionCommandName)) {
+        extensionCommandRunIds.set(session, runId);
+      }
       void session.prompt(promptText, {
         ...(images ? { images } : {}),
         ...(effectiveBehavior === 'prompt' ? {} : { streamingBehavior: effectiveBehavior }),
@@ -2750,6 +2844,8 @@ export class PiRuntimeService {
         slot.runFailed = true;
         if (this.selectedSlot === slot) this.emitError(normalized);
       }).finally(() => {
+        if (extensionCommandRunIds.get(session) === runId) extensionCommandRunIds.delete(session);
+        pendingHyp3rc0d3?.cancel();
         if (slot.activeRunId === runId) slot.activeRunId = null;
         if (queuedRecord && slot.startingQueuedMessage === queuedRecord) {
           slot.startingQueuedMessage = null;
@@ -2971,11 +3067,6 @@ export class PiRuntimeService {
       if (level !== 'off' && !effectiveModel?.reasoning) {
         throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The model selected for the next message does not support reasoning.', retryable: true });
       }
-      if (isHyp3rc0d3(sessionId)) {
-        this.rememberHyp3rc0d3PriorLevel(sessionId, level);
-        this.emitState();
-        return this.getState(false);
-      }
       cold.pendingThinkingLevel = level;
       this.rememberColdPendingThinkingLevel(sessionId, level);
       this.fallbackStateError = null;
@@ -2989,11 +3080,6 @@ export class PiRuntimeService {
     if (level !== 'off' && !effectiveModel?.reasoning) {
       throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The model selected for the next message does not support reasoning.', retryable: true });
     }
-    if (isHyp3rc0d3(sessionId)) {
-      this.rememberHyp3rc0d3PriorLevel(sessionId, level);
-      this.emitState();
-      return this.getState(false);
-    }
     slot.pendingThinkingLevel = { token: randomUUID(), level };
     this.coldPendingThinkingLevels.delete(sessionId);
     slot.stateError = null;
@@ -3001,46 +3087,32 @@ export class PiRuntimeService {
     return this.getState(false);
   }
 
-  setHyp3rc0d3(enabled: boolean): RuntimeState {
+  private persistHyp3rc0d3(session: AgentSession, enabled: boolean): void {
+    persistHyp3rc0d3Session(session.sessionManager, enabled);
+    if (this.project) this.sessionRepository.invalidate(this.project.path);
+  }
+
+  async setHyp3rc0d3(enabled: boolean): Promise<RuntimeState> {
     const cold = this.coldSession;
     if (cold) {
-      const sessionId = cold.snapshot.summary.id;
-      if (enabled) {
-        const model = this.coldSessionModel(cold);
-        if (!model?.reasoning) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Hyp3rc0d3 needs a model that supports reasoning.', retryable: true });
-        this.rememberHyp3rc0d3PriorLevel(sessionId, cold.pendingThinkingLevel ?? cold.thinkingLevel);
-        setHyp3rc0d3Session(sessionId, true);
-        const level = hyp3rc0d3ThinkingLevel(model);
-        cold.pendingThinkingLevel = level;
-        this.rememberColdPendingThinkingLevel(sessionId, level);
-      } else {
-        if (!isHyp3rc0d3(sessionId)) return this.getState(false);
-        forgetHyp3rc0d3Session(sessionId);
-        const prior = this.takeHyp3rc0d3PriorLevel(sessionId);
-        cold.pendingThinkingLevel = prior;
-        if (prior) this.rememberColdPendingThinkingLevel(sessionId, prior);
-        else this.coldPendingThinkingLevels.delete(sessionId);
-      }
-      this.fallbackStateError = null;
-      this.emitState();
-      return this.getState(false);
+      const project = this.project;
+      const initialization = this.initialization;
+      const selectionGeneration = this.coldSelectionGeneration;
+      const assertCurrent = () => {
+        if (!project || this.project !== project || initialization !== this.initialization || selectionGeneration !== this.coldSelectionGeneration || this.coldSession !== cold) throw this.replacementSuperseded();
+      };
+      return this.runColdSessionOperation(async () => {
+        assertCurrent();
+        await this.sessionRepository.setHyp3rc0d3(project!.path, cold.snapshot.summary.id, enabled, assertCurrent);
+        assertCurrent();
+        cold.snapshot = { ...cold.snapshot, hyp3rc0d3: enabled };
+        setHyp3rc0d3Session(cold.snapshot.summary.id, enabled);
+      });
     }
     const session = this.requireSession();
     const slot = this.selectedSlot!;
-    if (enabled) {
-      const effectiveModel = slot.pendingModel?.model ?? session.model;
-      if (!effectiveModel?.reasoning) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Hyp3rc0d3 needs a model that supports reasoning.', retryable: true });
-      this.rememberHyp3rc0d3PriorLevel(session.sessionId, slot.pendingThinkingLevel?.level ?? session.thinkingLevel);
-      slot.pendingThinkingLevel = null;
-      this.coldPendingThinkingLevels.delete(session.sessionId);
-      setHyp3rc0d3Session(session.sessionId, true);
-      this.applyHyp3rc0d3Effort(session, effectiveModel);
-    } else {
-      if (!isHyp3rc0d3(session.sessionId)) return this.getState(false);
-      forgetHyp3rc0d3Session(session.sessionId);
-      const prior = this.takeHyp3rc0d3PriorLevel(session.sessionId);
-      if (prior && session.model) session.setThinkingLevel(prior);
-    }
+    this.persistHyp3rc0d3(session, enabled);
+    setHyp3rc0d3Session(session.sessionId, enabled);
     slot.stateError = null;
     this.emitState();
     return this.getState(false);
@@ -3194,10 +3266,11 @@ export class PiRuntimeService {
     if (this.permissionStoreFailure) throw new PiDesktopError(this.permissionStoreFailure);
   }
 
-  private assertPermissionAdmission(target: ColdSessionState | RuntimeSlot): void {
+  private assertPermissionAdmission(target: ColdSessionState | RuntimeSlot, reloadRepair = false): void {
     if (this.hostStopping) throw new Error('The core is shutting down; new admissions are closed.');
     this.executionAdmissionGuard();
     this.assertPermissionPublication();
+    if ('reloadError' in target && target.reloadError && !reloadRepair) throw new PiDesktopError(target.reloadError);
     if (target.permissionError) throw new PiDesktopError(target.permissionError);
     if (target.permissionChange) throw this.activeOperationError('executing while permissions are being saved');
     if ('sessionInvalidated' in target && target.sessionInvalidated) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Session permissions are not ready. Reopen the project before continuing.', retryable: true });
@@ -3228,8 +3301,15 @@ export class PiRuntimeService {
     if (this.replacementActive || (session && this.sessionHasActiveWork(session))) {
       throw new PiDesktopError({ code: 'RUN_ACTIVE', message: 'Wait for the active Pi operation to finish before signing in.', retryable: true });
     }
-    const runtime = await this.providerLoginRuntime();
-    // The model-runtime await can admit another workspace before this resumes.
+    const revision = this.providerLoginRevision;
+    let runtime: ModelRuntime;
+    try {
+      runtime = await this.providerLoginRuntime();
+    } catch {
+      if (revision !== this.providerLoginRevision) return this.getState(false);
+      throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Provider sign-in could not initialize the SDK runtime. Check provider configuration and try again.', retryable: true });
+    }
+    if (revision !== this.providerLoginRevision) return this.getState(false);
     assertHostAdmission();
     if (this.hostStopping || this.providerLoginAbort || this.providerLoginSettlement) throw new PiDesktopError({ code: 'RUN_ACTIVE', message: 'Wait for the previous provider sign-in to settle.', retryable: true });
     const provider = runtime.getProvider(input.providerId);
@@ -3241,6 +3321,9 @@ export class PiRuntimeService {
     this.providerLogin = { ...this.providerLoginState(), status: 'working', providerId: provider.id, providerName: provider.name, method: input.method, prompt: null, message: 'Preparing secure provider sign-in…', deviceCode: null };
     this.emitState();
     let authorizationUrl: string | null = null;
+    let stage = 'provider setup';
+    let credentialSaved = false;
+    let catalogRefreshFailed = false;
     const prompt = (request: { type: 'text' | 'secret' | 'select' | 'manual_code'; message: string; placeholder?: string; options?: readonly { id: string; label: string; description?: string }[]; signal?: AbortSignal }) => new Promise<string>((resolve, reject) => {
       if (controller.signal.aborted || this.providerLoginAbort !== controller || request.signal?.aborted) { reject(new Error('Login cancelled')); return; }
       const id = randomUUID();
@@ -3260,6 +3343,8 @@ export class PiRuntimeService {
     });
     const notify = (event: { type: 'info' | 'auth_url' | 'device_code' | 'progress'; message?: string; url?: string; userCode?: string; verificationUri?: string; expiresInSeconds?: number }) => {
       if (controller.signal.aborted || this.providerLoginAbort !== controller) return;
+      if (event.type === 'auth_url' || event.type === 'device_code') stage = 'provider authorization';
+      if (event.type === 'progress' && event.message === 'Exchanging authorization code for tokens...') stage = 'credential exchange';
       if (event.type === 'auth_url') authorizationUrl = event.url ? this.openProviderAuthUrl(event.url) : null;
       const verificationUri = event.type === 'device_code' && event.verificationUri ? this.openProviderAuthUrl(event.verificationUri) : null;
       // Keep the complete validated URL available in the existing bounded message
@@ -3274,15 +3359,27 @@ export class PiRuntimeService {
       this.providerLogin = { ...this.providerLoginState(), status: 'working', providerId: provider.id, providerName: provider.name, method: input.method, prompt: pendingManualPrompt, message: message.slice(0, 2_000), deviceCode: event.type === 'device_code' && event.userCode && verificationUri ? { userCode: event.userCode.slice(0, 500), verificationUri, ...(event.expiresInSeconds ? { expiresInSeconds: Math.min(86_400, Math.max(1, Math.floor(event.expiresInSeconds))) } : {}) } : (pendingManualPrompt ? this.providerLogin.deviceCode : null) };
       this.emitState();
     };
-    const settlement = Promise.resolve().then(() => {
+    const settlement = Promise.resolve().then(async () => {
+      if (controller.signal.aborted || this.providerLoginAbort !== controller) throw new Error('Login cancelled');
+      stage = 'installation identity';
+      const deviceId = input.method === 'oauth' ? await providerLoginDeviceId(this.paths?.piAgentDir) : undefined;
       if (controller.signal.aborted || this.providerLoginAbort !== controller) throw new Error('Login cancelled');
       assertHostAdmission();
-      return runtime.login(provider.id, input.method, { signal: controller.signal, prompt, notify });
-    }).then(async () => {
+      stage = 'provider setup';
+      try {
+        await runtime.login(provider.id, input.method, { signal: controller.signal, prompt, notify }, deviceId ? { getDeviceId: () => deviceId } : undefined);
+      } catch (error) {
+        if (!(error instanceof CredentialSynchronizationError) || error.providerId !== provider.id || error.operation !== 'login') throw error;
+        catalogRefreshFailed = true;
+      }
+      credentialSaved = true;
       if (controller.signal.aborted || this.providerLoginAbort !== controller) return;
-      // Providers can publish a remote catalog only after credentials exist.
-      // Force a live fetch so /login does not reuse pi's 4-hour catalog TTL.
-      await runtime.refresh({ allowNetwork: true, force: true });
+      try {
+        const refresh = await runtime.refresh({ allowNetwork: true, force: true, signal: controller.signal });
+        catalogRefreshFailed ||= refresh.aborted || refresh.errors.size > 0;
+      } catch {
+        catalogRefreshFailed = true;
+      }
       if (controller.signal.aborted || this.providerLoginAbort !== controller) return;
       const available = await runtime.getAvailable();
       if (controller.signal.aborted || this.providerLoginAbort !== controller) return;
@@ -3291,15 +3388,24 @@ export class PiRuntimeService {
         this.status = available.length > 0 ? 'ready' : 'auth-required';
         this.stateError = available.length > 0 ? null : authRequiredError();
       }
-    }).catch(() => {
-      if (!controller.signal.aborted && this.providerLoginAbort === controller) this.providerLogin = { ...this.providerLoginState(), status: 'error', message: 'Provider sign-in did not finish. Check the provider page and try again.', prompt: null, deviceCode: null };
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || this.providerLoginAbort !== controller) return;
+      if (credentialSaved) { catalogRefreshFailed = true; return; }
+      const message = stage === 'installation identity'
+        ? 'Provider sign-in could not load or save the installation device ID. Check SDK settings access and try again.'
+        : error instanceof Error && error.message.startsWith('Port 1455 is in use, probably by an unfinished login')
+          ? 'Provider sign-in could not start because callback port 1455 is in use. Cancel other pending sign-ins and try again.'
+          : `Provider sign-in failed during ${stage}. Check the provider page and try again.`;
+      this.providerLogin = { ...this.providerLoginState(), status: 'error', message, prompt: null, deviceCode: null };
     }).finally(() => {
       if (this.providerLoginAbort !== controller) return;
       this.providerLoginResponse?.detachAbort?.();
       this.providerLoginResponse = null;
       this.providerLoginAbort = null;
       this.providerLoginSettlement = null;
-      if (this.providerLogin.status !== 'error') this.providerLogin = { ...this.providerLoginState(), status: 'idle', providerId: null, providerName: null, method: null, prompt: null, message: null, deviceCode: null };
+      if (credentialSaved && !controller.signal.aborted) {
+        this.providerLogin = { ...this.providerLoginState(), status: 'idle', providerId: provider.id, providerName: provider.name, method: input.method, prompt: null, message: catalogRefreshFailed ? 'Provider credentials were saved, but model refresh did not finish. Refresh the model list to try again.' : null, deviceCode: null };
+      } else if (this.providerLogin.status !== 'error') this.providerLogin = { ...this.providerLoginState(), status: 'idle', providerId: null, providerName: null, method: null, prompt: null, message: null, deviceCode: null };
       this.emitState(true);
     });
     this.providerLoginSettlement = settlement;
@@ -3318,6 +3424,7 @@ export class PiRuntimeService {
   }
 
   cancelProviderLogin(): RuntimeState {
+    this.providerLoginRevision++;
     this.providerLoginResponse?.reject(new Error('Login cancelled'));
     this.providerLoginResponse?.detachAbort?.();
     this.providerLoginResponse = null;
@@ -3730,7 +3837,7 @@ export class PiRuntimeService {
       try {
         await this.applySessionDefaults(created.runtime.session, nextDefaults, created);
         if (selectionGeneration !== this.coldSelectionGeneration || this.project?.path !== projectPath || this.coldSession !== source) throw this.replacementSuperseded();
-        this.coldSession = null;
+        this.clearColdSession(created.runtime.session.sessionId);
         await this.selectRuntimeSlot(created);
         this.coldPendingModels.delete(source.snapshot.summary.id);
         this.coldPendingThinkingLevels.delete(source.snapshot.summary.id);
@@ -3873,7 +3980,7 @@ export class PiRuntimeService {
       }
       const live = this.findLiveSlot(sessionId);
       if (live) {
-        this.coldSession = null;
+        this.clearColdSession(live.runtime.session.sessionId);
         await this.selectRuntimeSlot(live);
         return;
       }
@@ -3894,6 +4001,8 @@ export class PiRuntimeService {
       const preset = readAgentSessionPreset({ getEntries: () => snapshot.entries });
       const permissionLevel = preset?.runId ? presetPermission(preset, savedPermission) : savedPermission;
       if (selectionGeneration !== this.coldSelectionGeneration || this.project?.path !== projectPath) throw this.replacementSuperseded();
+      this.clearColdSession(summary.id);
+      hydrateHyp3rc0d3Session(summary.id, snapshot.hyp3rc0d3 ?? false);
       this.coldSession = {
         snapshot,
         ...settings,
@@ -3922,12 +4031,18 @@ export class PiRuntimeService {
     });
   }
 
+  private clearColdSession(nextSessionId?: string): void {
+    const sessionId = this.coldSession?.snapshot.summary.id;
+    if (sessionId && sessionId !== nextSessionId && !this.findLiveSlot(sessionId)) forgetHyp3rc0d3Session(sessionId);
+    this.coldSession = null;
+  }
+
   private async loadColdSession(projectPath: string, summary: SessionSummary): Promise<SessionSnapshot> {
     const snapshot = (this.sessionRepository as PiSessionRepository & { snapshot?: (cwd: string, sessionId: string, knownSummary?: SessionSummary) => Promise<SessionSnapshot | undefined> }).snapshot;
     // Lightweight injected repositories in tests and integrations may not yet
     // implement snapshots. Their summary is still safe to render, just without
     // transcript hydration; production always uses the direct JSONL parser.
-    if (!snapshot) return { summary, entries: [], branch: [] };
+    if (!snapshot) return { summary, entries: [], branch: [], hyp3rc0d3: false };
     const loaded = await snapshot.call(this.sessionRepository, projectPath, summary.id, summary);
     if (loaded) return loaded;
     throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The selected saved session could not be read.', retryable: true });
@@ -3971,7 +4086,7 @@ export class PiRuntimeService {
         throw this.replacementSuperseded();
       }
       await this.selectRuntimeSlot(slot);
-      this.coldSession = null;
+      this.clearColdSession(slot.runtime.session.sessionId);
     });
   }
 
@@ -4082,7 +4197,6 @@ export class PiRuntimeService {
       this.coldPendingModels.delete(candidate.id);
       this.coldPendingThinkingLevels.delete(candidate.id);
       forgetHyp3rc0d3Session(candidate.id);
-      this.hyp3rc0d3PriorLevels.delete(candidate.id);
       this.monitorEvents.delete(candidate.id);
       this.subagents.releaseParent(candidate.id);
       this.agentWorkflows.releaseParent(candidate.id);
@@ -4155,6 +4269,31 @@ export class PiRuntimeService {
     return this.getState(false);
   }
 
+  private async forkWithHyp3rc0d3(runtime: AgentSessionRuntime, entryId: string, options?: Parameters<AgentSessionRuntime['fork']>[1]): ReturnType<AgentSessionRuntime['fork']> {
+    const initialization = this.initialization;
+    const source = runtime.session;
+    const enabled = isHyp3rc0d3(source.sessionId);
+    let applied: AgentSession | undefined;
+    const apply = (session: AgentSession) => {
+      if (initialization !== this.initialization) throw this.replacementSuperseded();
+      if (applied === session) return;
+      this.persistHyp3rc0d3(session, enabled);
+      setHyp3rc0d3Session(session.sessionId, enabled);
+      applied = session;
+    };
+    this.hyp3rc0d3Forks.set(runtime, { source, apply });
+    try {
+      const result = await runtime.fork(entryId, { ...options, withSession: async (context) => {
+        apply(runtime.session);
+        await options?.withSession?.(context);
+      } });
+      if (!result.cancelled) apply(runtime.session);
+      return result;
+    } finally {
+      this.hyp3rc0d3Forks.delete(runtime);
+    }
+  }
+
   async forkSession(entryId: string): Promise<{ state: RuntimeState; selectedText?: string }> {
     let selectedText: string | undefined;
     const state = await this.runReplacement(async (runtime) => {
@@ -4164,7 +4303,7 @@ export class PiRuntimeService {
       if (!points.some((point) => point.entryId === entryId)) {
         throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'That branch point is not part of the active session.', retryable: true });
       }
-      const result = await runtime.fork(entryId);
+      const result = await this.forkWithHyp3rc0d3(runtime, entryId);
       if (result?.cancelled) throw this.replacementCancelled('Session fork');
       selectedText = result.selectedText;
     });
@@ -4241,7 +4380,7 @@ export class PiRuntimeService {
       if (this.adapter.supportsClone !== true || typeof runtime.fork !== 'function') throw this.unsupported('Session cloning');
       const leafId = runtime.session.sessionManager?.getLeafId?.();
       if (!leafId) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The current session has no conversation to clone.', retryable: true });
-      if ((await runtime.fork(leafId, { position: 'at' }))?.cancelled) throw this.replacementCancelled('Session clone');
+      if ((await this.forkWithHyp3rc0d3(runtime, leafId, { position: 'at' }))?.cancelled) throw this.replacementCancelled('Session clone');
     });
   }
 
@@ -4386,6 +4525,8 @@ export class PiRuntimeService {
       permissionError: null,
       permissionChange: null,
       stateError: null,
+      reloadError: null,
+      reloadRevision: 0,
       contextUsageEstimate: null,
       pendingModel: null,
       pendingThinkingLevel: null,
@@ -4444,6 +4585,7 @@ export class PiRuntimeService {
   private invalidateSession(slot: RuntimeSlot | null = this.selectedSlot): void {
     if (!slot) return;
     const invalidatedSession = slot.boundSession ?? slot.runtime.session;
+    if (this.coldSession?.snapshot.summary.id !== invalidatedSession.sessionId) forgetHyp3rc0d3Session(invalidatedSession.sessionId);
     this.recoveredExecution.forget(invalidatedSession.sessionId);
     if (this.project) this.browserIntegration?.revokeSession?.({ projectPath: this.project.path, sessionId: invalidatedSession.sessionId });
     this.revokeSlotToolAccess(slot);
@@ -4481,6 +4623,8 @@ export class PiRuntimeService {
     slot.permissionError = null;
     slot.permissionChange = null;
     slot.stateError = null;
+    slot.reloadError = null;
+    slot.reloadRevision = 0;
     slot.contextUsageEstimate = null;
     slot.pendingModel = null;
     slot.pendingThinkingLevel = null;
@@ -4538,6 +4682,13 @@ export class PiRuntimeService {
       && generation === slot.sessionGeneration
       && slot.runtime === runtime
       && runtime.session === session;
+    if (!ownsSession()) return;
+    const fork = this.hyp3rc0d3Forks.get(runtime);
+    if (fork && fork.source !== session) {
+      fork.apply(session);
+    } else {
+      hydrateHyp3rc0d3Session(session.sessionId, readHyp3rc0d3Session(session.sessionManager.getEntries()));
+    }
     const access = toolAccessBySession.get(session);
     if (access) {
       access.assertExecutionAdmission = () => {
@@ -4598,15 +4749,12 @@ export class PiRuntimeService {
       commandContextActions: {
         waitForIdle: () => ownsSession() ? session.waitForIdle() : Promise.resolve(),
         newSession: async (options) => replaceFromExtension('New session', async () => runtime.newSession(options)),
-        fork: async (entryId, options) => replaceFromExtension('Session fork', async () => runtime.fork(entryId, options)),
+        fork: async (entryId, options) => replaceFromExtension('Session fork', async () => this.forkWithHyp3rc0d3(runtime, entryId, options)),
         navigateTree: async (targetId, options) => replaceFromExtension('Branch navigation', () => session.navigateTree(targetId, options)),
         switchSession: async (sessionPath, options) => replaceFromExtension('Session switch', async () => runtime.switchSession(sessionPath, { ...options, cwdOverride: this.project!.path })),
         reload: async () => {
-          await replaceFromExtension('Session reload', async () => {
-            extensionUi.clear();
-            await session.reload();
-            return { cancelled: false };
-          });
+          if (!ownsSession() || this.selectedSlot !== slot) throw this.replacementSuperseded();
+          await this.reloadSession(slot, undefined, extensionCommandRunIds.get(session));
         },
       },
       shutdownHandler: () => { if (ownsSession() && this.selectedSlot === slot) this.emitSystemMessage('An extension requested shutdown. Close Fate UI when you are ready.', 'warning'); },
@@ -4733,10 +4881,7 @@ export class PiRuntimeService {
         if (this.selectedSlot === slot) this.emitState();
       } } : undefined);
       if (queued) this.acknowledgeQueuedMessage(slot, queued.id);
-      if (!queued?.boundModel && !queued?.boundThinkingLevel) {
-        this.applyHyp3rc0d3Effort(session, session.model);
-        return;
-      }
+      if (!queued?.boundModel && !queued?.boundThinkingLevel) return;
       try {
         if (queued.boundModel) {
           await session.setModel(queued.boundModel.model);
@@ -4755,7 +4900,6 @@ export class PiRuntimeService {
             this.coldPendingThinkingLevels.delete(session.sessionId);
           }
         }
-        this.applyHyp3rc0d3Effort(session, session.model);
         slot.boundaryModelOverride = queued.boundModel ?? null;
         slot.stateError = null;
         if (this.selectedSlot === slot) this.emitState();
@@ -4805,7 +4949,7 @@ export class PiRuntimeService {
     return session.sendCustomMessage(
       message,
       session.isStreaming
-        ? { triggerTurn: triggerWhenIdle, deliverAs: activeDelivery }
+        ? message.customType === 'fate-subagent-notification' ? { triggerTurn: false } : { triggerTurn: triggerWhenIdle, deliverAs: activeDelivery }
         : { triggerTurn: triggerWhenIdle },
     );
   }
@@ -4832,7 +4976,9 @@ export class PiRuntimeService {
           for (const item of pending) {
             if (!ownsSession()) return;
             this.assertPermissionAdmission(slot);
-            await session.sendCustomMessage(item.message, { triggerTurn: item.triggerWhenIdle && (this.allowsRecoveredContinuation(session.sessionId) || this.pendingDirectIntent(slot, item.message) !== null), deliverAs: item.activeDelivery });
+            await session.sendCustomMessage(item.message, item.message.customType === 'fate-subagent-notification'
+              ? { triggerTurn: false }
+              : { triggerTurn: item.triggerWhenIdle && (this.allowsRecoveredContinuation(session.sessionId) || this.pendingDirectIntent(slot, item.message) !== null), deliverAs: item.activeDelivery });
             submitted += 1;
           }
           return;
@@ -5079,9 +5225,9 @@ export class PiRuntimeService {
     return this.runtime.session;
   }
 
-  private requireRuntimeIdleSession(action: string): AgentSession {
+  private requireRuntimeIdleSession(action: string, reloadRepair = false): AgentSession {
     const session = this.requireRuntimeSession();
-    this.assertPermissionAdmission(this.selectedSlot!);
+    this.assertPermissionAdmission(this.selectedSlot!, reloadRepair);
     if (this.replacementActive || this.sessionHasActiveWork(session)) {
       throw new PiDesktopError({ code: 'RUN_ACTIVE', message: `Wait for the active Pi operation to finish before ${action}.`, retryable: true });
     }
@@ -5155,6 +5301,14 @@ export class PiRuntimeService {
   }
 
   private runReplacement(operation: (runtime: AgentSessionRuntime, slot: RuntimeSlot) => Promise<void>, refreshSessionList = true): Promise<RuntimeState> {
+    if (this.coldSession) {
+      const sessionId = this.coldSession.snapshot.summary.id;
+      const initialization = this.initialization;
+      return this.materializeColdSession().then(() => {
+        if (initialization !== this.initialization || this.selectedSessionId !== sessionId) throw this.replacementSuperseded();
+        return this.runReplacement(operation, refreshSessionList);
+      });
+    }
     this.requireRuntimeSession();
     const replacementGeneration = this.replacementGeneration;
     const ownsGeneration = () => replacementGeneration === this.replacementGeneration;
@@ -5240,16 +5394,23 @@ export class PiRuntimeService {
       { name: 'login', description: 'Connect a Pi model provider with OAuth or an API key', source: 'builtin' },
       { name: 'logout', description: 'Disconnect a Pi model provider', source: 'builtin' },
       { name: 'compact', description: 'Compact the conversation context · /compact [instructions]', source: 'builtin' },
+      { name: 'reload', description: 'Reload skills, templates, and extensions', source: 'builtin' },
       { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax <objective>, pause, resume, clear', source: 'builtin' },
     ];
     const session = runtime?.session;
     if (!session) return builtinCommands;
-    const extensionCommands = session.extensionRunner?.getRegisteredCommands?.().filter((command) => command.invocationName.toLocaleLowerCase() !== 'goalmax').map((command) => ({
+    const extensionCommands = session.extensionRunner?.getRegisteredCommands?.().filter((command) => {
+      const name = command.invocationName.toLocaleLowerCase();
+      return name !== 'goalmax' && name !== 'reload';
+    }).map((command) => ({
       name: command.invocationName.slice(0, 500),
       description: (command.description ?? '').slice(0, 2_000),
       source: 'extension' as const,
     })) ?? [];
-    const promptCommands = session.promptTemplates?.filter((command) => command.name.toLocaleLowerCase() !== 'goalmax').map((command) => ({
+    const promptCommands = session.promptTemplates?.filter((command) => {
+      const name = command.name.toLocaleLowerCase();
+      return name !== 'goalmax' && name !== 'reload';
+    }).map((command) => ({
       name: command.name.slice(0, 500),
       description: (command.description ?? '').slice(0, 2_000),
       source: 'prompt' as const,
@@ -5766,7 +5927,6 @@ export class PiRuntimeService {
     if (slot.disposed || slot.runtime.session !== session || slot.projectGeneration !== this.initialization || slot.sessionGeneration !== generation) throw this.replacementSuperseded();
     this.assertPermissionAdmission(slot);
     if (stagedThinkingLevel) session.setThinkingLevel(stagedThinkingLevel.level);
-    this.applyHyp3rc0d3Effort(session, session.model);
     if (stagedModel && slot.pendingModel?.token === stagedModel.token) {
       slot.pendingModel = null;
       this.coldPendingModels.delete(session.sessionId);
@@ -5822,7 +5982,7 @@ export class PiRuntimeService {
     // Goal reviews must inspect the delivered project, not an older committed snapshot.
     const workspaceMode = policy.strict ? policy.preferredMode : 'shared';
     if (workspaceMode === 'worktree' && (await this.goalReviewGit.status(this.project.path)).dirty) {
-      throw new Error('Strict isolated-worktree goal review requires a clean, committed project. Commit the project changes or relax Strict mode in Settings > Agent before verification.');
+      throw new Error('Strict isolated-worktree goal review requires a clean, committed project. Commit the project changes or relax Strict mode in Settings > AI settings before verification.');
     }
     const rootNodeId = this.agentTeams.rootNodeId(sessionId);
     this.assertPermissionAdmission(slot);
@@ -6103,24 +6263,9 @@ export class PiRuntimeService {
     while (this.coldPendingThinkingLevels.size > MAX_COLD_PENDING_MODELS) this.coldPendingThinkingLevels.delete(this.coldPendingThinkingLevels.keys().next().value!);
   }
 
-  private rememberHyp3rc0d3PriorLevel(sessionId: string, level: ThinkingLevel): void {
-    if (!this.hyp3rc0d3PriorLevels.has(sessionId)) this.hyp3rc0d3PriorLevels.set(sessionId, level);
-  }
-
-  private takeHyp3rc0d3PriorLevel(sessionId: string): ThinkingLevel | null {
-    const level = this.hyp3rc0d3PriorLevels.get(sessionId);
-    this.hyp3rc0d3PriorLevels.delete(sessionId);
-    return level ?? null;
-  }
-
   private coldSessionModel(cold: ColdSessionState): SessionModel | null {
     const effective = cold.pendingModel ?? cold.model;
     return effective ? this.modelRuntime?.getModel(effective.provider, effective.id) ?? null : null;
-  }
-
-  private applyHyp3rc0d3Effort(session: AgentSession, model: SessionModel | null | undefined): void {
-    if (!isHyp3rc0d3(session.sessionId) || !model) return;
-    session.setThinkingLevel(hyp3rc0d3ThinkingLevel(model));
   }
 
   private recordSessionAttention(sessionId: string, value: SessionAttention | null): number {
@@ -6399,8 +6544,6 @@ export class PiRuntimeService {
         failures.push(new Error(`Pi session ${sessionId} has not actually settled; retaining checkout ownership.`));
       }
       this.subagents.releaseParent(sessionId);
-      forgetHyp3rc0d3Session(sessionId);
-      this.hyp3rc0d3PriorLevels.delete(sessionId);
       this.agentWorkflows.releaseParent(sessionId);
       this.agentTeams.releaseRoot(sessionId);
       if (failures.length > 0) throw new AggregateError(failures, `Pi session ${sessionId} could not be fully disposed.`);
@@ -6425,14 +6568,13 @@ export class PiRuntimeService {
     }
     this.providerFileSync?.stop();
     this.providerFileSync = null;
+    this.clearColdSession();
     const cancellationResults = await Promise.allSettled([
       this.agentWorkflows.cancelAll(),
       this.agentTeams.cancelAll(),
     ]);
     const slots = [...this.liveSlots];
     this.selectedSlot = null;
-    if (this.coldSession) forgetHyp3rc0d3Session(this.coldSession.snapshot.summary.id);
-    this.coldSession = null;
     this.batcher.clear();
     const disposalResults = await Promise.allSettled(slots.map((slot) => this.disposeSlot(slot, true)));
     this.sessions = [];

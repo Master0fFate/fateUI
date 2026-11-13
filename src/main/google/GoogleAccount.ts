@@ -26,7 +26,7 @@ const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
 const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
 export const GOOGLE_REQUEST_TIMEOUT_MS = 30_000;
-const SETTINGS_HINT = 'Settings → Agent → Google';
+const SETTINGS_HINT = 'Settings → Saved agents → Google';
 
 const storedSchema = z.object({
   clientId: z.string().min(1).max(500),

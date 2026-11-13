@@ -6,14 +6,14 @@ import type { PiEvent, SubagentAgentSource, SubagentNotification, SubagentParent
 import { assertContextTransfer, isContextWindowError } from './SubagentContext';
 import { emptyUsage, addUsage } from './SubagentSessionFactory';
 import { scheduleLongTimeout, type CancelableTimer } from './SubagentTimer';
-import { workflowToolResult } from './SubagentPresentation';
+import { workflowResultsToolResult, workflowToolResult } from './SubagentPresentation';
 import { normalizeWorkflowStart, workflowParameters, type ModelSelection, type WorkflowNodeRequest } from './SubagentProtocol';
 import type { NativeWorkflowSchedulerFactory } from './durable/NativeWorkflowScheduler';
-import { SubagentWorkflowEngine, workflowView, type SubagentWorkflow, type SubagentWorkflowExecutionBinding, type SubagentWorkflowNode, type SubagentWorkflowSnapshot } from './SubagentWorkflow';
+import { SubagentWorkflowEngine, type SubagentWorkflow, type SubagentWorkflowExecutionBinding, type SubagentWorkflowNode, type SubagentWorkflowRun, type SubagentWorkflowSnapshot, type WorkflowNotificationDeliveryError } from './SubagentWorkflow';
 import type { AgentTeamCoordinator } from './multi-agent/AgentTeamCoordinator';
-import { hyp3rc0d3MaxChildren, hyp3rc0d3MaxConcurrent } from './context/Hyp3rc0d3';
+import type { AgentTaskOutcome } from './multi-agent/AgentTeamTypes';
+import { NativeEffectNotStartedError, NativeExecutionUnknownError } from './durable/NativeExecutionFence';
 
-const MAX_RESTORE_HISTORY_ENTRIES = 10_000;
 const WORKFLOW_SNAPSHOT_CUSTOM_TYPE = 'fate-subagent-workflow';
 const TASK_SETTLEMENT_POLL_MS = 5 * 60_000;
 
@@ -27,9 +27,13 @@ type WorkflowToolDetails = {
 };
 
 interface WorkflowInput {
-  action: 'start' | 'list' | 'status' | 'cancel' | 'resume';
+  action: 'start' | 'list' | 'status' | 'results' | 'cancel' | 'resume' | 'finalize';
   workflowId?: string;
+  nodeIds?: string[];
+  textOffset?: number;
+  textLength?: number;
   reason?: string;
+  notifyParent?: SubagentNotification;
 }
 
 export interface AgentWorkflowCoordinatorHost {
@@ -61,7 +65,11 @@ type Attempt = {
   startedAt: number;
   endedAt: number;
   resultTransportFailed?: boolean;
+  notificationDeliveryError?: string;
+  executionUnknown?: boolean;
 };
+
+type TeamAttempt = { nodeId: string; taskId?: string; outcome?: AgentTaskOutcome };
 
 function sourceForAgent(agent: string | undefined): SubagentAgentSource {
   if (agent?.startsWith('project/')) return 'project';
@@ -80,10 +88,14 @@ function routingFailureMessage(error: unknown): string {
 }
 
 function retryableRoutingFailure(error: unknown, signal: AbortSignal): boolean {
-  if (signal.aborted || (error instanceof Error && error.name === 'AbortError') || isContextWindowError(error)) return false;
+  if (signal.aborted || error instanceof NativeExecutionUnknownError || (error instanceof Error && error.name === 'AbortError') || isContextWindowError(error)) return false;
   const message = routingFailureMessage(error);
   if (/permission|authority|workspace|policy|writer lease|capacity|node limit|message limit|goal agent strategy|caller|unknown (?:pi )?agent profile|disabled|not currently authenticated|context window|context transfer|tool.+not granted/iu.test(message)) return false;
   return /model|provider|network|api|rate.?limit|overload|timeout|temporar|unavailable|failed|error/iu.test(message);
+}
+
+function retryableAdmissionFailure(error: unknown, signal: AbortSignal): boolean {
+  return error instanceof NativeEffectNotStartedError && retryableRoutingFailure(error.cause ?? error, signal);
 }
 
 function assertRepresentableWorkflowDurations(rawNodes: unknown): void {
@@ -122,20 +134,24 @@ export class AgentWorkflowCoordinator {
       launchNode: (workflow, node, request, modelRuntime, signal) => this.launchNode(workflow, node, request, modelRuntime, signal),
       cancelRuns: async (parentSessionId, runIds, reason) => {
         const teams = this.teams.getTeams(parentSessionId);
-        await Promise.all(runIds.map(async (runId) => {
+        const outcomes = await Promise.allSettled(runIds.map(async (runId) => {
           const activeNodeId = this.activeTeamNodeByRun.get(runId) ?? runId;
-          const root = teams.find((team) => team.nodes.some((node) => node.id === activeNodeId))?.rootNodeId ?? this.teams.rootNodeId(parentSessionId);
-          await this.teams.interrupt(root, activeNodeId, reason);
-          await this.teams.release(root, activeNodeId, true);
+          const team = teams.find((candidate) => candidate.nodes.some((node) => node.id === activeNodeId));
+          const root = team?.rootNodeId ?? this.teams.rootNodeId(parentSessionId);
+          const target = team?.nodes.find((node) => node.id === activeNodeId);
+          const subtree = target ? team!.nodes.filter((node) => node.id === target.id || node.path.startsWith(`${target.path}/`)).map((node) => node.id) : [activeNodeId];
+          const failures: unknown[] = [];
+          try { await this.teams.interrupt(root, activeNodeId, reason); } catch (error) { failures.push(error); }
+          try { await this.teams.release(root, activeNodeId, true); } catch (error) { failures.push(error); }
+          const settlement = await Promise.allSettled(subtree.map((nodeId) => this.awaitNativePhysicalSettlement(root, nodeId)));
+          failures.push(...settlement.flatMap((result) => result.status === 'rejected' ? [result.reason] : []));
+          if (settlement.every((result) => result.status === 'fulfilled')) this.activeTeamNodeByRun.delete(runId);
+          if (failures.length) throw new AggregateError(failures, `Agent workflow child ${activeNodeId} cancellation cleanup failed.`);
         }));
-        runIds.forEach((runId) => this.activeTeamNodeByRun.delete(runId));
+        const failures = outcomes.flatMap((outcome) => outcome.status === 'rejected' ? [outcome.reason] : []);
+        if (failures.length) throw new AggregateError(failures, 'Agent workflow cancellation cleanup failed.');
       },
-      executionConcurrency: (workflow) => {
-        const team = this.teams.getTeams(workflow.parentSessionId)
-          .find((candidate) => candidate.id === workflow.execution?.teamId && candidate.rootNodeId === workflow.execution.rootNodeId);
-        if (!team) return 1;
-        return this.hyp3rc0d3Active(workflow.parentSessionId) ? Math.min(workflow.maxConcurrency, hyp3rc0d3MaxConcurrent()) : workflow.maxConcurrency;
-      },
+      executionConcurrency: (workflow) => workflow.maxConcurrency,
       usedHandles: (parentSessionId) => this.teams.getTeams(parentSessionId).flatMap((team) => team.nodes.map((node) => node.handle)),
       runIdentity: (parentSessionId, runId) => {
         const node = this.teams.getTeams(parentSessionId).flatMap((team) => team.nodes).find((candidate) => candidate.id === runId);
@@ -153,45 +169,78 @@ export class AgentWorkflowCoordinator {
     return defineTool<typeof workflowParameters, WorkflowToolDetails>({
       name: 'agent_workflow',
       label: 'Agent workflow',
-      description: 'Run or manage a persisted dependency graph whose executable nodes are admitted exclusively through Agent Teams. The serialized graph schema remains compatible with historical subagent workflows.',
+      description: 'Run or manage a persisted dependency graph through Agent Teams. finalize checks root-wide readiness without a workflowId. list/status return summaries; results retrieves retained node output and errors as JSON, optionally selected by nodeIds and sliced with textOffset/textLength. Omitted textLength returns the full remainder.',
       promptSnippet: 'Run and manage an Agent Team dependency graph',
       promptGuidelines: [
         'Node IDs and dependencies define the graph. includeDependencyResults is the only automatic result transfer and is opt-in per node.',
         'Requested permissions, models, thinking, tools, skills, instructions, routing attempts, and workspace are passed to Agent Team admission. Workspace and permission safety policies remain enforced; no arbitrary team-size ceiling is imposed.',
-        'dependencyFailure controls whether a node skips or runs after a failed dependency. Fallback models are used only when explicitly configured.',
+        'dependencyFailure controls whether a node skips or runs after a failed dependency. Fallback models are used only when explicitly configured. maxAttempts defaults to 1; explicitly requesting more attempts permits whole-task retries after confirmed failures, so edits and other effects may repeat.',
+        'Use results with workflowId for full retained output; notifications are previews. result/error null means absent, while an empty string means present but empty. Offsets count UTF-16 characters. If context transfer is too large, request nodeIds and textLength slices.',
+        'agent_workflow defaults an omitted graph-level notifyParent to immediate in Hyp3rc0d3 mode; explicit never and next-turn are preserved.',
         'Budget thresholds are advisory telemetry. Native workflow tasks never replay after interruption; review retained child sessions and start a reviewed new graph. Legacy graphs require explicit resume.',
+        'After delegation, call finalize immediately before the root final report. Collect and synthesize all required results, wait for ready, and recheck after further work. Use bounded wait_agent with stateOnly:true, not tight status polling; yield progress only for a blocked writer. Delayed notifications warrant user updates only for material changes.',
       ],
       parameters: workflowParameters,
       executionMode: 'sequential',
       execute: async (toolCallId, params, signal, _onUpdate, ctx) => {
         const parent = this.requireParent(ctx.sessionManager.getSessionId(), ctx.cwd);
         const input = params as WorkflowInput;
-        const deliver = (workflows: readonly SubagentWorkflow[]) => this.deliver(parent, workflows);
+        const deliver = (workflows: Parameters<SubagentWorkflowEngine['format']>[0]) => this.deliver(parent, workflows);
         if (input.action === 'start') {
           if (parent.agentStrategy === 'off') throw new Error('Goal agent strategy is off; complete this turn with the root agent.');
           assertRepresentableWorkflowDurations((params as { nodes?: unknown }).nodes);
           const request = normalizeWorkflowStart(params);
           if (!request) throw new Error('Invalid workflow graph. Node IDs must be unique, dependencies must exist, and cycles are not allowed.');
-          const bounded = { ...request, maxConcurrency: this.boundedMaxConcurrency(parent, request.maxConcurrency) };
-          this.assertHyp3rc0d3ChildBudget(parent, bounded.nodes.length);
-          const execution = this.preflight(parent.session.sessionId, bounded.nodes, bounded.maxConcurrency);
-          return deliver([this.workflows.start(parent.session.sessionId, toolCallId, bounded, modelRuntime, signal, execution)]);
+          const start = {
+            ...request,
+            notification: parent.hyp3rc0d3 === true && input.notifyParent === undefined ? 'immediate' as const : request.notification,
+          };
+          const execution = this.preflight(parent.session.sessionId, start.nodes, start.maxConcurrency);
+          const workflow = this.workflows.start(parent.session.sessionId, toolCallId, start, modelRuntime, signal, execution);
+          return deliver([this.workflows.getWorkflowSummary(parent.session.sessionId, workflow.id)]);
         }
-        if (input.action === 'list') return deliver(this.workflows.getWorkflows(parent.session.sessionId));
+        if (input.action === 'list') return deliver(this.workflows.getWorkflowSummaries(parent.session.sessionId));
+        if (input.action === 'finalize') {
+          const root = parent.session.sessionId;
+          const teams = this.teams.finalizationSnapshot(root);
+          const workflows = this.workflows.getWorkflowSummaries(root).map((workflow) => ({
+            workflowId: workflow.id,
+            status: workflow.status,
+            error: workflow.error,
+            notificationDeliveryErrors: workflow.notificationDeliveryErrors,
+            nodes: workflow.nodes.map((node) => ({ nodeId: node.id, status: node.status, runId: node.runId, error: node.error, results: `agent_workflow action=results workflowId=${workflow.id} nodeIds=["${node.id}"]` })),
+          }));
+          const schedulerActive = this.workflows.hasActive(root);
+          const attention = teams.some((team) => team.needsAttention) || workflows.some((workflow) => workflow.status === 'paused' || workflow.nodes.some((node) => node.status === 'interrupted' || (node.status === 'pending' && workflow.status !== 'running')));
+          const active = schedulerActive || teams.some((team) => team.active.length > 0) || workflows.some((workflow) => workflow.status === 'running' || workflow.nodes.some((node) => node.status === 'running' || node.status === 'pending'));
+          const status = attention ? 'needs_attention' : teams.some((team) => team.blockedByCaller.length > 0) ? 'yield' : active ? 'wait' : 'ready';
+          const instructions = status === 'needs_attention'
+            ? 'Review unresolved work. For interrupted agents, explicitly use followup_task or close_agent/release_agent after review; for paused workflows, explicitly resume or cancel as appropriate. Do not replay automatically.'
+            : status === 'yield'
+              ? 'Yield a brief progress-only turn, not a final report, to release the shared writer lease; continue on automatic join.'
+              : status === 'wait'
+                ? 'Use bounded wait_agent with stateOnly:true on relevant direct children by teamId; do not tight-loop status. Wait for scheduler and notification delivery to settle.'
+                : 'Collect and synthesize required task and workflow results, including full ranges where needed. Recheck finalize immediately before reporting if further work was spawned.';
+          const snapshot = { ready: status === 'ready', status, instructions, schedulerActive, teams, workflows };
+          return { content: [{ type: 'text' as const, text: JSON.stringify(snapshot) }], details: { kind: 'fate-subagent-workflow' as const, version: 1 as const, workflowIds: workflows.map((workflow) => workflow.workflowId), runIds: workflows.flatMap((workflow) => workflow.nodes.flatMap((node) => node.runId ? [node.runId] : [])) } };
+        }
         if (!input.workflowId) throw new Error(`${input.action} requires workflowId.`);
-        if (input.action === 'status') {
-          const workflow = this.workflows.getWorkflow(parent.session.sessionId, input.workflowId);
-          if (!workflow) throw new Error(`Unknown agent workflow ${input.workflowId}.`);
-          return deliver([workflow]);
+        if (input.action === 'status') return deliver([this.workflows.getWorkflowSummary(parent.session.sessionId, input.workflowId)]);
+        if (input.action === 'results') {
+          const result = workflowResultsToolResult(this.workflows.results(parent.session.sessionId, input.workflowId, input.nodeIds, input.textOffset, input.textLength));
+          return result;
         }
-        if (input.action === 'cancel') return deliver([await this.workflows.cancel(parent.session.sessionId, input.workflowId, input.reason)]);
+        if (input.action === 'cancel') {
+          await this.workflows.cancel(parent.session.sessionId, input.workflowId, input.reason);
+          return deliver([this.workflows.getWorkflowSummary(parent.session.sessionId, input.workflowId)]);
+        }
         if (input.action === 'resume') {
           if (parent.agentStrategy === 'off') throw new Error('Goal agent strategy is off; recovered workflows cannot resume.');
           const workflow = this.workflows.getWorkflow(parent.session.sessionId, input.workflowId);
           if (!workflow) throw new Error(`Unknown agent workflow ${input.workflowId}.`);
-          this.assertHyp3rc0d3ChildBudget(parent, 0);
           const execution = this.preflight(parent.session.sessionId, workflow.nodes.map((node) => node.request), workflow.maxConcurrency, workflow.execution);
-          return deliver([await this.workflows.resume(parent.session.sessionId, input.workflowId, modelRuntime, execution)]);
+          await this.workflows.resume(parent.session.sessionId, input.workflowId, modelRuntime, execution);
+          return deliver([this.workflows.getWorkflowSummary(parent.session.sessionId, input.workflowId)]);
         }
         throw new Error('Unknown agent_workflow action.');
       },
@@ -199,7 +248,7 @@ export class AgentWorkflowCoordinator {
   }
 
   getWorkflowViews(parentSessionId: string): import('../../shared/contracts/ipc').SubagentWorkflow[] {
-    return this.workflows.getWorkflows(parentSessionId).map(workflowView);
+    return this.workflows.getWorkflowViews(parentSessionId);
   }
 
   hasActive(parentSessionId: string): boolean { return this.workflows.hasActive(parentSessionId); }
@@ -208,7 +257,9 @@ export class AgentWorkflowCoordinator {
   async cancelParent(parentSessionId: string): Promise<void> { await this.workflows.cancelParent(parentSessionId); }
 
   async cancelAll(): Promise<void> {
-    await Promise.all(this.workflows.parentIds().map((parentSessionId) => this.cancelParent(parentSessionId)));
+    const outcomes = await Promise.allSettled(this.workflows.parentIds().map((parentSessionId) => this.cancelParent(parentSessionId)));
+    const failures = outcomes.flatMap((outcome) => outcome.status === 'rejected' ? [outcome.reason] : []);
+    if (failures.length) throw new AggregateError(failures, 'Agent workflow cancellation cleanup failed.');
   }
 
   releaseParent(parentSessionId: string): void {
@@ -227,7 +278,7 @@ export class AgentWorkflowCoordinator {
   restoreParent(session: AgentSession): void {
     if (this.workflows.hasActive(session.sessionId)) return;
     const candidates: SubagentWorkflow[] = [];
-    for (const entry of (session.sessionManager?.getBranch?.() ?? []).slice(-MAX_RESTORE_HISTORY_ENTRIES)) {
+    for (const entry of session.sessionManager?.getBranch?.() ?? []) {
       if (entry.type !== 'custom' || entry.customType !== WORKFLOW_SNAPSHOT_CUSTOM_TYPE) continue;
       const snapshot = entry.data as Partial<SubagentWorkflowSnapshot>;
       if (snapshot?.kind === 'fate-subagent-workflow-snapshot' && snapshot.version === 1 && snapshot.workflow?.id) candidates.push(snapshot.workflow);
@@ -251,36 +302,17 @@ export class AgentWorkflowCoordinator {
     return { kind: 'agent-team', teamId: team.id, rootNodeId: root };
   }
 
-  private hyp3rc0d3Active(parentSessionId: string): boolean {
-    return this.host.resolveParent(parentSessionId)?.hyp3rc0d3 === true;
-  }
-
-  private boundedMaxConcurrency(parent: ParentContext, requested: number): number {
-    return parent.hyp3rc0d3 === true ? Math.min(requested, hyp3rc0d3MaxConcurrent()) : requested;
-  }
-
-  private childCount(parentSessionId: string): number {
-    return this.teams.getTeams(parentSessionId).reduce((count, team) => count + team.nodes.filter((node) => node.depth > 0).length, 0);
-  }
-
-  private assertHyp3rc0d3ChildBudget(parent: ParentContext, incoming: number): void {
-    if (parent.hyp3rc0d3 !== true) return;
-    const used = this.childCount(parent.session.sessionId);
-    const limit = hyp3rc0d3MaxChildren();
-    if (used + incoming > limit) throw new Error(`Hyp3rc0d3 allows ${limit} child agents per session and ${used} already exist; this graph adds ${incoming}. Nothing was started.`);
-  }
-
   private async launchNode(
     workflow: SubagentWorkflow,
     node: SubagentWorkflowNode,
     request: WorkflowNodeRequest,
     modelRuntime: ModelRuntime,
     signal: AbortSignal,
-  ): Promise<{ runId: string; completion: Promise<SubagentRun> }> {
+  ): Promise<{ runId: string; completion: Promise<SubagentWorkflowRun> }> {
     const execution = workflow.execution;
     if (!execution) throw new Error(`Agent workflow ${workflow.id} has no immutable Team binding.`);
     const root = execution.rootNodeId;
-    let first: { nodeId: string } | undefined;
+    let first: TeamAttempt | undefined;
     let firstAttempt = 0;
     let lastAdmissionError: unknown;
     for (let attempt = 1; attempt <= request.routing.maxAttempts; attempt += 1) {
@@ -291,7 +323,7 @@ export class AgentWorkflowCoordinator {
         break;
       } catch (error) {
         lastAdmissionError = error;
-        if (!retryableRoutingFailure(error, signal)) throw error;
+        if (!retryableAdmissionFailure(error, signal)) throw error;
       }
     }
     if (!first) throw lastAdmissionError ?? new Error(`No routing attempt could admit workflow node ${node.id}.`);
@@ -306,14 +338,14 @@ export class AgentWorkflowCoordinator {
   private async completeAttempts(
     root: string,
     logicalRunId: string,
-    initial: { nodeId: string },
+    initial: TeamAttempt,
     initialAttempt: number,
     workflow: SubagentWorkflow,
     node: SubagentWorkflowNode,
     request: WorkflowNodeRequest,
     modelRuntime: ModelRuntime,
     signal: AbortSignal,
-  ): Promise<SubagentRun> {
+  ): Promise<SubagentWorkflowRun> {
     const attempts: Attempt[] = [];
     let current = initial;
     let lastAdmissionError: unknown;
@@ -322,7 +354,7 @@ export class AgentWorkflowCoordinator {
         this.activeTeamNodeByRun.set(logicalRunId, current.nodeId);
         const previousUsage = attempts.reduce((sum, previous) => addUsage(sum, previous.usage), emptyUsage());
         let settled: Attempt;
-        try { settled = await this.awaitAttempt(root, current.nodeId, workflow, node, request, signal, attempt, previousUsage); }
+        try { settled = await this.awaitAttempt(root, current, workflow, node, request, signal, attempt, previousUsage); }
         finally {
           // A logical Team 'interrupted' receipt or cancelled wait does not prove
           // its SDK prompt stopped. Native task evidence must retain the actual lease.
@@ -334,11 +366,9 @@ export class AgentWorkflowCoordinator {
           // must not downgrade successful work or manufacture a model retry.
           await this.teams.release(root, current.nodeId).catch(() => undefined);
         }
-        const mayRoute = settled.status === 'error'
-          && !settled.resultTransportFailed
-          && retryableRoutingFailure(new Error(settled.error ?? 'Child model runtime failed.'), signal);
+        const mayRoute = settled.status === 'error' && !settled.resultTransportFailed && !settled.executionUnknown;
         if (!mayRoute || signal.aborted || attempt >= request.routing.maxAttempts) break;
-        let next: { nodeId: string } | undefined;
+        let next: TeamAttempt | undefined;
         for (let nextAttempt = attempt + 1; nextAttempt <= request.routing.maxAttempts; nextAttempt += 1) {
           try {
             next = await this.spawnAttempt(root, workflow, node, request, modelRuntime, signal, nextAttempt);
@@ -346,7 +376,7 @@ export class AgentWorkflowCoordinator {
             break;
           } catch (error) {
             lastAdmissionError = error;
-            if (!retryableRoutingFailure(error, signal)) throw error;
+            if (!retryableAdmissionFailure(error, signal)) throw error;
           }
         }
         if (!next) break;
@@ -356,9 +386,13 @@ export class AgentWorkflowCoordinator {
       const final = attempts[attempts.length - 1]!;
       const usage = attempts.reduce((sum, attempt) => addUsage(sum, attempt.usage), emptyUsage());
       const admissionError = lastAdmissionError instanceof Error ? lastAdmissionError.message : lastAdmissionError ? String(lastAdmissionError) : undefined;
-      const error = final.status === 'completed' ? undefined : [final.error, admissionError].filter(Boolean).join('\n') || 'All configured routing attempts failed.';
+      const errors = [final.error, admissionError].filter((error): error is string => error !== undefined);
+      const error = final.status === 'completed' ? undefined : errors.length ? errors.join('\n') : 'All configured routing attempts failed.';
       this.reportNodeBudget(workflow, node, final.nodeId, usage);
-      const run: SubagentRun = {
+      const notificationDeliveryErrors: WorkflowNotificationDeliveryError[] = attempts.flatMap((attempt) => attempt.notificationDeliveryError === undefined ? [] : [{ nodeId: node.id, phase: 'team-result' as const, error: attempt.notificationDeliveryError, timestamp: attempt.endedAt }]);
+      const run: SubagentWorkflowRun = {
+        retainedOutcome: { ...(final.result === undefined ? {} : { result: final.result }), ...(error === undefined ? {} : { error }) },
+        notificationDeliveryErrors,
         id: final.nodeId,
         parentSessionId: workflow.parentSessionId,
         parentToolCallId: workflow.parentToolCallId,
@@ -403,13 +437,17 @@ export class AgentWorkflowCoordinator {
         usage,
       };
       if (request.notification !== 'never' && !this.workflows.notificationsSuppressed(workflow.parentSessionId, workflow.id)) {
-        await this.host.notifyParent?.(
+        const output = final.result ?? error ?? '(no text output)';
+        const preview = output.length > 6_000 ? `${output.slice(0, 6_000)}\n[preview; ${output.length - 6_000} more characters]` : output;
+        await Promise.resolve().then(() => this.host.notifyParent?.(
           workflow.parentSessionId,
           request.notification,
-          `Agent workflow node ${node.displayName ?? node.id} settled as ${run.status}.\n${run.result ?? run.error ?? '(no text output)'}`,
+          `Agent workflow node ${node.displayName ?? node.id} settled as ${run.status}. Retrieve retained output with agent_workflow action=results workflowId=${workflow.id} nodeIds=["${node.id}"]; notification text is only a preview.\n${preview}`,
           [run.id],
           workflow.id,
-        ).catch(() => undefined);
+        )).catch((error: unknown) => {
+          notificationDeliveryErrors.push({ nodeId: node.id, phase: 'node-notification', error: error instanceof Error ? error.message : String(error), timestamp: Date.now() });
+        });
       }
       return run;
     } finally {
@@ -437,7 +475,7 @@ export class AgentWorkflowCoordinator {
     });
   }
 
-  private spawnAttempt(
+  private async spawnAttempt(
     root: string,
     workflow: SubagentWorkflow,
     node: SubagentWorkflowNode,
@@ -445,18 +483,15 @@ export class AgentWorkflowCoordinator {
     modelRuntime: ModelRuntime,
     signal: AbortSignal,
     attempt: number,
-  ) {
-    if (this.hyp3rc0d3Active(workflow.parentSessionId)) {
-      const limit = hyp3rc0d3MaxChildren();
-      if (this.childCount(workflow.parentSessionId) >= limit) throw new Error(`Hyp3rc0d3 node limit of ${limit} child agents for this session is reached; ${node.id} was not admitted.`);
-    }
+  ): Promise<TeamAttempt> {
+    const retained: TeamAttempt = { nodeId: '' };
     const model = modelForAttempt(request, attempt);
-    return this.teams.spawn(root, {
+    const receipt = await this.teams.spawn(root, {
       task: request.task,
       name: `${node.handle ?? node.id}-a${attempt}`.slice(0, 64),
       ...(request.role ? { role: request.role } : {}),
       ...(request.agent ? { agent: request.agent } : {}),
-      permission: request.permissionLevel,
+      ...(request.permissionLevel === undefined ? {} : { permission: request.permissionLevel }),
       ...(model ? { model } : {}),
       ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
       ...(request.tools ? { tools: request.tools } : {}),
@@ -466,15 +501,18 @@ export class AgentWorkflowCoordinator {
       preloadSkills: request.preloadSkills,
       ...(request.workspace ? { workspace: request.workspace } : {}),
     }, `agent-workflow:${workflow.id}:${node.id}:${attempt}:${randomUUID()}`, modelRuntime, signal, {
-      allowDelegation: false,
+      onInitialTaskOutcome: (outcome) => { retained.outcome = outcome; },
       deliverFinalAnswer: false,
       ...(request.mailboxTtlMs > 0 ? { idleReleaseMs: request.mailboxTtlMs } : {}),
     });
+    retained.nodeId = receipt.nodeId;
+    if (receipt.taskId !== undefined) retained.taskId = receipt.taskId;
+    return retained;
   }
 
   private async awaitAttempt(
     root: string,
-    nodeId: string,
+    attempt: TeamAttempt,
     workflow: SubagentWorkflow,
     workflowNode: SubagentWorkflowNode,
     request: WorkflowNodeRequest,
@@ -482,6 +520,7 @@ export class AgentWorkflowCoordinator {
     attemptNumber: number,
     previousUsage: SubagentUsage,
   ): Promise<Attempt> {
+    const nodeId = attempt.nodeId;
     let unsubscribeUsage: (() => void) | undefined;
     try {
       this.armLivenessTimers(root, nodeId, workflow, workflowNode, request, signal);
@@ -497,20 +536,21 @@ export class AgentWorkflowCoordinator {
         observeUsage();
       }
       while (true) {
-        const settled = await this.teams.waitForTaskSettlement(root, nodeId, TASK_SETTLEMENT_POLL_MS, signal);
+        const settled = await this.teams.waitForTaskSettlement(root, nodeId, TASK_SETTLEMENT_POLL_MS, signal, attempt.taskId);
         if (!settled) continue;
         const inspected = this.teams.inspectNode(root, nodeId);
         const task = settled.task as typeof settled.task & { resultTransportError?: string };
         const resultTransportError = task.status === 'completed'
           ? task.resultTransportError ?? (!settled.envelope ? 'The completed task has no persisted result envelope.' : undefined)
           : undefined;
-        const status: SubagentRun['status'] = resultTransportError
-          ? 'error'
-          : settled.task.status === 'completed'
-            ? 'completed'
-            : settled.task.status === 'cancelled' || settled.task.status === 'interrupted'
-              ? 'cancelled'
-              : 'error';
+        const outcome = attempt.outcome;
+        const executionError = (outcome ?? task).error;
+        const taskStatus = outcome?.status ?? task.status;
+        const status: SubagentRun['status'] = taskStatus === 'completed' && (!resultTransportError || outcome !== undefined)
+          ? 'completed'
+          : taskStatus === 'cancelled' || taskStatus === 'interrupted'
+            ? 'cancelled'
+            : 'error';
         return {
           attemptNumber,
           nodeId,
@@ -520,10 +560,14 @@ export class AgentWorkflowCoordinator {
           thinkingLevel: inspected.node.thinkingLevel,
           usage: inspected.node.usage,
           status,
-          ...(!resultTransportError && settled.envelope ? { result: settled.envelope.content } : {}),
-          ...(resultTransportError
-            ? { error: `Agent Team execution succeeded, but its result is unavailable: ${resultTransportError} The workflow will not rerun this side-effectful task.`.slice(0, 4_000), resultTransportFailed: true }
-            : task.error ? { error: task.error } : {}),
+          ...(outcome === undefined
+            ? !resultTransportError && settled.envelope ? { result: settled.envelope.content } : {}
+            : outcome.result === undefined ? {} : { result: outcome.result }),
+          ...(outcome === undefined && resultTransportError
+            ? { error: `Agent Team execution succeeded, but its result is unavailable: ${resultTransportError} The workflow will not rerun this side-effectful task.` }
+            : executionError === undefined ? {} : { error: executionError }),
+          ...(outcome?.executionUnknown ? { executionUnknown: true } : {}),
+          ...(resultTransportError === undefined ? {} : { resultTransportFailed: true, notificationDeliveryError: resultTransportError }),
           startedAt: settled.task.startedAt ?? inspected.node.createdAt,
           endedAt: settled.task.endedAt ?? Date.now(),
         };
@@ -689,7 +733,7 @@ export class AgentWorkflowCoordinator {
     return parent;
   }
 
-  private deliver(parent: ParentContext, workflows: readonly SubagentWorkflow[]) {
+  private deliver(parent: ParentContext, workflows: Parameters<SubagentWorkflowEngine['format']>[0]) {
     const result = workflowToolResult(workflows, this.workflows.format(workflows));
     const text = result.content.map((part) => part.text).join('\n');
     try {

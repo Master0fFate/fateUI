@@ -465,7 +465,7 @@ function resolveImageProvider(settings: ImageGenerationSettings, context: ImageT
   }
   const preset = imageGenerationPreset(source);
   const providerId = source === 'custom' ? settings.customProvider : preset?.providerId;
-  if (!providerId) throw new Error('Choose a Pi provider for custom image generation in Settings → Agent.');
+  if (!providerId) throw new Error('Choose a Pi provider for custom image generation in Settings → AI settings.');
   const providerModels = available.filter((model) => model.provider === providerId);
   if (source === 'custom' && providerModels.length > 0 && !providerModels.some((model) => isOpenAICompatibleImageApi(model.api))) {
     throw new Error(`Provider ${providerId} is not configured with an OpenAI-compatible API. Use openai-completions or openai-responses in ~/.pi/fateGUI/models.json.`);
@@ -482,7 +482,7 @@ function resolveImageProvider(settings: ImageGenerationSettings, context: ImageT
     : preset?.models.some((model) => model.id === requestedModel)
       ? requestedModel
       : defaultImageGenerationModel(source);
-  if (!imageModel) throw new Error('Choose an image model in Settings → Agent, then retry.');
+  if (!imageModel) throw new Error('Choose an image model in Settings → AI settings, then retry.');
   return { source, providerId, imageModel, driver };
 }
 

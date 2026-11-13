@@ -38,6 +38,8 @@ import { InMemoryGoalMaxRepository } from './goalmaxxing/GoalMaxRepository';
 import { bindAgentSessionPreset } from '../agents/AgentSessionPreset';
 import type { SavedAgentSession } from '../../shared/contracts/agents';
 
+vi.mock('./ProviderLoginDeviceId', () => ({ providerLoginDeviceId: async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }));
+
 const model: Pick<NonNullable<AgentSessionRuntime['session']['model']>, 'provider' | 'id' | 'name' | 'reasoning' | 'contextWindow' | 'input' | 'thinkingLevelMap'> = {
   provider: 'test', id: 'model', name: 'Test Model', reasoning: true, contextWindow: 1000, input: ['text', 'image'],
 };
@@ -72,6 +74,9 @@ function fixture(availableModels: typeof model[] = [model]) {
       buildSessionContext: vi.fn(() => ({ messages: [] })),
       setSessionFile: vi.fn(),
       getBranch: vi.fn(() => [] as unknown[]),
+      getEntries: vi.fn(() => [] as unknown[]),
+      getSessionFile: vi.fn(() => undefined),
+      isPersisted: vi.fn(() => false),
       getSessionName: vi.fn(() => sessionName),
       appendSessionInfo: vi.fn((name: string) => { sessionName = name; return 'name-entry'; }),
       appendCustomEntry: vi.fn(() => 'custom-entry'),
@@ -3478,7 +3483,7 @@ describe('PiRuntimeService', () => {
     expect(promptId).toBeTruthy();
     service.respondProviderLogin({ promptId: promptId!, value: 'input-value' });
     await vi.waitFor(() => expect(login).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(fake.modelRuntime.refresh).toHaveBeenCalledWith({ allowNetwork: true, force: true }));
+    await vi.waitFor(() => expect(fake.modelRuntime.refresh).toHaveBeenCalledWith({ allowNetwork: true, force: true, signal: expect.any(AbortSignal) }));
     expect(service.getState(false).providerLogin).not.toMatchObject({ prompt: { message: 'API key' } });
     await service.dispose();
   });
@@ -3533,7 +3538,7 @@ describe('PiRuntimeService', () => {
     await vi.waitFor(() => expect(service.getState(false).providerLogin).toMatchObject({ status: 'working', prompt: null }));
 
     resolveLogin?.();
-    await vi.waitFor(() => expect(service.getState(false).providerLogin).toMatchObject({ status: 'idle', prompt: null, providerId: null }));
+    await vi.waitFor(() => expect(service.getState(false).providerLogin).toMatchObject({ status: 'idle', prompt: null, providerId: 'openai-codex' }));
     await service.dispose();
   });
 
@@ -3556,6 +3561,7 @@ describe('PiRuntimeService', () => {
       { name: 'login', description: 'Connect a Pi model provider with OAuth or an API key', source: 'builtin' },
       { name: 'logout', description: 'Disconnect a Pi model provider', source: 'builtin' },
       { name: 'compact', description: 'Compact the conversation context · /compact [instructions]', source: 'builtin' },
+      { name: 'reload', description: 'Reload skills, templates, and extensions', source: 'builtin' },
       { name: 'goalmax', description: 'Start or manage a persistent goal · /goalmax <objective>, pause, resume, clear', source: 'builtin' },
       { name: 'parallax', description: 'Control Parallax', source: 'extension' },
       { name: 'review', description: 'Review changes', source: 'prompt' },
@@ -4403,7 +4409,7 @@ describe('PiRuntimeService', () => {
     await service.openProject({ path: '/project', name: 'project', trusted: true });
     const state = await service.cloneSession();
     const runtime = await fake.adapter.createRuntime('/project', {} as ModelRuntime);
-    expect(runtime.fork).toHaveBeenCalledWith('leaf-1', { position: 'at' });
+    expect(runtime.fork).toHaveBeenCalledWith('leaf-1', expect.objectContaining({ position: 'at' }));
     expect(state.sessionOperation).toBe(false);
     await service.dispose();
   });

@@ -34,7 +34,7 @@ export const BROWSER_PANE_MIN = 360;
 export const BROWSER_PANE_MAX = 2400;
 
 export type SidebarTab = 'sessions' | 'resources' | 'agents';
-export type SettingsSection = 'general' | 'skins' | 'compaction' | 'agent' | 'mcp' | 'hooks' | 'code' | 'usage' | 'hosts' | 'learning' | 'voice' | 'workspace' | 'system';
+export type SettingsSection = 'general' | 'skins' | 'compaction' | 'ai' | 'saved-agents' | 'mcp' | 'hooks' | 'code' | 'usage' | 'hosts' | 'learning' | 'voice' | 'workspace' | 'system';
 export type InspectorTab = 'changes' | 'files' | 'tools' | 'sessions' | 'resources' | 'context' | 'goal' | 'activity' | 'monitor';
 export type InspectorDestination = 'work' | 'run' | 'system';
 export type InspectorLastViews = Record<InspectorDestination, InspectorTab>;

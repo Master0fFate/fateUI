@@ -908,7 +908,7 @@ function DesktopSubagentSessionsPanel() {
         {hasChildren ? <span className="agent-tree-overview">{totalAgents} {totalAgents === 1 ? 'agent' : 'agents'}{activeAgents ? ` · ${activeAgents} active` : ''}</span> : null}
       </div>
       {!hasChildren ? (
-        <div className="inspector-empty subagent-empty"><MessagesSquare size={24} /><strong>No child sessions</strong><p>The AI creates teams and delegates work as needed. Set workspace preferences in Settings → Agent.</p></div>
+        <div className="inspector-empty subagent-empty"><MessagesSquare size={24} /><strong>No child sessions</strong><p>The AI creates teams and delegates work as needed. Set workspace preferences in Settings → AI settings.</p></div>
       ) : (
         <div className="agent-tree-forest" aria-label={workflows.length ? 'Subagent workflows' : undefined}>
           {agentTeams.map((team) => <AgentTeamBranch key={team.id} team={team} goalLinks={goalLinks} />)}

@@ -193,8 +193,8 @@ export function SavedAgentsSettings({ compact }: { compact: boolean }) {
   useEffect(() => { void useAgentsStore.getState().load(); void useAgentsStore.getState().loadLegacy(); }, []);
   useEffect(() => { if (editing) document.getElementById(`saved-agent-${editing}`)?.scrollIntoView?.({ block: 'nearest' }); }, [editing, agents.length]);
   return <>
-    <div className="settings-title settings-title--spaced">
-      <div><h3>Saved agents</h3><p>Each agent has one chat and its own folder. It works in your projects through background runs.</p></div>
+    <div className="settings-title">
+      <div><h3>Saved agents</h3><p>Each agent has its own chat and folder, and works in your projects through background runs.</p></div>
       <button type="button" className="settings-providers-add" onClick={() => useAgentsStore.setState({ editing: 'new' })}><Plus size={13} aria-hidden="true" /> New agent</button>
     </div>
     {editing === 'new' && <AgentCard key="new" models={models} compact={compact} />}

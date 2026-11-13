@@ -17,7 +17,7 @@ import { useSkinComponents } from '../skins/SkinProvider';
 
 /**
  * The one provider window in Fate UI. Used by /login ("Connect a provider",
- * including the first-run flow) and by Settings → Agent → Add provider.
+ * including the first-run flow) and by Settings → AI settings → Add provider.
  *
  * A single searchable list holds every provider two ways:
  * - Sign-in providers from the Pi runtime (OAuth / API key methods, sign-out).
@@ -87,7 +87,7 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
   // Auto-close may only fire after the flow went active (working /
   // awaiting-input) and settled back to idle — otherwise a stale pre-start
   // snapshot plus an already-configured provider would close instantly.
-  const sawActiveLoginRef = useRef(false);
+  const loginAttemptRef = useRef<{ providerId: string; sawActive: boolean } | null>(null);
 
   const login: ProviderLoginState = providerLogin ?? { status: 'idle', providers: [], providerId: null, providerName: null, method: null, prompt: null, message: null, deviceCode: null };
   const loginActive = login.status === 'working' || login.status === 'awaiting-input';
@@ -111,15 +111,23 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
     // refresh is skipped when a list is already present (for example the
     // /login trigger just fetched it) to avoid a redundant round-trip.
     if ((useRuntimeStore.getState().runtime.providerLogin?.providers?.length ?? 0) === 0) {
-      void getDesktopApiOptional()?.initializeProviderLogin().catch(() => undefined);
+      void getDesktopApiOptional()?.initializeProviderLogin()
+        .then((state) => {
+          if (active && state.providerLogin?.status === 'error') setStartError(state.providerLogin.message ?? 'Provider sign-in options could not load. Try again.');
+        })
+        .catch(() => { if (active) setStartError('Provider sign-in options could not load. Try again.'); });
     }
     loadCatalog();
     return () => {
       active = false;
+      if (loginAttemptRef.current) {
+        loginAttemptRef.current = null;
+        void getDesktopApiOptional()?.cancelProviderLogin().catch(() => onNotice?.('error', 'Sign-in cancellation', 'Cancellation could not be confirmed. Check provider sign-in before retrying.'));
+      }
       setQuery(''); setSelectedId(null); setDetail(null); setDetailError(null);
       setApiKey(''); setAdding(false); setAddError(null); setRemoving(false);
       setValue(''); setStarted(false); setPendingStart(false); setStartError(null);
-      sawActiveLoginRef.current = false;
+      loginAttemptRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -131,11 +139,15 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
   }, [catalog]);
 
   useEffect(() => {
-    if (loginActive) sawActiveLoginRef.current = true;
-    if (started && sawActiveLoginRef.current && login.status === 'idle' && login.providers.some((provider) => provider.configured)) {
+    const attempt = loginAttemptRef.current;
+    if (!started || !attempt || login.providerId !== attempt.providerId) return;
+    if (loginActive) attempt.sawActive = true;
+    if (attempt.sawActive && login.status === 'idle') {
+      loginAttemptRef.current = null;
+      if (login.message) onNotice?.('success', 'Provider connected', login.message);
       onOpenChange(false);
     }
-  }, [login.status, login.providers, onOpenChange, started, loginActive]);
+  }, [login.status, login.providers, login.providerId, login.message, onOpenChange, onNotice, started, loginActive]);
 
   const loadCatalog = () => {
     setCatalogLoading(true); setCatalogError(null);
@@ -229,25 +241,60 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
   };
 
   const start = (method: 'oauth' | 'api_key') => {
-    if (!selectedBuiltin || !getDesktopApiOptional()) return;
+    if (!selectedBuiltin || !getDesktopApiOptional() || pendingStart) return;
+    const attempt = { providerId: selectedBuiltin.id, sawActive: false };
+    loginAttemptRef.current = attempt;
     setStarted(true);
     setValue('');
     setStartError(null);
     setPendingStart(true);
-    void getDesktopApi().startProviderLogin({ providerId: selectedBuiltin.id, method })
-      .catch((error: unknown) => setStartError(ipcErrorMessage(error, 'Provider sign-in could not start. Try again.')))
-      .finally(() => setPendingStart(false));
+    void getDesktopApi().startProviderLogin({ providerId: attempt.providerId, method })
+      .then((state) => {
+        if (loginAttemptRef.current !== attempt) return;
+        const result = state.providerLogin;
+        if (result?.status === 'error') {
+          setStartError(result.message ?? 'Provider sign-in could not start. Try again.');
+        } else if (result?.providerId === attempt.providerId) {
+          attempt.sawActive = result.status === 'working' || result.status === 'awaiting-input';
+          if (result.status === 'idle') {
+            loginAttemptRef.current = null;
+            if (result.message) onNotice?.('success', 'Provider connected', result.message);
+            onOpenChange(false);
+          }
+        }
+      })
+      .catch(() => {
+        if (loginAttemptRef.current === attempt) setStartError('Provider sign-in could not start. Try again.');
+      })
+      .finally(() => { if (loginAttemptRef.current === attempt) setPendingStart(false); });
   };
 
   const respond = () => {
     if (!login.prompt || !getDesktopApiOptional()) return;
     const answer = value;
-    setValue('');
-    void getDesktopApi().respondProviderLogin({ promptId: login.prompt.id, value: answer }).catch(() => undefined);
+    const attempt = loginAttemptRef.current;
+    setStartError(null);
+    void getDesktopApi().respondProviderLogin({ promptId: login.prompt.id, value: answer })
+      .then((state) => {
+        if (loginAttemptRef.current !== attempt) return;
+        if (state.providerLogin?.status === 'error') {
+          setStartError(state.providerLogin.message ?? 'The sign-in response could not be accepted. Try again.');
+        } else setValue((current) => current === answer ? '' : current);
+      })
+      .catch(() => {
+        if (loginAttemptRef.current === attempt) setStartError('The sign-in response could not be accepted. Check the active prompt and try again.');
+      });
   };
 
   const cancelLogin = () => {
-    if (loginActive || pendingStart) void getDesktopApiOptional()?.cancelProviderLogin();
+    const shouldCancel = loginActive || pendingStart || loginAttemptRef.current !== null;
+    loginAttemptRef.current = null;
+    setStarted(false);
+    setPendingStart(false);
+    setValue('');
+    setStartError(null);
+    if (shouldCancel) void getDesktopApiOptional()?.cancelProviderLogin()
+      .catch(() => onNotice?.('error', 'Sign-in cancellation', 'Cancellation could not be confirmed. Check provider sign-in before retrying.'));
   };
 
   const close = () => {
@@ -282,6 +329,7 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
             <Dialog.Close className="provider-dialog-close" aria-label="Close"><ActionContent text="x"><X size={15} /></ActionContent></Dialog.Close>
           </div>
 
+          {startError && <p className="provider-dialog-error" role="alert">{startError}</p>}
           {!selected && (
             <>
               <div className="provider-dialog-search">
@@ -339,8 +387,8 @@ export function ProviderConnectDialog({ open, onOpenChange, onNotice, onAdded }:
                   <small>{selected.id} · {methodLabel(selected.methods) || 'Sign-in'}</small>
                 </div>
               </div>
-              {login.status === 'error' && <p className="provider-dialog-error" role="alert">{login.message}</p>}
-              {startError && <p className="provider-dialog-error" role="alert">{startError}</p>}
+              {login.status === 'error' && login.providerId === selected.id && !startError && <p className="provider-dialog-error" role="alert">{login.message}</p>}
+              {login.status === 'idle' && login.providerId === selected.id && login.message && <p className="provider-dialog-prompt-message" role="status">{login.message}</p>}
               {blockingPrompt ? (
                 <form className="provider-dialog-prompt" onSubmit={(event) => { event.preventDefault(); respond(); }}>
                   <p className="provider-dialog-prompt-message">{blockingPrompt.message}</p>

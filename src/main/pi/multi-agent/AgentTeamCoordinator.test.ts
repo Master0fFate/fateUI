@@ -723,7 +723,7 @@ describe('AgentTeamCoordinator vertical slice', () => {
     const team = coordinator.getTeams('root-session')[0]!;
     await expect(coordinator.control('root-session', {
       action: 'configureWorkspace', teamId: team.id, workspace: { mode: 'shared' }, operationId: 'stale-workspace-control',
-    }, runtime())).rejects.toThrow('Use Settings > Agent');
+    }, runtime())).rejects.toThrow('Use Settings > AI settings');
     expect(coordinator.getWorkspacePolicy()).toMatchObject({ preferredMode: 'shared', strict: false });
     const policyTool = coordinator.createRootTools(runtime()).find((tool) => tool.name === 'get_agent_workspace_policy')!;
     const output = await policyTool.execute('policy', {}, undefined, undefined, { sessionManager: { getSessionId: () => 'root-session' } } as never);

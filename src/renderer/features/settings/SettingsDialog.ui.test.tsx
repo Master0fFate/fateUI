@@ -325,13 +325,13 @@ describe('SettingsDialog feedback', () => {
     expect(compactSessions).not.toBeChecked();
   });
 
-  it('offers one unified Agents surface with a global workspace preference before any agent exists', async () => {
+  it('offers a global workspace preference before any agent exists', async () => {
     installBridge(vi.fn(async (value) => value));
     const user = userEvent.setup();
     render(<SettingsDialog />);
-    await user.click(await screen.findByRole('tab', { name: /Agent/ }));
-    expect(screen.getByRole('heading', { name: 'Agents' })).toBeVisible();
-    expect(screen.getByText(/one unified agent system/u)).toBeVisible();
+    await user.click(await screen.findByRole('tab', { name: 'AI settings' }));
+    expect(screen.getByRole('heading', { name: 'Agent workspaces' })).toBeVisible();
+    expect(screen.getByText(/Workspace preference for newly created agents/u)).toBeVisible();
     expect(screen.queryByRole('combobox', { name: 'Agent orchestration mode' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Legacy subagents|Agent Teams V2/u)).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Isolated worktree' })).toBeChecked();
@@ -354,7 +354,7 @@ describe('SettingsDialog feedback', () => {
     useRuntimeStore.setState((state) => ({ runtime: { ...state.runtime, streaming: true } }));
     const user = userEvent.setup();
     render(<SettingsDialog />);
-    await user.click(await screen.findByRole('tab', { name: /Agent/ }));
+    await user.click(await screen.findByRole('tab', { name: 'AI settings' }));
     await user.click(screen.getByRole('radio', { name: 'Shared checkout' }));
     await user.click(screen.getByRole('checkbox', { name: 'Strict workspace mode' }));
     expect(screen.getByText('Required: shared checkout')).toBeVisible();
@@ -373,7 +373,7 @@ describe('SettingsDialog feedback', () => {
     installBridge(save, { ...settings, agentWorkspace: { preferredMode: 'worktree', strict: true } });
     const user = userEvent.setup();
     render(<SettingsDialog />);
-    await user.click(await screen.findByRole('tab', { name: /Agent/ }));
+    await user.click(await screen.findByRole('tab', { name: 'AI settings' }));
     expect(screen.getByRole('checkbox', { name: 'Strict workspace mode' })).toBeChecked();
     await user.click(screen.getByRole('checkbox', { name: 'Strict workspace mode' }));
     expect(screen.getByRole('radio', { name: 'Isolated worktree' })).toBeChecked();
@@ -386,7 +386,7 @@ describe('SettingsDialog feedback', () => {
     const user = userEvent.setup();
     render(<SettingsDialog />);
 
-    await user.click(await screen.findByRole('tab', { name: /Agent/ }));
+    await user.click(await screen.findByRole('tab', { name: 'AI settings' }));
     expect(screen.getByText(/Fallbacks for the first Pi session opened in a project/)).toBeInTheDocument();
     expect(screen.getByText(/Initial reasoning effort when a project starts without an active session/)).toBeInTheDocument();
     expect(screen.queryByText('Sets the default reasoning effort for new sessions.')).not.toBeInTheDocument();
@@ -409,7 +409,7 @@ describe('SettingsDialog feedback', () => {
     const user = userEvent.setup();
     render(<SettingsDialog />);
 
-    await user.click(await screen.findByRole('tab', { name: /Agent/ }));
+    await user.click(await screen.findByRole('tab', { name: 'AI settings' }));
     expect(screen.getByRole('combobox', { name: 'Custom image provider' })).toHaveTextContent('Mixed Images');
     expect(screen.getByText('Choose an image model ID')).toBeInTheDocument();
     await user.type(screen.getByRole('textbox', { name: 'Image model ID' }), 'deployed-image');
@@ -424,7 +424,7 @@ describe('SettingsDialog feedback', () => {
     const user = userEvent.setup();
     render(<SettingsDialog />);
 
-    await user.click(await screen.findByRole('tab', { name: /Agent/ }));
+    await user.click(await screen.findByRole('tab', { name: 'AI settings' }));
 
     expect(screen.getByRole('combobox', { name: 'Image generation provider' })).toHaveTextContent('Google Gemini');
     expect(screen.getByRole('combobox', { name: 'Image generation model' })).toHaveTextContent('Nano Banana 2');
@@ -605,7 +605,7 @@ describe('SettingsDialog providers card (models.dev)', () => {
     });
     const user = userEvent.setup();
     render(<SettingsDialog />);
-    await user.click(screen.getByRole('tab', { name: /agent/i }));
+    await user.click(screen.getByRole('tab', { name: 'AI settings' }));
 
     const addProvider = await screen.findByRole('button', { name: /add provider/i });
     expect(addProvider).toBeInTheDocument();
@@ -636,7 +636,7 @@ describe('SettingsDialog providers card (models.dev)', () => {
     });
     const user = userEvent.setup();
     render(<SettingsDialog />);
-    await user.click(screen.getByRole('tab', { name: /agent/i }));
+    await user.click(screen.getByRole('tab', { name: 'AI settings' }));
     await user.click(await screen.findByRole('button', { name: 'Show or hide CrofAI models' }));
 
     const modelsDialog = await screen.findByRole('dialog', { name: 'CrofAI models' });
@@ -662,7 +662,7 @@ describe('SettingsDialog providers card (models.dev)', () => {
     });
     const user = userEvent.setup();
     render(<SettingsDialog />);
-    await user.click(screen.getByRole('tab', { name: /agent/i }));
+    await user.click(screen.getByRole('tab', { name: 'AI settings' }));
     await user.click(await screen.findByRole('button', { name: 'Remove CrofAI from Fate UI' }));
     expect(await screen.findByRole('status')).toHaveTextContent('CrofAI removed');
   });

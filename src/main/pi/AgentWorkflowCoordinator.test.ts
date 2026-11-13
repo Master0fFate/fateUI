@@ -214,7 +214,7 @@ describe('AgentWorkflowCoordinator', () => {
     await vi.waitFor(() => expect(run.coordinator.getWorkflowViews('parent-1')[0]?.status).toBe('completed'));
 
     expect(run.spawnInputs[0]).toMatchObject({ task: 'Build foundation', permission: 'edit', tools: ['read', 'write'], workspace: { mode: 'shared' } });
-    expect(run.spawnOptions[0]).toEqual({ allowDelegation: false, deliverFinalAnswer: false });
+    expect(run.spawnOptions[0]).toEqual({ onInitialTaskOutcome: expect.any(Function), deliverFinalAnswer: false });
     expect(run.spawnInputs[1].task).toContain('<dependency-result node="foundation" status="completed">\nfoundation result');
     expect(run.spawnInputs[2].task).toContain('<dependency-result node="review" status="completed">\nreview result');
     expect(run.coordinator.getWorkflowViews('parent-1')[0]).toMatchObject({
@@ -299,7 +299,7 @@ describe('AgentWorkflowCoordinator', () => {
       }],
     });
     await vi.waitFor(() => expect(run.coordinator.getWorkflowViews('parent-1')[0]?.status).toBe('completed'));
-    expect(run.spawnOptions[0]).toEqual({ allowDelegation: false, deliverFinalAnswer: false, idleReleaseMs: 2_500 });
+    expect(run.spawnOptions[0]).toEqual({ onInitialTaskOutcome: expect.any(Function), deliverFinalAnswer: false, idleReleaseMs: 2_500 });
     expect(run.snapshots.find((snapshot) => snapshot.nodes[0]?.request.timeoutMs === 1)?.nodes[0]?.request).toMatchObject({
       timeoutMs: 1, idleTimeoutMs: 1_235, mailboxTtlMs: 2_500,
     });
@@ -343,7 +343,7 @@ describe('AgentWorkflowCoordinator', () => {
     });
     await vi.waitFor(() => expect(run.coordinator.getWorkflowViews('parent-1')[0]?.status).toBe('completed'));
     expect(run.release).not.toHaveBeenCalled();
-    expect(run.spawnOptions[0]).toEqual({ allowDelegation: false, deliverFinalAnswer: false, idleReleaseMs: 60_000 });
+    expect(run.spawnOptions[0]).toEqual({ onInitialTaskOutcome: expect.any(Function), deliverFinalAnswer: false, idleReleaseMs: 60_000 });
     expect(run.coordinator.getWorkflowViews('parent-1')[0]?.nodes[0]).toMatchObject({ status: 'completed', runId: 'node-1' });
     run.coordinator.reset();
   });
@@ -528,7 +528,7 @@ describe('AgentWorkflowCoordinator', () => {
     await execute(resumed.tool, 'resume', { action: 'resume', workflowId });
     await vi.waitFor(() => expect(resumed.coordinator.getWorkflowViews('parent-1')[0]?.status).toBe('completed'));
     expect(resumed.teams.spawn).toHaveBeenCalledOnce();
-    expect(resumed.teams.spawn).toHaveBeenCalledWith('root-node', expect.any(Object), expect.any(String), modelRuntime, expect.any(AbortSignal), { allowDelegation: false, deliverFinalAnswer: false });
+    expect(resumed.teams.spawn).toHaveBeenCalledWith('root-node', expect.any(Object), expect.any(String), modelRuntime, expect.any(AbortSignal), { onInitialTaskOutcome: expect.any(Function), deliverFinalAnswer: false });
   });
 
   it('surfaces Team interruption failures from workflow cancellation', async () => {

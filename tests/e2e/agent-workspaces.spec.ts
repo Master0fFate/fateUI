@@ -25,13 +25,13 @@ test('Settings owns workspace policy while Run Agents reviews and retains work',
     const page = await application.firstWindow();
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
-    await settings.getByRole('tab', { name: /Agent/u }).click();
+    await settings.getByRole('tab', { name: 'AI settings' }).click();
     const preferred = settings.getByRole('radio', { name: 'Isolated worktree' });
     const strict = settings.getByRole('checkbox', { name: 'Strict workspace mode' });
     await expect(preferred).toBeChecked();
     await expect(strict).not.toBeChecked();
-    await expect(settings.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible();
-    await expect(settings.getByText(/one unified agent system/u)).toBeVisible();
+    await expect(settings.getByRole('heading', { name: 'Agent workspaces', exact: true })).toBeVisible();
+    await expect(settings.getByText(/Workspace preference for newly created agents/u)).toBeVisible();
     await expect(settings.getByRole('combobox', { name: 'Agent orchestration mode' })).toHaveCount(0);
     await settings.getByText('Strict mode', { exact: true }).click();
     await settings.getByRole('button', { name: 'Save changes' }).click();
@@ -55,7 +55,7 @@ test('Settings owns workspace policy while Run Agents reviews and retains work',
     await expect(agents.getByLabel('Reviewer Agent Team node active')).toBeVisible();
     await page.screenshot({ path: await evidenceOutputPath('agent-workspace-run-panel.png') });
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await settings.getByRole('tab', { name: /Agent/u }).click();
+    await settings.getByRole('tab', { name: 'AI settings' }).click();
     await expect(preferred).toBeChecked();
     await expect(strict).toBeChecked();
     await settings.getByRole('radio', { name: 'Shared checkout' }).check();

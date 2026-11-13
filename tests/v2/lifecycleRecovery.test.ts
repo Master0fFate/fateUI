@@ -471,8 +471,9 @@ describe('T28 bounded cold recovery', () => {
       expect(owner.core.recovery.admissionsAllowed).toBe(false);
       expect((await owner.ipc.monitor({ section: 'runs', limit: 1 })).sessionId).toBe(sessionId);
       await owner.ipc.abort({});
-      await expect(owner.ipc.prompt({ text: 'No new work during a checkpoint.' })).rejects.toThrow('STORAGE_UNAVAILABLE');
+      const waitingPrompt = owner.ipc.prompt({ text: 'Wait for the checkpoint before new work.' });
       release(); await pending;
+      await expect(waitingPrompt).resolves.toMatchObject({ accepted: true });
       storage.mockImplementation(async () => { throw new LifecycleStorageError('Private storage fault.'); });
       await owner.core.recovery.record({ projectPath: project, sessionId }, 'failed');
       expect(() => owner.core.recovery.assertAdmission()).toThrow('STORAGE_UNAVAILABLE');
@@ -480,7 +481,7 @@ describe('T28 bounded cold recovery', () => {
       await owner.ipc.abort({});
       await expect(owner.ipc.prompt({ text: 'No new work after a fault.' })).rejects.toThrow('STORAGE_UNAVAILABLE');
       expect(abort).toHaveBeenCalledTimes(2);
-      expect(owner.adapter.invocations.filter((item) => item.kind === 'prompt')).toHaveLength(0);
+      expect(owner.adapter.invocations.filter((item) => item.kind === 'prompt')).toHaveLength(1);
       storage.mockRestore();
     } finally { release(); vi.spyOn(owner.core.recovery, 'flush').mockResolvedValue(); await owner.dispose(); }
   });

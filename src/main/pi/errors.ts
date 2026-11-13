@@ -43,7 +43,7 @@ export function authRequiredError(): AppError {
   return {
     code: 'AUTH_REQUIRED',
     message: 'Fate UI could not find authentication for an available model provider.',
-    actionable: 'Type /login or use Settings → Agent → Add provider. Supported environment credentials also work.',
+    actionable: 'Type /login or use Settings → AI settings → Add provider. Supported environment credentials also work.',
     retryable: true,
   };
 }

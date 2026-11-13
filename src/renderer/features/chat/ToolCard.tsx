@@ -1,6 +1,6 @@
 import { ArrowUpRight, Check, ChevronDown, ChevronRight, CircleAlert, CircleStop, LoaderCircle } from 'lucide-react';
 import { memo, useEffect, useRef } from 'react';
-import type { RuntimeTool, SubagentRun } from '../../../shared/contracts/ipc';
+import type { RuntimeTool, SubagentRun, SubagentWorkflow } from '../../../shared/contracts/ipc';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useSkinComponents } from '../../skins/SkinProvider';
@@ -26,12 +26,23 @@ export function presentedSubagentToolStatus(toolStatus: RuntimeTool['status'], c
   return 'succeeded';
 }
 
+function presentedWorkflowToolStatus(toolStatus: RuntimeTool['status'], workflowStatus: SubagentWorkflow['status'] | undefined): PresentedToolStatus {
+  if (toolStatus === 'error') return 'error';
+  if (toolStatus === 'running' || workflowStatus === 'running') return 'running';
+  if (workflowStatus === 'error') return 'error';
+  if (workflowStatus === 'cancelled' || workflowStatus === 'paused') return 'stopped';
+  return toolStatus;
+}
+
 export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, waitPollCount = 1, expansionCommand }: { toolCallId: string; compact?: boolean; waitPollCount?: number | undefined; expansionCommand?: DetailExpansionCommand }) {
   const { Symbol } = useSkinComponents();
   const tool = useRuntimeStore((state) => state.toolsById[toolCallId]);
   const childStatusKey = useRuntimeStore((state) => state.toolsById[toolCallId]?.subagentRunIds
     ?.flatMap((runId) => state.subagentsById[runId]?.status ?? [])
     .join('|') ?? '');
+  const workflowStatus = useRuntimeStore((state) => state.toolsById[toolCallId]?.name === 'agent_workflow'
+    ? state.runtime.subagentWorkflows?.find((workflow) => workflow.parentToolCallId === toolCallId)?.status
+    : undefined);
   const jump = useUiStore((state) => state.flightDeckJump);
   const clearFlightDeckJump = useUiStore((state) => state.clearFlightDeckJump);
   const projectPath = useRuntimeStore((state) => state.runtime.project?.path);
@@ -50,14 +61,15 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
   const loadedImages = useHistoryImages(sessionId, 'tool', toolCallId, tool?.images, tool?.deferredImages, showImages);
   if (!tool) return null;
   const isSubagentTool = /^subagent(?:_|$)/u.test(tool.name);
+  const tracksChildWork = isSubagentTool || workflowStatus !== undefined;
   const presentedStatus = isSubagentTool
     ? presentedSubagentToolStatus(tool.status, childStatusKey ? childStatusKey.split('|') as SubagentRun['status'][] : [])
-    : tool.status;
+    : presentedWorkflowToolStatus(tool.status, workflowStatus);
   const Icon = presentedStatus === 'running' ? LoaderCircle : presentedStatus === 'error' ? CircleAlert : presentedStatus === 'stopped' ? CircleStop : Check;
-  const statusLabel = presentedStatus === 'running' ? 'Running' : presentedStatus === 'error' ? 'Error' : presentedStatus === 'stopped' ? 'Stopped' : 'Completed';
+  const statusLabel = workflowStatus === 'paused' ? 'Paused' : presentedStatus === 'running' ? 'Running' : presentedStatus === 'error' ? 'Error' : presentedStatus === 'stopped' ? 'Stopped' : 'Completed';
   const presentedStatusLabel = waitPollCount > 1 ? `${waitPollCount} wait polls · ${statusLabel}` : statusLabel;
   const summary = previewHotPathText(tool.input, 240).text.replace(/\s+/g, ' ').trim() || 'No input';
-  const ariaStatus = isSubagentTool && presentedStatus === 'succeeded' ? 'completed' : presentedStatus;
+  const ariaStatus = workflowStatus === 'paused' ? 'paused' : tracksChildWork && presentedStatus === 'succeeded' ? 'completed' : presentedStatus;
   const childIds = [...new Set(tool.subagentRunIds ?? [])];
   const hasChildLink = childIds.length > 0 || tool.name === 'agent_workflow';
   const images = showImages && loadedImages?.length ? loadedImages : null;
@@ -67,7 +79,7 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
       <button className="tool-card-header" type="button" aria-expanded={expanded} onClick={toggle}>
         <Symbol text={presentedStatus === 'running' ? '[run]' : presentedStatus === 'error' ? '[err]' : presentedStatus === 'stopped' ? '[stop]' : '[ok]'}><Icon size={13} className={`tool-status-icon${presentedStatus === 'running' ? ' tool-spinner' : ''}`} aria-hidden="true" /></Symbol>
         <span className="tool-heading icon-label"><strong>{tool.name}</strong><small>{summary}</small></span>
-        <span className="tool-meta icon-label">{isSubagentTool ? presentedStatusLabel : tool.status === 'running' ? 'Running' : elapsed(tool)}</span>
+        <span className="tool-meta icon-label">{tracksChildWork ? presentedStatusLabel : tool.status === 'running' ? 'Running' : elapsed(tool)}</span>
         <Symbol text={expanded ? '-' : '+'}>{expanded ? <ChevronDown className="tool-disclosure-icon" size={13} /> : <ChevronRight className="tool-disclosure-icon" size={13} />}</Symbol>
       </button>
       {hasChildLink ? (

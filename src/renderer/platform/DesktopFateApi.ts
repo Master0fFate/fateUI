@@ -125,6 +125,7 @@ export function selectDesktopMethods(bridge: DesktopOnlyApi): DesktopOnlyApi {
     respondProviderLogin: bridge.respondProviderLogin,
     respondToBrowserConfirmation: bridge.respondToBrowserConfirmation,
     revealFileLink: bridge.revealFileLink,
+    showFileLinkContextMenu: bridge.showFileLinkContextMenu,
     revealProject: bridge.revealProject,
     revealProjectPath: bridge.revealProjectPath,
     reviewLearningCapture: bridge.reviewLearningCapture,

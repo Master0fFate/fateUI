@@ -344,7 +344,7 @@ export class FakePiRuntimeService {
     return this.getState();
   }
   async controlAgentTeam(input: AgentTeamControlInput): Promise<RuntimeState> {
-    if (input.action === 'configureWorkspace') throw new Error('Workspace policy is managed in Settings → Agent.');
+    if (input.action === 'configureWorkspace') throw new Error('Workspace policy is managed in Settings → AI settings.');
     const now = Date.now();
     if (input.action === 'createTeam') {
       const created = agentTeamFixture();

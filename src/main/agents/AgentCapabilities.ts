@@ -13,7 +13,7 @@ export interface CapabilityState {
   mcpServers: number;
 }
 
-const AGENT_CARD = 'Settings → Agent → Saved agents';
+const AGENT_CARD = 'Settings → Saved agents';
 const levelNames: Record<PermissionLevel, string> = { 'read-only': 'Read only', edit: 'Edit files', 'full-access': 'Full access' };
 
 function raise(level: PermissionLevel): string {
@@ -25,11 +25,11 @@ function googleLine(state: CapabilityState): string {
   if (tools.has('google_mail_search')) {
     return google.status?.access === 'write'
       ? 'Gmail and Google Calendar: on. Read mail and events freely; every send or event change waits for the user\'s approval in this chat.'
-      : 'Gmail and Google Calendar: on, read only. To send mail or change events, the user selects Allow sending in Settings → Agent → Google.';
+      : 'Gmail and Google Calendar: on, read only. To send mail or change events, the user selects Allow sending in Settings → Saved agents → Google.';
   }
   const steps = [
     'In Google Cloud Console: create a project, enable the Gmail API and the Google Calendar API, set the OAuth consent screen to External with their own address as a test user, publish it to In production (in Testing the sign-in expires every 7 days), and create an OAuth client of type Desktop app.',
-    'In Settings → Agent → Google: paste the client ID and secret, select Save client, then Connect and sign in. Select Allow sending if you should send mail or change events.',
+    'In Settings → Saved agents → Google: paste the client ID and secret, select Save client, then Connect and sign in. Select Allow sending if you should send mail or change events.',
     `On this Agent's card in ${AGENT_CARD}: turn on Google. This chat restarts with the mail and calendar tools.`,
   ];
   const status = google.status;
@@ -46,7 +46,7 @@ export function describeCapabilities(state: CapabilityState): string {
     'Projects: on. run_in_project starts background work in any project the user trusts (opened in Fate UI with Trust and open). Mode goal adds GoalMax with checked completion; runs can delegate to Agent Teams.',
     `Your folder: read, grep, find and ls${has('write') ? ', write and edit' : `; writing needs Edit files: ${raise('edit')}`}.`,
     has('bash') ? 'Shell: on.' : `Shell: off. It needs Full access: ${raise('full-access')}.`,
-    has('web_search') ? 'Web: web_search and web_fetch are on.' : `Web: web_fetch is on; web_search is off. The user turns it on in Settings → Agent → Web search (queries go to Parallel).`,
+    has('web_search') ? 'Web: web_search and web_fetch are on.' : `Web: web_fetch is on; web_search is off. The user turns it on in Settings → AI settings → Web search (queries go to Parallel).`,
     [...tools].some((name) => name.startsWith('browser_')) ? 'Browser: on while this chat is the open one.' : 'Browser: available only while this chat is the open one in the window.',
     googleLine(state),
     !memory ? 'Memory: unavailable here.'
