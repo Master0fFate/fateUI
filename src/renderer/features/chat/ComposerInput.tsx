@@ -56,7 +56,7 @@ export function ComposerPresentation({ source, formRef, formProps, inputRef, inp
     {action.content}
   </button>;
   return <form {...formProps} ref={formRef} className={formProps?.className ?? 'composer'} data-composer-source={source}
-    onSubmit={(event) => { event.preventDefault(); (window as typeof window & { fateE2eComposerTrace?: Record<string, unknown>[] }).fateE2eComposerTrace?.push({ type: 'form-submit', disabled: action.disabled }); if (!action.disabled) onAction(); }}>
+    onSubmit={(event) => { event.preventDefault(); if (!action.disabled) onAction(); }}>
     {children({ input: entry, sendAction })}
   </form>;
 }

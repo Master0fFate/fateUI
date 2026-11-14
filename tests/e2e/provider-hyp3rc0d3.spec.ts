@@ -17,8 +17,6 @@ type GuardedGlobal = typeof globalThis & { fateE2eBrowserAttempts: BrowserAttemp
 type RequestRecord = { model: string; reasoning: string | undefined; hyp3rc0d3: boolean; child: boolean; reply: string; tool: string | undefined;
   tag?: string; args?: Record<string, unknown>; tools?: string[]; results?: { tool: string; error: boolean; text: string; details?: unknown }[] };
 type SyntheticGlobal = typeof globalThis & { fateE2eSynthetic?: { held: Map<string, () => void>; released: Set<string>; releasedAll: boolean } };
-type PromptTraceGlobal = typeof globalThis & { fateE2ePromptTrace: Record<string, unknown>[] };
-const pageApplications = new WeakMap<Page, ElectronApplication>();
 
 async function projectFixture(prefix: string) {
   const root = await mkdtemp(path.join(tmpdir(), prefix));
@@ -58,34 +56,6 @@ async function launchProduction(fixture: Awaited<ReturnType<typeof projectFixtur
     const page = await application.firstWindow();
     await page.route(/^https?:\/\//u, (route) => route.abort('blockedbyclient'));
     await expect(page.locator('[data-bridge-status="ready"]')).toBeVisible(READY);
-    await application.evaluate(({ ipcMain }) => {
-      type Handler = (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => unknown;
-      const handlers = (ipcMain as unknown as { _invokeHandlers?: Map<string, Handler> })._invokeHandlers;
-      const handler = handlers?.get('runtime:prompt');
-      if (!(handlers instanceof Map) || typeof handler !== 'function') throw new Error('runtime:prompt invoke handler unavailable for diagnostics');
-      const trace: Record<string, unknown>[] = [];
-      (globalThis as PromptTraceGlobal).fateE2ePromptTrace = trace;
-      const record = (entry: Record<string, unknown>) => { trace.push(entry); if (trace.length > 20) trace.shift(); };
-      handlers.set('runtime:prompt', function (this: unknown, event, ...args) {
-        const input = args[0] as { text?: unknown } | undefined;
-        record({ type: 'entry', textLength: typeof input?.text === 'string' ? input.text.length : null });
-        const returned = (value: unknown) => {
-          const result = value as { ok?: boolean; value?: { accepted?: boolean; disposition?: string }; accepted?: boolean; disposition?: string; error?: { message?: string } } | null;
-          const data = result?.value ?? result;
-          record({ type: 'return', accepted: data?.accepted, disposition: data?.disposition, error: result?.error?.message?.slice(0, 500) });
-          return value;
-        };
-        const rejected = (error: unknown) => {
-          record({ type: 'reject', error: (error instanceof Error ? error.message : String(error)).slice(0, 500) });
-          throw error;
-        };
-        try {
-          const result = handler.call(this, event, ...args);
-          return result instanceof Promise ? result.then(returned, rejected) : returned(result);
-        } catch (error) { return rejected(error); }
-      });
-    });
-    pageApplications.set(page, application);
     await page.evaluate((project) => window.piDesktop.openProject(project), fixture.project);
     await expect.poll(() => page.evaluate(() => window.piDesktop.getRuntimeState().then((state) => state.project?.path)), READY).toBe(fixture.project);
     return { application, page };
@@ -313,70 +283,12 @@ export default function (pi) {
 }
 
 async function sendMessage(page: Page, value: string, reply: string): Promise<void> {
-  const application = pageApplications.get(page);
-  if (!application) throw new Error('Electron application unavailable for send diagnostics');
-  const nativeState = () => application.evaluate(({ app, BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0];
-    return { appActive: process.platform === 'darwin' ? app.isActive() : null,
-      windowFocused: window?.isFocused() ?? null, webContentsFocused: window?.webContents.isFocused() ?? null };
-  });
-  const before = await nativeState();
-  await page.evaluate(() => {
-    const state = window as typeof window & { fateE2eComposerTrace?: Record<string, unknown>[]; fateE2eComposerCleanup?: () => void };
-    const trace: Record<string, unknown>[] = [];
-    const push = trace.push.bind(trace);
-    trace.push = (...entries) => { const length = push(...entries); if (trace.length > 100) trace.splice(0, trace.length - 100); return length; };
-    state.fateE2eComposerTrace = trace;
-    const describe = (target: EventTarget | null) => target instanceof Element
-      ? { tag: target.tagName, id: target.id.slice(0, 100), class: String(target.className).slice(0, 200), label: target.getAttribute('aria-label')?.slice(0, 100) } : null;
-    const snapshot = () => {
-      const button = document.querySelector<HTMLButtonElement>('.send-button');
-      return { focused: document.hasFocus(), active: describe(document.activeElement),
-        error: document.querySelector('.composer-error')?.textContent?.slice(0, 500),
-        button: button ? { disabled: button.disabled, label: button.getAttribute('aria-label'), mode: button.dataset.mode } : null };
-    };
-    trace.push({ type: 'before', ...snapshot() });
-    const types = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'submit', 'invalid'];
-    const listener = (event: Event) => {
-      if (!(event.target instanceof Element) || !event.target.closest('.composer')) return;
-      const entry = { type: event.type, trusted: event.isTrusted, defaultPrevented: event.defaultPrevented,
-        target: describe(event.target), submitter: event instanceof SubmitEvent ? describe(event.submitter) : null };
-      trace.push(entry);
-      queueMicrotask(() => { entry.defaultPrevented = event.defaultPrevented; });
-    };
-    for (const type of types) document.addEventListener(type, listener, true);
-    const observer = new MutationObserver((mutations) => {
-      if (mutations.some((mutation) => {
-        const element = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
-        return element?.closest('.composer') || [...mutation.addedNodes, ...mutation.removedNodes].some((node) =>
-          node instanceof Element && (node.matches('.composer-error, .send-button') || node.querySelector('.composer-error, .send-button')));
-      })) trace.push({ type: 'mutation', ...snapshot() });
-    });
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true,
-      attributeFilter: ['disabled', 'aria-label', 'data-mode', 'class'] });
-    state.fateE2eComposerCleanup = () => {
-      trace.push({ type: 'after', ...snapshot() });
-      observer.disconnect();
-      for (const type of types) document.removeEventListener(type, listener, true);
-      delete state.fateE2eComposerCleanup;
-    };
-  });
+  const composer = page.getByRole('textbox', { name: 'Message Pi', exact: true });
+  await composer.fill(value);
   try {
-    const composer = page.getByRole('textbox', { name: 'Message Pi', exact: true });
-    await composer.fill(value);
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(composer).toHaveValue('');
-    await page.evaluate(() => (window as typeof window & { fateE2eComposerCleanup?: () => void }).fateE2eComposerCleanup?.());
-    await expect.poll(() => page.evaluate(async (expected) => {
-      const state = await window.piDesktop.getRuntimeState();
-      return state.messages.some((message) => message.role === 'assistant' && message.text === expected);
-    }, reply), READY).toBe(true);
-    await expect.poll(() => page.evaluate(() => window.piDesktop.getRuntimeState().then((state) => state.activeSessionRunning ?? state.streaming)), READY).toBe(false);
-    const scrollbar = page.getByRole('scrollbar', { name: 'Conversation scroll position' });
-    if (await scrollbar.isVisible()) await scrollbar.press('End');
-    await expect(page.getByText(reply, { exact: true }).first()).toBeVisible();
   } catch (error) {
-    await page.evaluate(() => (window as typeof window & { fateE2eComposerCleanup?: () => void }).fateE2eComposerCleanup?.()).catch(() => {});
     const state = await page.evaluate(async () => {
       const runtime = await window.piDesktop.getRuntimeState();
       const button = document.querySelector<HTMLButtonElement>('.send-button');
@@ -384,16 +296,17 @@ async function sendMessage(page: Page, value: string, reply: string): Promise<vo
         model: runtime.model, messages: runtime.messages.slice(-2).map((message) => ({ role: message.role, text: message.text.slice(0, 500) })),
         composerError: document.querySelector('.composer-error')?.textContent?.slice(0, 500),
         sendButton: button ? { disabled: button.disabled, label: button.getAttribute('aria-label'), mode: button.dataset.mode } : null };
-    }).catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
-    const after = await nativeState().catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
-    const trace = await page.evaluate(() => (window as typeof window & { fateE2eComposerTrace?: Record<string, unknown>[] }).fateE2eComposerTrace)
-      .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
-    const promptTrace = await application.evaluate(() => (globalThis as PromptTraceGlobal).fateE2ePromptTrace)
-      .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\nComposer send state: ${JSON.stringify(state)}\nSend diagnostics: ${JSON.stringify({ before, after, trace, promptTrace })}`, { cause: error });
-  } finally {
-    await page.evaluate(() => (window as typeof window & { fateE2eComposerCleanup?: () => void }).fateE2eComposerCleanup?.()).catch(() => {});
+    });
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nComposer send state: ${JSON.stringify(state)}`, { cause: error });
   }
+  await expect.poll(() => page.evaluate(async (expected) => {
+    const state = await window.piDesktop.getRuntimeState();
+    return state.messages.some((message) => message.role === 'assistant' && message.text === expected);
+  }, reply), READY).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.piDesktop.getRuntimeState().then((state) => state.activeSessionRunning ?? state.streaming)), READY).toBe(false);
+  const scrollbar = page.getByRole('scrollbar', { name: 'Conversation scroll position' });
+  if (await scrollbar.isVisible()) await scrollbar.press('End');
+  await expect(page.getByText(reply, { exact: true }).first()).toBeVisible();
 }
 
 async function toggleHyp3rc0d3(page: Page, enabled: boolean): Promise<void> {

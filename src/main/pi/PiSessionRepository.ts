@@ -682,7 +682,7 @@ export class PiSessionRepository {
         lstat(summary.path), realpath(this.sessionsRoot), realpath(dirname(summary.path)), realpath(summary.path),
       ]);
       if (!file.isFile() || canonicalDir !== join(canonicalRoot, basename(dirname(summary.path)))
-        || canonicalFile !== resolve(summary.path)) return { state: 'unknown', reason: 'unavailable' };
+        || canonicalFile !== join(canonicalDir, basename(summary.path))) return { state: 'unknown', reason: 'unavailable' };
       const limit = 8 * 1024 * 1024;
       if (file.size < 1 || file.size > limit) return { state: 'unknown', reason: 'oversized' };
       const handle = await open(summary.path, 'r');
