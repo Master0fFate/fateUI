@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import manifest from '../../package.json';
 import { releaseMetadata } from './releaseMetadata';
 
 describe('application release metadata', () => {
-  it('exposes the 2.3 machine version and Hyper display title', () => {
+  it('exposes the manifest machine version and display title', () => {
     expect(releaseMetadata).toEqual({
-      version: '2.3.0',
-      releaseName: 'Hyper',
-      displayVersion: 'V2.3.0 - Hyper',
+      version: manifest.version,
+      releaseName: manifest.releaseName,
+      displayVersion: `V${manifest.version} - ${manifest.releaseName}`,
     });
   });
 });

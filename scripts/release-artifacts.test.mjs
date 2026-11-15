@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 const execFileAsync = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '..');
 const script = path.join(root, 'scripts', 'release-artifacts.mjs');
-const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
+const { version, releaseName } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+const displayVersion = `V${version}${releaseName ? ` - ${releaseName}` : ''}`;
 const expected = [
   `Fate-UI-${version}-Windows-x64.exe`,
   `Fate-UI-${version}-macOS-arm64.dmg`,
@@ -78,15 +79,15 @@ describe('release artifact verification', () => {
 
   it('reports a clean tag, exact titled release, and stable classification', async () => {
     const metadata = async (field) => (await execFileAsync(process.execPath, [script, 'metadata', '--field', field], { cwd: root })).stdout.trim();
-    await expect(metadata('version')).resolves.toBe('2.3.0');
-    await expect(metadata('tag')).resolves.toBe('v2.3.0');
-    await expect(metadata('display-version')).resolves.toBe('V2.3.0 - Hyper');
+    await expect(metadata('version')).resolves.toBe(version);
+    await expect(metadata('tag')).resolves.toBe(`v${version}`);
+    await expect(metadata('display-version')).resolves.toBe(displayVersion);
     await expect(metadata('is-prerelease')).resolves.toBe('false');
-    await expect(execFileAsync(process.execPath, [script, 'validate-tag', '--tag', 'v2.3.0'], { cwd: root })).resolves.toMatchObject({
-      stdout: expect.stringContaining('title V2.3.0 - Hyper'),
+    await expect(execFileAsync(process.execPath, [script, 'validate-tag', '--tag', `v${version}`], { cwd: root })).resolves.toMatchObject({
+      stdout: expect.stringContaining(`title ${displayVersion}`),
     });
     await expect(execFileAsync(process.execPath, [script, 'validate-tag', '--tag', 'V1.1.0 - Modulo'], { cwd: root }))
-      .rejects.toMatchObject({ stderr: expect.stringContaining('does not match package version 2.3.0') });
+      .rejects.toMatchObject({ stderr: expect.stringContaining(`does not match package version ${version}`) });
   });
 
   it('prints a safe gh latest flag from the current package and published tag', async () => {
@@ -103,7 +104,7 @@ describe('release artifact verification', () => {
     await expect(policy('--published-tag', 'v2.2.4')).resolves.toBe('--latest');
     await expect(policy('--published-tag', 'v2.2.5')).resolves.toBe('--latest');
     await expect(policy('--published-tag', 'v2.2.6')).resolves.toBe('--latest');
-    await expect(policy('--published-tag', 'v2.3.0')).resolves.toBe('--latest=false');
+    await expect(policy('--published-tag', `v${version}`)).resolves.toBe('--latest=false');
     await expect(policy('--published-tag', 'v2.4.0-beta1')).resolves.toBe('--latest=false');
     await expect(policy('--published-tag', 'V1.0.0 - Old Title')).rejects.toMatchObject({
       stderr: expect.stringContaining('Published release tag is invalid'),

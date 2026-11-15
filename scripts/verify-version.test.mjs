@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +11,9 @@ const root = path.resolve(import.meta.dirname, '..');
 describe('release metadata verification', () => {
   it('verifies the repository release metadata and exact public title', async () => {
     const result = await execFileAsync(process.execPath, [path.join(root, 'scripts', 'verify-version.mjs')], { cwd: root });
-    expect(result.stdout).toBe('Version sources match exactly: 2.3.0; release title: V2.3.0 - Hyper\n');
+    const { version, releaseName } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+    const title = `V${version}${releaseName ? ` - ${releaseName}` : ''}`;
+    expect(result.stdout).toBe(`Version sources match exactly: ${version}; release title: ${title}\n`);
   });
 
   it('keeps the codename out of package and production SemVer', () => {

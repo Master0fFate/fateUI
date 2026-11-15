@@ -253,7 +253,7 @@ describe('BrowserService visibility safety', () => {
     });
     const add = vi.fn(async () => undefined);
     const tabs = (service as unknown as { tabs: Map<string, unknown> }).tabs;
-    tabs.set('tab-1', { annotationOverlay: { add, remove: vi.fn(async () => undefined) } });
+    tabs.set('tab-1', { annotationOverlay: { add, remove: vi.fn(async () => undefined), setLabel: vi.fn(async () => undefined) } });
     const labels = (id: string, createdAt: number) => service.annotations.save({
       id, tabId: 'tab-1', url: 'https://example.test/', origin: 'https://example.test',
       documentEpoch: 1, pageRevision: createdAt, kind: 'element',
