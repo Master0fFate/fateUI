@@ -41,7 +41,9 @@ export class AnnotationService {
     private readonly refs: BrowserRefRegistry,
   ) {}
 
-  async selectElement(context: AnnotationContext, comment: string, signal?: AbortSignal): Promise<BrowserAnnotation> {
+  async selectElement(context: AnnotationContext, comment: string, signal?: AbortSignal): Promise<BrowserAnnotation>;
+  async selectElement(context: AnnotationContext, comment: string, signal: AbortSignal | undefined, onBadge: (backendNodeId: number) => boolean): Promise<BrowserAnnotation | null>;
+  async selectElement(context: AnnotationContext, comment: string, signal?: AbortSignal, onBadge?: (backendNodeId: number) => boolean): Promise<BrowserAnnotation | null> {
     this.requireOverlay();
     // Reset the inspector agent between selections. Chromium can otherwise
     // acknowledge the next picker without reactivating hit testing.
@@ -63,6 +65,7 @@ export class AnnotationService {
     try {
       const selected = await selection;
       if (!selected.backendNodeId) throw new BrowserError('UNSUPPORTED_ACTION', 'Chromium did not return an inspected element.');
+      if (onBadge?.(selected.backendNodeId)) return null;
       const existing = this.repository.findElement(context.tabId, context.documentEpoch, selected.backendNodeId);
       return existing ?? await this.describeElement(context, selected.backendNodeId, comment);
     } finally {

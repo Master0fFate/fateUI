@@ -2,6 +2,39 @@
 
 Fate UI includes third-party software. This file records license notices that must accompany the distribution. Other bundled packages retain their own license files and package metadata.
 
+## OpenUI intelligent answers
+
+Fate UI bundles `@openuidev/react-lang` 1.1.1, `@openuidev/lang-core` 1.1.1 and `@openuidev/observability` 0.0.4 from [OpenUI](https://github.com/thesysdev/openui). Their exact published license files contain the MIT terms below with `Copyright (c) 2011-2024 Thesys Inc.`. The React runtime's development-only inspector dependency is not enabled in production. Fate disables renderer observability publication and the Lang Core installation-telemetry script.
+
+The local component composition, reactive-control patterns, and computation functions in `src/renderer/features/chat/intelligent-ui/` adapt ideas and portions of [open-intelligent-ui at commit 8ecdd17297d1f15cecfbc8750817dda5a576c401](https://github.com/thesysdev/open-intelligent-ui/tree/8ecdd17297d1f15cecfbc8750817dda5a576c401). That source is MIT, `Copyright (c) 2026 Thesys Inc.`. Fate's library is independently themed and deliberately omits that example's arbitrary HTML, raw SVG, remote media, maps, search and service/tool integrations.
+
+Both notices are retained with these complete terms:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2011-2024 Thesys Inc.
+Copyright (c) 2026 Thesys Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ## Bundled fonts
 
 Fate UI bundles local Fontsource assets, including Roboto Flex (`@fontsource-variable/roboto-flex` 5.3.0) for the M3 Expressive skin and JetBrains Mono for Angelcore and code. These fonts are distributed under SIL OFL 1.1. Copyright notices and the complete license are included in [FONT_LICENSES.md](FONT_LICENSES.md), which accompanies packaged distributions. No Google brand font or remote font service is required.

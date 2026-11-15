@@ -4,6 +4,7 @@ import type { AgentTeam, AgentTeamControlInput } from '../../src/shared/contract
 import type { TaskCreateInput, TaskDeleteInput, TaskEvent, TaskList, TaskReorderInput, TaskUpdateInput } from '../../src/shared/contracts/tasks';
 import type { MonitorDashboard, MonitorReadInput } from '../../src/shared/contracts/monitorDashboard';
 import { buildMonitorDashboard } from '../../src/main/pi/monitor/MonitorDashboard';
+import { intelligentAnswer, invalidIntelligentAnswer } from './intelligent-ui-fixture';
 
 const releaseShowcase = process.env.FATE_UI_SHOWCASE === '1';
 const model = { provider: 'test', id: 'deterministic', name: releaseShowcase ? 'Example model' : 'Deterministic Test Model', reasoning: true, contextWindow: 100_000, supportsImages: true };
@@ -103,6 +104,7 @@ export class FakePiRuntimeService {
   private conversationBranchesEnabled = false;
   private activeConversationBranchId = 'e2e-path-current';
   private readonly sessionPermissions = new Map<string, PermissionLevel>();
+  private readonly intelligentMessages = new Map<string, RuntimeState['messages']>();
   private createdSessionSequence = 0;
   private permissionKey(sessionId: string): string { return `${this.project?.path ?? ''}\0${sessionId}`; }
   private sink: (events: PiEvent[]) => void = () => undefined;
@@ -157,8 +159,8 @@ export class FakePiRuntimeService {
           : [{ label: 'Overview' }, { label: 'Recent work' }, { label: 'Last view' }],
       } } : {}),
       thinkingLevel: 'medium', permissionLevel: this.permissionLevel, hyp3rc0d3: this.hyp3rc0d3,
-      messages: historical ? [{ id: 'history-assistant', role: 'assistant', text: '**Second session** history', timestamp: 1, timelinePosition: 0 }]
-        : showQuestionnaire ? [{ id: 'questionnaire-assistant', role: 'assistant', text: 'Let’s set up your dashboard.', timestamp: 1, timelinePosition: 0 }] : [],
+      messages: this.intelligentMessages.get(this.permissionKey(this.activeSession)) ?? (historical ? [{ id: 'history-assistant', role: 'assistant', text: '**Second session** history', timestamp: 1, timelinePosition: 0 }]
+        : showQuestionnaire ? [{ id: 'questionnaire-assistant', role: 'assistant', text: 'Let’s set up your dashboard.', timestamp: 1, timelinePosition: 0 }] : []),
       tools: historical ? [{ id: 'history-tool', name: 'read', input: '{"path":"README.md"}', output: 'historical output', outputTruncated: false, status: 'succeeded', startedAt: 2, updatedAt: 3, endedAt: 3, timelinePosition: 0.5 }] : [],
       commands: [
         { name: 'goalmax', description: 'Start a persistent, visible, evidence-verified engineering goal', source: 'builtin' },
@@ -224,6 +226,36 @@ export class FakePiRuntimeService {
       });
       this.sink([{ type: 'run.accepted', runId, timestamp: Date.now() }]);
       this.emitState();
+      return { accepted: true, runId };
+    }
+    if (process.env.PI_DESKTOP_E2E_INTELLIGENT_UI === '1' && (input.text === '__FATE_INTELLIGENT_UI__' || input.text === '__FATE_INTELLIGENT_UI_INVALID__')) {
+      const text = input.text.endsWith('_INVALID__') ? invalidIntelligentAnswer : intelligentAnswer;
+      const key = this.permissionKey(this.activeSession);
+      const timestamp = Date.now();
+      const userId = `intelligent-user-${timestamp}`;
+      const promptText = input.text.endsWith('_INVALID__') ? 'Show an invalid dashboard.' : 'Show release readiness using mock data.';
+      const assistantId = `intelligent-assistant-${timestamp}`;
+      const messages = this.intelligentMessages.get(key) ?? [];
+      this.streaming = true;
+      this.sink([
+        { type: 'run.accepted', runId, timestamp },
+        { type: 'run.started', runId, timestamp: timestamp + 1 },
+        { type: 'message.completed', messageId: userId, role: 'user', text: promptText, timestamp: timestamp + 2 },
+        { type: 'message.started', messageId: assistantId, role: 'assistant', timestamp: timestamp + 3 },
+        { type: 'assistant.text', messageId: assistantId, delta: text.slice(0, text.indexOf('\n', text.indexOf('```openui')) + 1) + 'streaming_raw_lang_marker', timestamp: timestamp + 4 },
+      ]);
+      setTimeout(() => {
+        this.intelligentMessages.set(key, [...messages,
+          { id: userId, role: 'user', text: promptText, timestamp: timestamp + 2, timelinePosition: messages.length },
+          { id: assistantId, role: 'assistant', text, timestamp: timestamp + 5, timelinePosition: messages.length + 1 },
+        ]);
+        this.sink([
+          { type: 'message.completed', messageId: assistantId, role: 'assistant', text, timestamp: timestamp + 5 },
+          { type: 'run.completed', runId, aborted: false, timestamp: timestamp + 6 },
+        ]);
+        this.streaming = false;
+        this.emitState();
+      }, 1500);
       return { accepted: true, runId };
     }
     const profileRequest = /^__FATE_LIVE_PROFILE__(?::(\d+):(\d+))?$/u.exec(input.text);

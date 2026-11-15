@@ -1,4 +1,4 @@
-import { getFateApi, getFateApiOptional, getDesktopApi, getDesktopApiOptional, getWebApiOptional, hasCapability } from '../../platform/api';
+import { getFateApi, getFateApiOptional, getDesktopApi, getDesktopApiOptional, getDesktopConnectionState, getWebApiOptional, hasCapability } from '../../platform/api';
 import { UnconfirmedCommand } from '../../../client/HttpCommandTransport';
 import type { WebWorkspace } from '../../../client/WebFateApi';
 import { useWebWorkspaceStore } from '../../stores/webWorkspaceStore';
@@ -140,6 +140,19 @@ export function attachBrowserAnnotationToSession(projectPath: string | null, ses
   cacheSessionDraft(key, {
     ...current,
     browserAnnotationIds: [...current.browserAnnotationIds, id].slice(-24),
+    browserAnnotationsRevision: current.browserAnnotationsRevision + 1,
+  });
+}
+
+export function detachBrowserAnnotationFromSession(projectPath: string, sessionId: string, id: string): void {
+  const runtime = useRuntimeStore.getState().runtime;
+  const currentSessions = runtime.project?.path === projectPath && runtime.sessionId === sessionId ? runtime.sessions : undefined;
+  const key = sessionDraftKey(projectPath, sessionId, currentSessions);
+  const current = key ? sessionDraftsByIdentity.get(key) : undefined;
+  if (!key || !current?.browserAnnotationIds.includes(id)) return;
+  cacheSessionDraft(key, {
+    ...current,
+    browserAnnotationIds: current.browserAnnotationIds.filter((item) => item !== id),
     browserAnnotationsRevision: current.browserAnnotationsRevision + 1,
   });
 }
@@ -750,6 +763,8 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const setReasoningMenu = useUiStore((state) => state.setReasoningMenu);
   const composerDraftRequest = useUiStore((state) => state.composerDraftRequest);
   const clearComposerDraftRequest = useUiStore((state) => state.clearComposerDraftRequest);
+  const composerFollowUpRequest = useUiStore((state) => state.composerFollowUpRequest);
+  const clearComposerFollowUpRequest = useUiStore((state) => state.clearComposerFollowUpRequest);
   const showToast = useUiStore((state) => state.showToast);
   const speech = useUiStore((state) => state.speech);
   const speechDownload = useUiStore((state) => state.speechDownload);
@@ -1150,6 +1165,43 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       textarea.current?.setSelectionRange(composerDraftRequest.selectAll ? 0 : nextCaret, composerDraftRequest.selectAll ? nextDraft.length : nextCaret);
     });
   }, [clearComposerDraftRequest, composerDraftRequest, updateBrowserAnnotations, updateDraft, updateForkNotice, updateImages, updateSessionReferences]);
+
+  useEffect(() => {
+    if (!composerFollowUpRequest || useUiStore.getState().composerFollowUpRequest?.id !== composerFollowUpRequest.id) return;
+    clearComposerFollowUpRequest(composerFollowUpRequest.id);
+    const current = useRuntimeStore.getState();
+    const source = composerFollowUpRequest.source;
+    const targetKey = sessionDraftKey(source.projectPath, source.sessionId, current.runtime.sessions);
+    if (current.source !== source.source || getWebApiOptional()
+      || (getDesktopConnectionState()?.generation ?? null) !== source.connectionGeneration
+      || current.runtime.project?.path !== source.projectPath || current.runtime.sessionId !== source.sessionId
+      || current.pendingSessionSwitch || targetKey === null || activeDraftKey.current !== targetKey) {
+      showToast({ kind: 'error', title: 'Session changed', message: 'The answer was not added to the composer.' });
+      return;
+    }
+    if (optimizingPromptRef.current || submittingRef.current || liveAgentBusy || voiceStateRef.current !== 'idle') {
+      showToast({ kind: 'warning', title: 'Composer busy', message: 'Finish the current composer action, then add the answer again. Your draft was not changed.' });
+      return;
+    }
+    if (!composerFollowUpRequest.text.trim() || composerFollowUpRequest.text.length > 32_000) {
+      showToast({ kind: 'error', title: 'Follow-up unavailable', message: 'The answer could not be added. Your draft was not changed.' });
+      return;
+    }
+    const currentDraft = draftRef.current;
+    const nextDraft = `${currentDraft}${currentDraft ? '\n\n' : ''}${composerFollowUpRequest.text}`;
+    pendingDraftSelection.current = {
+      key: targetKey, text: nextDraft, start: nextDraft.length, end: nextDraft.length,
+      scrollTop: textarea.current?.scrollTop ?? 0, focus: true,
+    };
+    setLiveAgentTarget(null);
+    setLiveAgentDelivery('queue');
+    setSlashDismissed(true);
+    setMentionDismissed(true);
+    updateDraftForKey(targetKey, nextDraft);
+    updateForkNoticeForKey(targetKey, null);
+    setCaretPosition(nextDraft.length);
+    showToast({ kind: 'info', title: 'Review draft', message: 'The answer was appended to this conversation’s draft, not sent.' });
+  }, [clearComposerFollowUpRequest, composerFollowUpRequest, liveAgentBusy, showToast, updateDraftForKey, updateForkNoticeForKey]);
 
   useLayoutEffect(() => {
     const element = composer.current;

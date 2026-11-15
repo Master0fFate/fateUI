@@ -216,6 +216,7 @@ export const browserEventSchema = z.discriminatedUnion('type', [
     sessionId: browserIdSchema,
     annotation: z.lazy(() => browserAnnotationSchema),
   }).strict(),
+  z.object({ type: z.literal('annotation-removed'), projectPath: z.string().min(1).max(32_000), sessionId: browserIdSchema, id: browserIdSchema }).strict(),
   z.object({ type: z.literal('annotation-error'), message: z.string().min(1).max(1_000), ...browserEventScope }).strict(),
   z.object({ type: z.literal('confirmation-requested'), confirmation: browserConfirmationSchema, ...browserEventScope }).strict(),
   z.object({ type: z.literal('confirmation-cleared'), id: z.string().uuid(), approved: z.boolean(), ...browserEventScope }).strict(),

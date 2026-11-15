@@ -1,8 +1,8 @@
 import { getFateApiOptional, getDesktopApi, getDesktopApiOptional } from '../../platform/api';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Check, Copy, Download, Expand, Image as ImageIcon, ImageOff, X } from 'lucide-react';
-import { Children, createContext, isValidElement, memo, useCallback, useContext, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { Children, Component, Suspense, createContext, isValidElement, lazy, memo, useCallback, useContext, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import ReactMarkdown, { type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { normalizeBrowserWebUrl } from '../../../shared/contracts/browser';
 import type { HistoryImagesInput, RuntimeImage } from '../../../shared/contracts/ipc';
@@ -354,10 +354,40 @@ function CodeBlock({ child }: { child: ReactElement<{ className?: string; childr
   );
 }
 
-function MermaidAwarePre({ children }: { children?: ReactNode }) {
+const IntelligentAnswer = lazy(() => import('./intelligent-ui/IntelligentAnswer').then((module) => ({ default: module.IntelligentAnswer })));
+
+class IntelligentAnswerBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  override render() {
+    return this.state.failed ? <div role="alert">Interactive answer unavailable.</div> : this.props.children;
+  }
+}
+
+interface MarkdownContextValue {
+  enabled: boolean;
+  allowMedia: boolean;
+  text: string;
+  isStreaming: boolean;
+  stateKey?: string | undefined;
+  onFollowUp?: ((text: string) => void) | undefined;
+}
+
+const MarkdownContext = createContext<MarkdownContextValue>({ enabled: false, allowMedia: true, text: '', isStreaming: false });
+
+function MermaidAwarePre({ children, node }: { children?: ReactNode } & ExtraProps) {
+  const context = useContext(MarkdownContext);
   const child = Children.count(children) === 1 ? Children.only(children) : null;
   if (isValidElement<{ className?: string; children?: ReactNode }>(child)) {
-    if (child.props.className?.split(' ').includes('language-mermaid')) {
+    if (context.enabled && child.props.className?.split(' ').includes('language-openui')) {
+      const offset = node?.position?.start.offset ?? 0;
+      const end = node?.position?.end.offset ?? context.text.length;
+      const block = context.text.slice(offset, end);
+      const open = context.isStreaming && end >= context.text.length && !/(?:^|\n)[ \t]*(?:`{3,}|~{3,})[ \t]*$/u.test(block);
+      const stateKey = context.stateKey ? JSON.stringify([context.stateKey, offset]) : undefined;
+      return <IntelligentAnswerBoundary key={stateKey}><Suspense fallback={<div role="status">Loading interactive answer…</div>}><IntelligentAnswer source={String(child.props.children ?? '').replace(/\n$/, '')} isStreaming={open} {...(stateKey ? { stateKey } : {})} {...(context.onFollowUp ? { onFollowUp: context.onFollowUp } : {})} /></Suspense></IntelligentAnswerBoundary>;
+    }
+    if (context.allowMedia && child.props.className?.split(' ').includes('language-mermaid')) {
       return <MermaidDiagram source={String(child.props.children ?? '').replace(/\n$/, '')} />;
     }
     return <CodeBlock child={child} />;
@@ -399,15 +429,17 @@ export function MessageImages({ images }: { images: RuntimeImage[] }) {
 }
 
 function MarkdownImage({ src, alt }: { src?: string | undefined; alt?: string | undefined }) {
-  return <ChatImage src={src} alt={alt ?? ''} />;
+  const { allowMedia } = useContext(MarkdownContext);
+  return allowMedia ? <ChatImage src={src} alt={alt ?? ''} /> : <span>{alt ? `Image omitted: ${alt}` : 'Image omitted'}</span>;
 }
 
 const markdownPlugins = [remarkGfm, remarkAgentMentions];
 const markdownComponents = { a: AgentMentionLink, img: MarkdownImage, pre: MermaidAwarePre };
 
-export const AssistantMarkdown = memo(function AssistantMarkdown({ text, images = [] }: { text: string; images?: RuntimeImage[] | undefined }) {
+export const AssistantMarkdown = memo(function AssistantMarkdown({ text, images = [], interpretOpenUI = false, allowMedia = true, isStreaming = false, stateKey, onFollowUp }: { text: string; images?: RuntimeImage[] | undefined; interpretOpenUI?: boolean | undefined; allowMedia?: boolean | undefined; isStreaming?: boolean | undefined; stateKey?: string | undefined; onFollowUp?: ((text: string) => void) | undefined }) {
   return (
     <div className="markdown-content">
+      <MarkdownContext.Provider value={{ enabled: interpretOpenUI, allowMedia, text, isStreaming, stateKey, onFollowUp }}>
       <ReactMarkdown
         remarkPlugins={markdownPlugins}
         urlTransform={safeMarkdownUrl}
@@ -415,7 +447,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({ text, images 
       >
         {text}
       </ReactMarkdown>
-      {images.length > 0 ? <div className="chat-image-grid"><MessageImages images={images} /></div> : null}
+      </MarkdownContext.Provider>
+      {allowMedia && images.length > 0 ? <div className="chat-image-grid"><MessageImages images={images} /></div> : null}
     </div>
   );
 });

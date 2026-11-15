@@ -154,7 +154,7 @@ function ChildTool({ tool }: { tool: RuntimeTool }) {
   );
 }
 
-function ChildMessage({ message }: { message: RuntimeMessage }) {
+function ChildMessage({ message, stateKey, isStreaming }: { message: RuntimeMessage; stateKey: string; isStreaming: boolean }) {
   if (message.role === 'assistant' && !message.text && !message.reasoning && !message.images?.length) return null;
   const label = message.role === 'user' ? 'Parent task' : message.role === 'assistant' ? 'Child agent' : 'System';
   return (
@@ -167,16 +167,16 @@ function ChildMessage({ message }: { message: RuntimeMessage }) {
         </details>
       ) : null}
       {message.role === 'assistant' || message.role === 'system' || message.images?.length
-        ? <AssistantMarkdown text={message.text} images={message.images} />
+        ? <AssistantMarkdown text={message.text} images={message.images} interpretOpenUI={message.role === 'assistant'} stateKey={stateKey} isStreaming={isStreaming} />
         : <p>{message.text}</p>}
     </article>
   );
 }
 
-function ActivityRow({ activity }: { activity: Activity }) {
+function ActivityRow({ activity, stateKey, isStreaming }: { activity: Activity; stateKey: string; isStreaming: boolean }) {
   return (
     <div className="subagent-activity-row">
-      {activity.kind === 'message' ? <ChildMessage message={activity.message} /> : <ChildTool tool={activity.tool} />}
+      {activity.kind === 'message' ? <ChildMessage message={activity.message} stateKey={stateKey} isStreaming={isStreaming} /> : <ChildTool tool={activity.tool} />}
     </div>
   );
 }
@@ -233,7 +233,7 @@ function AgentTeamEnvelopeRow({ team, node, envelope }: { team: AgentTeam; node:
   return (
     <article className={`subagent-message subagent-message--${role}`}>
       <span className="subagent-activity-label">{label}</span>
-      {role === 'assistant' ? <AssistantMarkdown text={envelope.content} /> : <p>{envelope.content}</p>}
+      {role === 'assistant' ? <AssistantMarkdown text={envelope.content} interpretOpenUI={envelope.kind === 'FINAL_ANSWER' || envelope.kind === 'MESSAGE'} stateKey={JSON.stringify(['team', team.id, node.id, envelope.id])} /> : <p>{envelope.content}</p>}
     </article>
   );
 }
@@ -385,7 +385,7 @@ function SubagentChatPreview({ runId, teamSelection, goalLink, height }: { runId
           alignToBottom
           initialItemCount={Math.min(activities.length, 12)}
           computeItemKey={(_index, activity) => activity.id}
-          itemContent={(_index, activity) => <ActivityRow activity={activity} />}
+          itemContent={(index, activity) => <ActivityRow activity={activity} stateKey={JSON.stringify(['child', projectPath, sessionId, run.id, activity.id])} isStreaming={isActive && index === activities.length - 1} />}
           scrollerRef={transcriptScroll.bindScroller}
           followOutput={isActive ? transcriptScroll.followOutput : false}
         />
@@ -451,6 +451,9 @@ function WorkflowNodeRow({ node, teamSelection, goalLink }: { node: SubagentWork
   const status = workflowNodeStatus(node);
   const handle = node.handle ?? node.id;
   const displayName = node.displayName ?? node.id;
+  const teamNode = teamSelection?.node;
+  const dependency = node.dependsOn.length ? `After ${node.dependsOn.join(', ')}` : 'Workflow root';
+  const metadata = teamNode ? `${teamNode.model.name} · ${thinkingLabel(teamNode.thinkingLevel)} · ${dependency}` : dependency;
   const selected = useUiStore((state) => Boolean(teamSelection && state.selectedAgent?.kind === 'team-node' && state.selectedAgent.teamId === teamSelection.team.id && state.selectedAgent.nodeId === teamSelection.node.id));
   const openNode = useUiStore((state) => state.openAgentTeamNode);
   const content = <>
@@ -460,12 +463,12 @@ function WorkflowNodeRow({ node, teamSelection, goalLink }: { node: SubagentWork
       <small>{node.task}</small>
       <span className="subagent-session-meta">
         <em>{node.status}</em>
-        <small>{node.dependsOn.length ? `After ${node.dependsOn.join(', ')}` : 'Workflow root'}</small>
+        <small title={metadata}>{metadata}</small>
       </span>
     </span>
   </>;
   return (
-    <article className={`subagent-session-row subagent-session-row--${status}${teamSelection ? '' : ' subagent-session-row--placeholder'}`} data-selected={selected || undefined}>
+    <article className={`subagent-session-row subagent-session-row--workflow subagent-session-row--${status}${teamSelection ? '' : ' subagent-session-row--placeholder'}`} data-selected={selected || undefined}>
       {teamSelection ? (
         <button
           className="subagent-session-open"

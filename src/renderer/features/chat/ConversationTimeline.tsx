@@ -1,4 +1,4 @@
-import { getDesktopApiOptional, getFateApi, getFateApiOptional } from '../../platform/api';
+import { getDesktopApiOptional, getDesktopConnectionState, getFateApi, getFateApiOptional, getWebApiOptional } from '../../platform/api';
 import { Brain, Check, CircleAlert, Copy, GitFork, PackageCheck, PackageOpen, Plug, RotateCcw } from 'lucide-react';
 import { useLearningStore } from '../learning/learningStore';
 import { memo, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -68,9 +68,10 @@ export function forkEntryForMessage(messageId: string, messageOrder: readonly st
 
 export const MessageRow = memo(function MessageRow({ messageId }: { messageId: string }) {
   const { ActionContent, MessageHeading } = useSkinComponents();
-  const { message, sessionId, streaming, streamingThisMessage, modelName, agentId, forkPoints, forkMessageOrder, forkCapable, sessionOperation } = useRuntimeStore(useShallow((state) => ({
+  const { message, sessionId, projectPath, streaming, streamingThisMessage, modelName, agentId, forkPoints, forkMessageOrder, forkCapable, sessionOperation } = useRuntimeStore(useShallow((state) => ({
     message: state.messagesById[messageId],
     sessionId: state.runtime.sessionId,
+    projectPath: state.runtime.project?.path ?? null,
     streaming: state.runtime.streaming,
     streamingThisMessage: state.runtime.streaming && state.messageOrder.at(-1) === messageId,
     modelName: state.runtime.model?.name ?? 'Assistant',
@@ -81,6 +82,7 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
     sessionOperation: Boolean(state.runtime.sessionOperation),
   })));
   const agentName = useAgentLabel(agentId);
+  const connectionGeneration = getDesktopConnectionState()?.generation ?? null;
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<number | null>(null);
   const [copying, setCopying] = useState(false);
@@ -152,12 +154,24 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
     }
   };
 
+  const stageFollowUp = (text: string) => {
+    const current = useRuntimeStore.getState();
+    if (!sessionId || !projectPath || current.source !== 'desktop' || getWebApiOptional()
+      || (getDesktopConnectionState()?.generation ?? null) !== connectionGeneration
+      || current.runtime.sessionId !== sessionId || (current.runtime.project?.path ?? null) !== projectPath) {
+      useUiStore.getState().showToast({ kind: 'error', title: 'Session changed', message: 'The answer was not added to the composer.' });
+      throw new Error('The conversation changed.');
+    }
+    useUiStore.getState().requestComposerFollowUp({ source: 'desktop', connectionGeneration, projectPath, sessionId }, text);
+  };
+  const streamingOpenUI = message.role === 'assistant' && streamingThisMessage && /(?:`{3,}|~{3,})openui\b/iu.test(message.text);
+
   return (
     <div className={`chat-message-row chat-message-row--${message.role}`}>
       <article className={`chat-message chat-message--${message.role}${message.error ? ' chat-message--error' : ''}`}>
         <MessageHeading role={message.role} label={label} />
-        {richContent && !(message.role === 'assistant' && streamingThisMessage && !images?.length)
-          ? <AssistantMarkdown text={message.text} images={images} />
+        {richContent && !(message.role === 'assistant' && streamingThisMessage && !images?.length && !streamingOpenUI)
+          ? <AssistantMarkdown text={message.text} images={images} interpretOpenUI={message.role === 'assistant'} isStreaming={streamingThisMessage} stateKey={JSON.stringify(['desktop', connectionGeneration, projectPath, sessionId, messageId])} onFollowUp={message.role === 'assistant' ? stageFollowUp : undefined} />
           : <p className="message-plain"><MentionText text={message.text} /></p>}
       </article>
       <footer className="message-footer">
@@ -317,13 +331,18 @@ export function ConversationTimeline(props: { expansionCommand?: DetailExpansion
   const snapshot = useRuntimeStore((state) => state.snapshot);
   if (source === 'desktop') return <DesktopConversationTimeline {...props} />;
   const items = snapshot?.items ?? [];
+  const web = getWebApiOptional();
+  const stateKey = JSON.stringify(['network', web?.origin, web?.hostId, web?.authenticatedSessionId,
+    snapshot?.header.serverEpoch, snapshot?.header.workspaceId, snapshot?.header.workspaceGeneration, snapshot?.header.sessionId]);
   return <section className="conversation" aria-label="Conversation timeline" data-entry-count={items.length}>
     {items.length === 0 ? <p className="conversation--empty">No retained items in this bounded snapshot. This does not prove that older history does not exist.</p> : null}
-    <Virtuoso className="conversation-virtuoso" data={items} computeItemKey={(index, item) => `${item.kind}:${item.id}:${index}`}
+    <Virtuoso className="conversation-virtuoso" data={items} computeItemKey={(_index, item) => JSON.stringify([stateKey, item.kind, item.id])}
       itemContent={(_index, item) => <div className="timeline-row" data-entry-kind={item.kind}>
         <article className="chat-message" aria-label={item.kind === 'tool' ? 'Tool excerpt' : 'Message excerpt'}>
           <strong>{item.kind === 'message' ? item.role ?? 'message' : item.name ?? 'tool'}{item.status ? ` · ${item.status}` : ''}</strong>
-          <p className="message-plain" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{item.text}</p>
+          {item.kind === 'message' && item.role === 'assistant' && !item.clipped
+            ? <AssistantMarkdown text={item.text} interpretOpenUI allowMedia={false} isStreaming={Boolean(snapshot?.header.controls.streaming && item.id === items.at(-1)?.id)} stateKey={JSON.stringify([stateKey, item.id])} />
+            : <p className="message-plain" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{item.text}</p>}
           <small>{item.clipped && 'Text clipped in this display. '}{item.mediaOmitted && 'Media omitted. '}
             {item.historyOmitted !== undefined && `${item.historyOmitted} earlier items omitted.`}</small>
         </article>

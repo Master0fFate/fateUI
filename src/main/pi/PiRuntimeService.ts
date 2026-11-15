@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { INTELLIGENT_UI_PROMPT } from '../../shared/intelligentUiPrompt';
 import { LearningContextAdapter } from '../learning/LearningContext';
 import type { LearningService } from '../learning/LearningService';
 import type { LearningOrigin } from '../learning/LearningEvidence';
@@ -699,6 +700,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
       const userExtensionPaths = preset ? [] : selectUserExtensionPaths(resolvedResources.extensions);
       const webTools = createWebTools(() => options.webSearch?.() !== false);
       const appendSystemPrompt = [
+        INTELLIGENT_UI_PROMPT,
         ...await boundedContextPrompts(agentDir, 'Global'),
         ...await boundedContextPrompts(effectiveCwd, 'Project'),
         ...(preset ? [`Saved Agent ${preset.name}, revision ${preset.revision}.\n${preset.instructions}`] : []),

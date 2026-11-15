@@ -75,6 +75,7 @@ export const useBrowserStore = create<BrowserStore>((set) => ({
       else if (event.type === 'confirmation-cleared' && confirmation?.id === event.id) confirmation = null;
       else if (event.type === 'navigation-blocked') error = event.reason;
       else if (event.type === 'annotation-created') annotations = [event.annotation, ...annotations.filter((item) => item.id !== event.annotation.id)];
+      else if (event.type === 'annotation-removed') annotations = annotations.filter((item) => item.id !== event.id);
       else if (event.type === 'annotation-error') error = event.message;
       else if (event.type === 'cdp-availability' && !event.available) error = event.reason ?? 'Semantic browser control disconnected.';
       else if (event.type === 'work-log') {

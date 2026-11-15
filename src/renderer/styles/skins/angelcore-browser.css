@@ -21,7 +21,7 @@
 :root[data-skin][data-skin-styled] .browser-device-toolbar { flex-wrap: nowrap; gap: 6px; }
 :root[data-skin][data-skin-styled] .browser-device-size { flex-wrap: nowrap; gap: 4px; }
 :root[data-skin][data-skin-styled] .browser-device-size input { border-radius: var(--surface-control-radius); font-family: var(--font-interface); }
-:root[data-skin][data-skin-styled] :is(.browser-annotation-hint, .browser-grant-strip, .browser-error-strip, .browser-confirmation, .browser-blank-mark) { border-radius: var(--surface-surface-radius); box-shadow: none; border-color: var(--surface-border); }
+:root[data-skin][data-skin-styled] :is(.browser-grant-strip, .browser-error-strip, .browser-confirmation, .browser-blank-mark) { border-radius: var(--surface-surface-radius); box-shadow: none; border-color: var(--surface-border); }
 :root[data-skin][data-skin-styled] :is(.browser-grant-strip, .browser-confirmation),
 :root[data-skin][data-skin-styled] :is(.browser-grant-strip, .browser-confirmation) * { font-family: "Noto Sans Variable", system-ui, sans-serif !important; }
 @container browser-workspace (max-width: 460px) {

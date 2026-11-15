@@ -33,6 +33,10 @@ interface BoxModelResult { model?: { content?: number[]; border?: number[] } }
 interface ContentQuadsResult { quads?: number[][] }
 interface LocationResult { backendNodeId?: number; nodeId?: number }
 interface DocumentResult { root: LiveDomNode }
+interface DomAncestrySnapshot {
+  strings: string[];
+  documents: Array<{ nodes: { backendNodeId?: number[]; parentIndex?: number[]; nodeName?: number[]; attributes?: number[][] } }>;
+}
 interface BrowserKeyStroke { key: string; code?: string; modifiers: number; printable: boolean; label: string }
 interface VerifiedBrowserElement {
   handle: BrowserElementHandle;
@@ -90,6 +94,7 @@ export class BrowserActionExecutor {
     input: { ref: string },
   ): Promise<BrowserActionResult> {
     assertActionCurrent(context);
+    await this.cdp.send<DocumentResult>('DOM.getDocument', { depth: 0, pierce: true });
     let target = await this.resolveVerified(context, input.ref);
     const action = await this.actionForElement(target, 'click', context.origin);
     const confirmed = await this.authorize(action, { tabId: context.tabId, documentEpoch: context.documentEpoch, ref: input.ref });
@@ -439,6 +444,20 @@ export class BrowserActionExecutor {
       const nodeId = pushed.nodeIds?.[0];
       if (!nodeId) throw new BrowserError('ACTION_BLOCKED', 'The browser could not bind the target to its live document.');
       current = (await this.cdp.send<DescribeNodeResult>('DOM.describeNode', { nodeId, depth: 0 })).node;
+      if (!current.parentId && !isDocumentNode(current)) {
+        const paths = await this.snapshotPaths([current.backendNodeId]);
+        const path = paths[0] ?? [];
+        if (!path.length || !isDocumentNode(path.at(-1)!)) {
+          throw new BrowserError('ACTION_BLOCKED', 'The browser could not verify the target form ancestry.');
+        }
+        const bound = await this.cdp.send<{ nodeIds?: number[] }>('DOM.pushNodesByBackendIdsToFrontend', {
+          backendNodeIds: path.map((node) => node.backendNodeId),
+        });
+        return path.map((node, index) => {
+          const nodeId = bound.nodeIds?.[index];
+          return nodeId ? { ...node, nodeId } : node;
+        });
+      }
     }
 
     const path: LiveDomNode[] = [];
@@ -585,6 +604,12 @@ export class BrowserActionExecutor {
     if (hit.backendNodeId === expectedBackendNodeId) return true;
     const hitNode = await this.describeHit(hit);
     if (!hitNode) return false;
+    if (!hitNode.parentId || !target.node.parentId) {
+      const [hitPath = [], targetPath = []] = await this.snapshotPaths([hitNode.backendNodeId, target.handle.backendNodeId]);
+      if (hitPath.some((node) => node.backendNodeId === expectedBackendNodeId)) return true;
+      const ownerIndex = targetPath.findIndex((node) => node.backendNodeId === hitNode.backendNodeId);
+      return ownerIndex > 0 && ownerIndex <= 6 && await this.isVerifiedClickOwner(targetPath[ownerIndex]!, target);
+    }
 
     // A child (icon, text, pseudo-host, or shadow descendant) receives the
     // pointer event and bubbles it to the verified semantic target.
@@ -639,6 +664,32 @@ export class BrowserActionExecutor {
     const nodeId = pushed.nodeIds?.[0];
     if (!nodeId) return node;
     return (await this.cdp.send<DescribeNodeResult>('DOM.describeNode', { nodeId, depth: 0 })).node;
+  }
+
+  private async snapshotPaths(backendNodeIds: readonly number[]): Promise<LiveDomNode[][]> {
+    const snapshot = await this.cdp.send<DomAncestrySnapshot>('DOMSnapshot.captureSnapshot', { computedStyles: [] });
+    return backendNodeIds.map((backendNodeId) => {
+      for (const { nodes } of snapshot.documents) {
+        let index = nodes.backendNodeId?.indexOf(backendNodeId) ?? -1;
+        if (index < 0) continue;
+        const path: LiveDomNode[] = [];
+        const visited = new Set<number>();
+        while (index >= 0 && path.length < 64 && !visited.has(index)) {
+          visited.add(index);
+          const id = nodes.backendNodeId?.[index];
+          const name = nodes.nodeName?.[index];
+          if (id === undefined || name === undefined) break;
+          path.push({
+            backendNodeId: id,
+            nodeName: snapshot.strings[name] ?? '',
+            attributes: (nodes.attributes?.[index] ?? []).map((value) => snapshot.strings[value] ?? ''),
+          });
+          index = nodes.parentIndex?.[index] ?? -1;
+        }
+        return path;
+      }
+      return [];
+    });
   }
 
   private async waitForLayout(): Promise<void> {

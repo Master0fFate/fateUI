@@ -16,6 +16,13 @@ let nextToastId = 0;
 let nextComposerDraftRequestId = 0;
 let nextFlightDeckJumpNonce = 0;
 
+export interface ComposerFollowUpSource {
+  source: 'desktop';
+  connectionGeneration: number | null;
+  projectPath: string;
+  sessionId: string;
+}
+
 export interface FlightDeckJump {
   nonce: number;
   projectPath: string;
@@ -82,6 +89,7 @@ interface UiState {
   speechStatus: SpeechStatus | null;
   toast: AppToastMessage | null;
   composerDraftRequest: { id: number; text: string; selectAll: boolean; mode: 'replace' | 'insert'; notice?: string } | null;
+  composerFollowUpRequest: { id: number; text: string; source: ComposerFollowUpSource } | null;
   inspectorTab: InspectorTab;
   inspectorLastViews: InspectorLastViews;
   selectedAgent: SelectedAgent | null;
@@ -119,6 +127,8 @@ interface UiState {
   requestComposerDraft: (text: string, selectAll?: boolean, notice?: string) => void;
   requestComposerInsertion: (text: string, notice?: string) => void;
   clearComposerDraftRequest: (id: number) => void;
+  requestComposerFollowUp: (source: ComposerFollowUpSource, text: string) => void;
+  clearComposerFollowUpRequest: (id: number) => void;
   setInspectorTab: (tab: InspectorTab) => void;
   openInspectorTab: (tab: InspectorTab) => void;
   openInspectorDestination: (destination: InspectorDestination) => void;
@@ -196,6 +206,7 @@ export const useUiStore = create<UiState>()(
       speechStatus: null,
       toast: null,
       composerDraftRequest: null,
+      composerFollowUpRequest: null,
       inspectorTab: 'changes',
       inspectorLastViews: { ...INSPECTOR_DEFAULT_VIEWS },
       selectedAgent: null,
@@ -233,6 +244,8 @@ export const useUiStore = create<UiState>()(
       requestComposerDraft: (text, selectAll = false, notice) => set({ composerDraftRequest: { id: ++nextComposerDraftRequestId, text, selectAll, mode: 'replace', ...(notice ? { notice } : {}) } }),
       requestComposerInsertion: (text, notice) => set({ composerDraftRequest: { id: ++nextComposerDraftRequestId, text, selectAll: false, mode: 'insert', ...(notice ? { notice } : {}) } }),
       clearComposerDraftRequest: (id) => set((state) => state.composerDraftRequest?.id === id ? { composerDraftRequest: null } : state),
+      requestComposerFollowUp: (source, text) => set({ composerFollowUpRequest: { id: ++nextComposerDraftRequestId, source, text } }),
+      clearComposerFollowUpRequest: (id) => set((state) => state.composerFollowUpRequest?.id === id ? { composerFollowUpRequest: null } : state),
       setInspectorTab: (inspectorTab) => set((state) => selectInspectorTab(state, inspectorTab)),
       openInspectorTab: (inspectorTab) => set((state) => ({ ...selectInspectorTab(state, inspectorTab), inspectorCollapsed: false })),
       openInspectorDestination: (destination) => set((state) => ({

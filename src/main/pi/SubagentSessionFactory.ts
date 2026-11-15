@@ -19,6 +19,7 @@ import type {
   SubagentUsage,
   ThinkingLevel,
 } from '../../shared/contracts/ipc';
+import { INTELLIGENT_UI_PROMPT } from '../../shared/intelligentUiPrompt';
 import { createProjectConfinedTools, type ProjectToolAccess } from './PiToolPolicy';
 import type { ImageGenerationSettingsResolver } from './PiImageTool';
 import { filterSkillsForChild, type SelectedSubagentSkill } from './SubagentSkills';
@@ -164,6 +165,7 @@ export async function createSdkChildSession(input: ChildSessionInput): Promise<A
   const settingsManager = isolatedSettingsManager(input.settingsProjectPath ?? input.projectPath, input.agentDir);
   const selectedNames = input.selectedSkills.map((skill) => skill.name);
   const appendSystemPrompt = [
+    INTELLIGENT_UI_PROMPT,
     ...(input.profileSystemPrompt ? [input.profileSystemPrompt] : []),
     ...(input.instructions ? [input.instructions] : []),
     ...input.selectedSkills.flatMap((skill) => skill.content ? [`<pi-skill name="${skill.name}">\n${skill.content}\n</pi-skill>`] : []),

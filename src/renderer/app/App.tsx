@@ -16,7 +16,7 @@ import { useGoalMaxStore } from '../stores/goalMaxStore';
 import { useTaskStore } from '../stores/taskStore';
 import { useBrowserStore } from '../stores/browserStore';
 import { fallbackThemes } from '../theme';
-import { attachBrowserAnnotationToSession } from '../features/chat/Composer';
+import { attachBrowserAnnotationToSession, detachBrowserAnnotationFromSession } from '../features/chat/Composer';
 import { openBrowserLink } from '../features/browser/browserLink';
 import { RuntimeEventBuffer, streamPresentationDelay } from '../lib/RuntimeEventBuffer';
 import { canStopSession } from '../../shared/sessionStop';
@@ -70,6 +70,8 @@ function BrowserInitializer() {
       for (const event of events) {
         if (event.type === 'annotation-created') {
           attachBrowserAnnotationToSession(event.projectPath, event.sessionId, event.annotation.id);
+        } else if (event.type === 'annotation-removed') {
+          detachBrowserAnnotationFromSession(event.projectPath, event.sessionId, event.id);
         }
       }
     });

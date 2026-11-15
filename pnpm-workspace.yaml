@@ -14,6 +14,7 @@ overrides:
   'undici@>=8.0.0 <8.9.0': 8.10.0
 allowBuilds:
   '@google/genai': false
+  '@openuidev/lang-core': false
   electron: true
   electron-winstaller: false
   esbuild: true

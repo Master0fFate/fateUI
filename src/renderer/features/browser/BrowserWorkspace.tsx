@@ -64,12 +64,6 @@ export function BrowserWorkspace({ visible = true }: { visible?: boolean }) {
       </div>
       <BrowserToolbar />
       <BrowserDeviceToolbar state={state} />
-      {state.mode === 'annotate' && (
-        <div className="browser-annotation-hint" role="status">
-          <span><span className="browser-annotation-cursor" aria-hidden="true" /> Hover and click any page element</span>
-          <kbd>Esc</kbd><small>to stop annotating</small>
-        </div>
-      )}
       {state.mode === 'annotate' && !state.tabs.find((tab) => tab.id === state.activeTabId)?.semanticAvailable && (
         <div className="browser-error-strip" role="alert"><span>Element selection is unavailable for this page.</span></div>
       )}

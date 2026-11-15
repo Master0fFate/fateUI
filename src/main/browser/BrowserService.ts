@@ -280,7 +280,7 @@ export class BrowserService {
         pointerOverlay,
       ),
       annotationService: new AnnotationService(cdp, this.policy, this.annotations, this.refs),
-      annotationOverlay: new BrowserAnnotationOverlay(cdp),
+      annotationOverlay: new BrowserAnnotationOverlay(cdp, view.webContents, (id) => this.removeAnnotation(id)),
       pointerOverlay,
       gate,
       removeFullscreenShortcut,
@@ -624,6 +624,7 @@ export class BrowserService {
         origin: browserSecurityOrigin(tab.view.webContents.getURL() || 'about:blank'),
         explicitUserSelection: true,
       }, comment, signal ? AbortSignal.any([controller.signal, signal]) : controller.signal);
+      if (!annotation) throw new BrowserError('ACTION_BLOCKED', 'No page element was selected.');
       this.queueAnnotation(annotation.id);
       this.eventSink?.({ type: 'work-log', tabId, action: 'annotate', target: redactPotentialSecretText(annotation.target.accessibleName ?? annotation.kind, 1_200), timestamp: Date.now() });
       return annotation;
@@ -662,7 +663,7 @@ export class BrowserService {
     const tab = this.tabs.get(annotation.tabId);
     if (!tab || tab.documentEpoch !== annotation.documentEpoch) return false;
     this.activateTab(tab.id);
-    await tab.annotationOverlay.add(annotation, this.annotationLabel(id));
+    await tab.annotationOverlay.add(annotation, this.annotationLabel(id)).catch(() => undefined);
     await tab.annotationOverlay.pulse(id);
     return true;
   }
@@ -703,9 +704,20 @@ export class BrowserService {
   updateAnnotationComment(id: string, comment: string) { return this.annotations.updateComment(id, comment); }
   removeAnnotation(id: string): boolean {
     const annotation = this.annotations.get(id);
+    const ownerKey = this.annotationOwnerKeys.get(id);
     const removed = this.annotations.remove(id);
     this.dequeueAnnotation(id);
-    if (removed && annotation) void this.tabs.get(annotation.tabId)?.annotationOverlay.remove(id);
+    if (removed && annotation) {
+      void this.tabs.get(annotation.tabId)?.annotationOverlay.remove(id);
+      if (ownerKey) {
+        const [projectPath, sessionId] = ownerKey.split('\u0000');
+        if (projectPath && sessionId) this.eventSink?.({ type: 'annotation-removed', projectPath, sessionId, id });
+        for (const queuedId of this.queuedAnnotationIds.get(ownerKey) ?? []) {
+          const queued = this.annotations.get(queuedId);
+          if (queued) void this.tabs.get(queued.tabId)?.annotationOverlay.setLabel(queuedId, this.annotationLabel(queuedId));
+        }
+      }
+    }
     return removed;
   }
 
@@ -1021,6 +1033,7 @@ export class BrowserService {
       if (!this.activeAgentNavigations.has(tab.id)) this.cancelActions();
       if (!event.isSameDocument) {
         tab.documentEpoch += 1;
+        void tab.annotationOverlay.clear();
         this.refs.invalidateTab(tab.id, tab.documentEpoch);
       }
     });
@@ -1234,11 +1247,21 @@ export class BrowserService {
           url: this.displayUrl(tab),
           origin: browserSecurityOrigin(tab.view.webContents.getURL() || 'about:blank'),
           explicitUserSelection: true,
-        }, '', controller.signal);
-        if (controller.signal.aborted || this.mode !== 'annotate' || tab.documentEpoch !== annotation.documentEpoch) return;
+        }, '', controller.signal, (backendNodeId) => {
+          const id = tab.annotationOverlay.annotationForBadge(backendNodeId);
+          return id ? this.removeAnnotation(id) : false;
+        });
+        if (controller.signal.aborted || this.mode !== 'annotate') return;
+        if (!annotation) {
+          setTimeout(() => {
+            if (this.mode === 'annotate' && this.activeTabId === tab.id && loop === this.annotationLoop) this.startAnnotationLoop();
+          }, 0);
+          return;
+        }
+        if (tab.documentEpoch !== annotation.documentEpoch) return;
         this.queueAnnotation(annotation.id);
         const label = this.annotationLabel(annotation.id);
-        await tab.annotationOverlay.add(annotation, label);
+        await tab.annotationOverlay.add(annotation, label).catch(() => undefined);
         // A successful pick earns a fresh retry budget for later hiccups.
         this.annotationRearmBudget = MAX_ANNOTATION_REARMS;
         this.eventSink?.({ type: 'annotation-created', ...annotationOwner, annotation });
@@ -1380,6 +1403,7 @@ export class BrowserService {
     // uncaught main-process exception during fast session switches.
     const contents = tab.view.webContents;
     await attemptDisposal('fullscreen shortcut cleanup', `tab ${tab.id}`, () => tab.removeFullscreenShortcut());
+    await attemptDisposal('annotation overlay cleanup', `tab ${tab.id}`, () => tab.annotationOverlay.dispose());
     await attemptDisposal('CDP detach', `tab ${tab.id}`, () => tab.cdp.dispose());
     if (this.owner && !this.owner.isDestroyed()) {
       await attemptDisposal('view detach', `tab ${tab.id}`, () => {
