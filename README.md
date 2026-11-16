@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="build/icon.png" alt="Fate UI" width="76" height="76">
+
+
+https://github.com/user-attachments/assets/d72c03b5-6162-41fd-b8f9-7a11fe950bb1
+
+
 
 # Fate UI
 
