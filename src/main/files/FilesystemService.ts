@@ -820,17 +820,17 @@ export class FilesystemService {
       invalidPath('Only local project file links are supported.');
     }
     const candidate = path.resolve(operation.root, decoded);
-    if (!path.isAbsolute(decoded)) this.ensureConfined(candidate);
+    if (!confirmOutside && !path.isAbsolute(decoded)) this.ensureConfined(candidate);
     // Absolute links may use a project alias, such as macOS /var versus /private/var.
     const absolute = path.normalize(await fs.realpath(candidate));
     this.assertRootOperation(operation);
     const relative = path.relative(operation.root, absolute);
     const outside = relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
-    if (outside && (!path.isAbsolute(decoded) || !confirmOutside)) this.ensureConfined(absolute);
+    if (outside && !confirmOutside) invalidPath();
     if (!(await fs.stat(absolute)).isFile()) invalidPath('The file link does not point to a file.');
     this.assertRootOperation(operation);
-    if (outside) {
-      if (!await confirmOutside!(absolute)) return { opened: false };
+    if (outside && confirmOutside) {
+      if (!await confirmOutside(absolute)) return { opened: false };
       this.assertRootOperation(operation);
       if (path.normalize(await fs.realpath(candidate)) !== absolute || !(await fs.stat(absolute)).isFile()) invalidPath('The file link changed while awaiting confirmation.');
       this.assertRootOperation(operation);

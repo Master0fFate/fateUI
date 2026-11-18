@@ -1825,11 +1825,6 @@ export class PiRuntimeService {
       ))
       .filter((message): message is RuntimeMessage => message !== null);
     if (historyStart > 0) messages.unshift(historyBoundary(selectedSessionId, historyStart));
-    if (cold?.snapshot.previewNotice && includeMessages) {
-      // Presentation only: never append preview omissions to Pi's saved or
-      // model-visible history. A clipped child state must not look current.
-      messages.unshift({ id: `saved-preview-notice:${selectedSessionId}`, role: 'system', text: cold.snapshot.previewNotice, timestamp: 0, timelinePosition: -1 });
-    }
     // SDK ownership survives missed selected-slot normalizer events. Persisted
     // calls in a cold session cannot be running in this process.
     const pendingToolCalls = session?.agent?.state?.pendingToolCalls;

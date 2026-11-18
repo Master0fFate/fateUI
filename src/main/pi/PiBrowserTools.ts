@@ -34,13 +34,15 @@ export interface PiBrowserToolHost {
   type(input: { ref: string; text: string; reason: string; sessionId: string; signal?: AbortSignal }): Promise<BrowserToolActionOutput>;
   press(input: { key: string; reason: string; sessionId: string; signal?: AbortSignal }): Promise<BrowserToolActionOutput>;
   scroll(input: { deltaX: number; deltaY: number; sessionId: string; signal?: AbortSignal }): Promise<BrowserToolActionOutput>;
-  tabs(input: { sessionId: string }): Promise<readonly BrowserToolTab[]>;
+  tabs(input: { sessionId: string; signal?: AbortSignal }): Promise<readonly BrowserToolTab[]>;
   createTab(input: { url?: string; sessionId: string; signal?: AbortSignal }): Promise<{ tabId: string; snapshot: SemanticPageSnapshot | null }>;
-  selectTab(input: { tabId: string; sessionId: string }): Promise<readonly BrowserToolTab[]>;
-  closeTab(input: { tabId: string; sessionId: string }): Promise<readonly BrowserToolTab[]>;
+  selectTab(input: { tabId: string; sessionId: string; signal?: AbortSignal }): Promise<readonly BrowserToolTab[]>;
+  closeTab(input: { tabId: string; sessionId: string; signal?: AbortSignal }): Promise<readonly BrowserToolTab[]>;
 }
 
 export type BrowserToolHostResolver = () => PiBrowserToolHost | null;
+
+const BROWSER_TOOL_TIMEOUT_MS = 60_000;
 
 export function createPiBrowserTools(resolveHost: BrowserToolHostResolver): ToolDefinition[] {
   const host = () => {
@@ -58,7 +60,7 @@ export function createPiBrowserTools(resolveHost: BrowserToolHostResolver): Tool
     'Fate UI applies the selected session access level outside the model; Full access skips ordinary site and action prompts.',
   ];
 
-  return [
+  const tools: ToolDefinition[] = [
     defineTool({
       name: 'browser_navigate',
       label: 'Navigate browser',
@@ -204,7 +206,8 @@ export function createPiBrowserTools(resolveHost: BrowserToolHostResolver): Tool
             sessionId: id,
             ...(signal ? { signal } : {}),
           });
-          const tabs = tabDetails(await current.tabs({ sessionId: id }));
+          if (signal?.aborted) throw new Error('Browser tab operation was cancelled.');
+          const tabs = tabDetails(await current.tabs({ sessionId: id, ...(signal ? { signal } : {}) }));
           return {
             content: [{ type: 'text', text: [
               `Opened tab ${created.tabId}.`,
@@ -216,16 +219,55 @@ export function createPiBrowserTools(resolveHost: BrowserToolHostResolver): Tool
         }
         if (action === 'select') {
           if (!params.tabId) throw new Error('tabId is required to select a browser tab.');
-          return tabListResult(await current.selectTab({ tabId: params.tabId, sessionId: id }));
+          return tabListResult(await current.selectTab({ tabId: params.tabId, sessionId: id, ...(signal ? { signal } : {}) }));
         }
         if (action === 'close') {
           if (!params.tabId) throw new Error('tabId is required to close a browser tab.');
-          return tabListResult(await current.closeTab({ tabId: params.tabId, sessionId: id }));
+          return tabListResult(await current.closeTab({ tabId: params.tabId, sessionId: id, ...(signal ? { signal } : {}) }));
         }
-        return tabListResult(await current.tabs({ sessionId: id }));
+        return tabListResult(await current.tabs({ sessionId: id, ...(signal ? { signal } : {}) }));
       },
     }),
   ];
+
+  return tools.map((tool) => ({
+    ...tool,
+    execute: (toolCallId, params, signal, onUpdate, context) => runBrowserTool(
+      tool.name,
+      signal,
+      (activeSignal) => tool.execute(toolCallId, params, activeSignal, onUpdate, context),
+    ),
+  }));
+}
+
+async function runBrowserTool<T>(name: string, signal: AbortSignal | undefined, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abort: (() => void) | undefined;
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    abort = () => {
+      controller.abort();
+      reject(new Error(`${name} was cancelled. The browser action may already have occurred; inspect the page before retrying.`));
+    };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
+    if (!controller.signal.aborted) {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`${name} timed out after ${BROWSER_TOOL_TIMEOUT_MS / 1_000} seconds. The browser action may already have occurred; inspect the page before retrying.`));
+      }, BROWSER_TOOL_TIMEOUT_MS);
+      timer.unref?.();
+    }
+  });
+  try {
+    return await Promise.race([interrupted, Promise.resolve().then(() => {
+      if (controller.signal.aborted) throw new Error(`${name} was cancelled.`);
+      return operation(controller.signal);
+    })]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (abort) signal?.removeEventListener('abort', abort);
+  }
 }
 
 function tabDetails(tabs: readonly BrowserToolTab[]) {

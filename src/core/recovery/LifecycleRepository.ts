@@ -1,3 +1,4 @@
+import { isUtf8 } from 'node:buffer';
 import { createHash, randomUUID } from 'node:crypto';
 import { checkoutFactsSchema, type CheckoutFacts } from './GoalReviewFacts';
 import { promises as fs } from 'node:fs';
@@ -18,7 +19,7 @@ const recordSchema = z.object({
 export type LifecycleRecord = z.infer<typeof recordSchema>;
 export type LifecycleReference = LifecycleRecord['reference'];
 export type LifecycleStatus = LifecycleRecord['status'];
-export type LifecycleRead = { records: LifecycleRecord[]; health: 'ok' | 'partial-tail' | 'corrupt-interior' | 'unavailable' | 'quota' };
+export type LifecycleRead = { records: LifecycleRecord[]; health: 'ok' | 'partial-tail' | 'corrupt-interior' | 'unavailable' };
 // R1 ACKs from unaccepted candidates are not authorization. The v2 filename
 // keeps them intact for inspection, but recovery reads only v2 staged ACKs.
 const reviewAckSchema = z.object({ version: z.literal(2), outcome: z.literal('unknown-reviewed'),
@@ -38,17 +39,30 @@ const MAX_SESSION_REVIEW_BYTES = 64 * 1024;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_RECORDS = 512;
 const MAX_LINE = 4096;
+const CHUNK_SIZE = 64 * 1024;
 
 /** Single profile owner only. A projection, not a Team/Goal/Pi event log. Never repair
  * an uncertain file automatically. Complete lines survive a partial tail; corrupt
  * interior is a separate operator error. No conversation, draft text or key fields. */
 export class LifecycleRepository {
   private tail: Promise<void> = Promise.resolve();
+  private byteTrigger: number;
+  private recordTrigger: number;
   constructor(private readonly root: string, private readonly maxBytes = MAX_BYTES, private readonly maxRecords = MAX_RECORDS) {
     if (!path.isAbsolute(root) || !Number.isSafeInteger(maxBytes) || maxBytes < MAX_LINE
       || maxBytes > MAX_BYTES || !Number.isSafeInteger(maxRecords) || maxRecords < 1 || maxRecords > MAX_RECORDS) throw new Error('Invalid lifecycle storage bounds.');
+    this.byteTrigger = maxBytes;
+    this.recordTrigger = maxRecords;
   }
   private get file(): string { return path.join(this.root, 'status-v1.jsonl'); }
+  private async syncDirectory(): Promise<void> {
+    try {
+      const dir = await fs.open(this.root, 'r');
+      try { await dir.sync(); } finally { await dir.close(); }
+    } catch (error) {
+      if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EINVAL', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    }
+  }
   private reviewFile(projectPath: string, sessionId: string, goalId: string, revision: number, checkout: CheckoutFacts): string {
     const hash = createHash('sha256').update(JSON.stringify([projectPath, sessionId, goalId, revision, checkout])).digest('hex');
     return path.join(this.root, `review-v2-${hash}.json`);
@@ -137,20 +151,12 @@ export class LifecycleRepository {
         if (count >= this.maxRecords && !(await fs.lstat(target).then((item) => item.isFile(), () => false))) throw new Error('Review quota reached.');
         const handle = await fs.open(temporary, 'wx', 0o600);
         try { await handle.writeFile(text, 'utf8'); await handle.sync(); } finally { await handle.close(); }
-        const syncDirectory = async () => {
-          try {
-            const dir = await fs.open(this.root, 'r');
-            try { await dir.sync(); } finally { await dir.close(); }
-          } catch (error) {
-            if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EINVAL', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-          }
-        };
         // Preparation must survive a restart before the final checks begin.
         // Commit has no fallible work after publication: power loss may leave
         // committed or revert it to the already durable prepared state.
-        if (ack.stage === 'committed') await syncDirectory();
+        if (ack.stage === 'committed') await this.syncDirectory();
         await fs.rename(temporary, target);
-        if (ack.stage === 'prepared') await syncDirectory();
+        if (ack.stage === 'prepared') await this.syncDirectory();
         return ack;
       } catch (error) { throw new Error('STORAGE_UNAVAILABLE: recovery review could not be saved.', { cause: error }); }
       finally { await fs.rm(temporary, { force: true }).catch(() => undefined); }
@@ -176,22 +182,34 @@ export class LifecycleRepository {
     }
     try {
       const stat = await handle.stat();
-      if (!stat.isFile() || stat.size > this.maxBytes) return { records: [], health: 'quota' };
-      const data = Buffer.alloc(stat.size + 1);
-      const { bytesRead } = await handle.read(data, 0, data.length, 0);
-      if (bytesRead !== stat.size || (await handle.stat()).size !== stat.size) return { records: [], health: 'unavailable' };
-      const bytes = data.subarray(0, bytesRead);
-      const last = bytes.lastIndexOf(10);
-      const partial = bytesRead > 0 && last !== bytesRead - 1;
-      const complete = last === -1 ? Buffer.alloc(0) : bytes.subarray(0, last + 1);
+      if (!stat.isFile() || !Number.isSafeInteger(stat.size)) return { records: [], health: 'unavailable' };
+      const chunk = Buffer.alloc(CHUNK_SIZE);
+      const line = Buffer.alloc(MAX_LINE);
       const records: LifecycleRecord[] = [];
-      for (const line of complete.toString('utf8').split('\n').slice(0, -1)) {
-        if (!line || Buffer.byteLength(line) > MAX_LINE || records.length >= this.maxRecords) return { records, health: 'corrupt-interior' };
-        try { records.push(recordSchema.parse(JSON.parse(line))); }
-        catch { return { records, health: 'corrupt-interior' }; }
+      let position = 0, length = 0;
+      let corrupt = false, oversized = false;
+      while (position < stat.size) {
+        const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, stat.size - position), position);
+        if (bytesRead === 0) return { records: [], health: 'unavailable' };
+        position += bytesRead;
+        for (let offset = 0; offset < bytesRead; offset++) {
+          if (chunk[offset] === 10) {
+            if (!corrupt) {
+              if (oversized || length === 0 || !isUtf8(line.subarray(0, length))) corrupt = true;
+              else {
+                try { records.push(recordSchema.parse(JSON.parse(line.toString('utf8', 0, length)))); }
+                catch { corrupt = true; }
+              }
+            }
+            length = 0;
+            oversized = false;
+          } else if (length < MAX_LINE) line[length++] = chunk[offset]!;
+          else oversized = true;
+        }
       }
-      if (partial && bytesRead - last - 1 > MAX_LINE) return { records, health: 'corrupt-interior' };
-      return { records, health: partial ? 'partial-tail' : 'ok' };
+      if ((await handle.stat()).size !== stat.size) return { records: [], health: 'unavailable' };
+      if (corrupt || oversized) return { records, health: 'corrupt-interior' };
+      return { records, health: length > 0 ? 'partial-tail' : 'ok' };
     } catch { return { records: [], health: 'unavailable' }; }
     finally { await handle.close(); }
   }
@@ -210,8 +228,16 @@ export class LifecycleRepository {
         && item.reference.goalId === reference.goalId && item.reference.nodeId === reference.nodeId && item.reference.runId === reference.runId
         && item.reference.teamId === reference.teamId && item.reference.taskId === reference.taskId && item.reference.requestId === reference.requestId);
       if (existing && ['completed', 'failed'].includes(existing.status) && status === 'running') throw new Error('A settled lifecycle reference cannot restart; use a new execution identity.');
-      const stat = await fs.stat(this.file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error; });
-      if (current.records.length >= this.maxRecords || (stat?.size ?? 0) + bytes > this.maxBytes) await this.compact(current.records, bytes);
+      let size: number;
+      try { size = (await fs.stat(this.file)).size; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle stat failed.', { cause: error });
+        size = 0;
+      }
+      if (current.records.length >= this.recordTrigger || size > this.byteTrigger - bytes) {
+        await this.compact([...current.records, record]);
+        return record;
+      }
       try {
         await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
         const handle = await fs.open(this.file, 'a', 0o600);
@@ -223,35 +249,46 @@ export class LifecycleRepository {
     this.tail = result.then(() => undefined, () => undefined);
     return result;
   }
-  private async compact(records: readonly LifecycleRecord[], incoming: number): Promise<void> {
-    const kept = compactRecords(records, Math.floor(this.maxRecords / 2));
-    const text = kept.map((record) => `${JSON.stringify(record)}\n`).join('');
-    if (kept.length >= this.maxRecords || Buffer.byteLength(text) + incoming > this.maxBytes) throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle quota.');
+  private async compact(records: readonly LifecycleRecord[]): Promise<void> {
+    const kept = compactRecords(records);
     const temporary = `${this.file}.${randomUUID()}.tmp`;
+    let bytes = 0;
     try {
+      await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
       const handle = await fs.open(temporary, 'wx', 0o600);
-      try { await handle.writeFile(text, 'utf8'); await handle.sync(); } finally { await handle.close(); }
+      try {
+        let batch = '', batchBytes = 0;
+        for (const record of kept) {
+          const line = `${JSON.stringify(record)}\n`;
+          const lineBytes = Buffer.byteLength(line);
+          if (batchBytes + lineBytes > CHUNK_SIZE && batchBytes > 0) {
+            await handle.writeFile(batch, 'utf8');
+            batch = '';
+            batchBytes = 0;
+          }
+          batch += line;
+          batchBytes += lineBytes;
+          bytes += lineBytes;
+        }
+        if (batchBytes > 0) await handle.writeFile(batch, 'utf8');
+        await handle.sync();
+      } finally { await handle.close(); }
       await fs.rename(temporary, this.file);
-    } catch (error) { throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle compaction failed; prior records retained.', { cause: error }); }
+      await this.syncDirectory();
+      this.recordTrigger = Math.max(this.maxRecords, Math.min(Number.MAX_SAFE_INTEGER, kept.length * 2));
+      this.byteTrigger = Math.max(this.maxBytes, Math.min(Number.MAX_SAFE_INTEGER, bytes * 2));
+    } catch (error) { throw new LifecycleStorageError('STORAGE_UNAVAILABLE: lifecycle compaction failed; checkpoint durability uncertain.', { cause: error }); }
     finally { await fs.rm(temporary, { force: true }).catch(() => undefined); }
   }
 }
 
-function compactRecords(records: readonly LifecycleRecord[], target: number): LifecycleRecord[] {
+function compactRecords(records: readonly LifecycleRecord[]): LifecycleRecord[] {
   const latest = new Map<string, LifecycleRecord>();
   for (const record of records) {
     const ref = record.reference;
-    latest.set(JSON.stringify([ref.projectPath, ref.sessionId, ref.runId, ref.teamId, ref.nodeId, ref.goalId, ref.taskId, ref.requestId]), record);
+    const key = JSON.stringify([ref.projectPath, ref.sessionId, ref.runId, ref.teamId, ref.nodeId, ref.goalId, ref.taskId, ref.requestId]);
+    latest.delete(key);
+    latest.set(key, record);
   }
-  const kept = [...latest.values()].sort((left, right) => left.at - right.at);
-  let surplus = kept.length - target;
-  return surplus <= 0 ? kept : kept.filter((record) => {
-    if (surplus <= 0 || !disposable(record.reference)) return true;
-    surplus -= 1;
-    return false;
-  });
-}
-
-function disposable(ref: LifecycleReference): boolean {
-  return !ref.teamId && !ref.nodeId && !ref.goalId && !ref.taskId && !ref.requestId && !ref.worktree;
+  return [...latest.values()];
 }

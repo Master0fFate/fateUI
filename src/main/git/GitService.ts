@@ -223,12 +223,45 @@ function executeWithStderr(root: string, args: string[], additionalConfig: reado
   });
 }
 
-function executeNetwork(root: string, args: string[], additionalConfig: readonly string[]): Promise<{ stdout: string; stderr: string }> {
-  const environment = gitEnvironment();
-  environment.GIT_ALLOW_PROTOCOL = 'https:http:ssh:git';
-  const ssh = trustedSshExecutable();
-  if (ssh) environment.GIT_SSH = ssh;
-  return executeWithStderr(root, args, additionalConfig, environment, MAX_GIT_NETWORK_RUNTIME_MS);
+async function createHooksDirectory(temporaryRoot: string): Promise<string> {
+  await fs.mkdir(temporaryRoot, { recursive: true, mode: 0o700 });
+  return fs.mkdtemp(path.join(temporaryRoot, 'fate-ui-git-hooks-'));
+}
+
+async function executeNetwork(root: string, args: string[], temporaryRoot = tmpdir()): Promise<{ stdout: string; stderr: string }> {
+  const hooksDirectory = await createHooksDirectory(temporaryRoot);
+  try {
+    const credentialConfig = await trustedCredentialConfig(root);
+    const ssh = trustedSshExecutable();
+    const networkConfig = [
+      ...await inheritedLineEndingConfig(root),
+      ...(await safeFilterConfig(root)),
+      '-c', `core.hooksPath=${hooksDirectory}`,
+      '-c', 'protocol.allow=never',
+      '-c', 'protocol.https.allow=always',
+      '-c', 'protocol.http.allow=always',
+      '-c', 'protocol.ssh.allow=always',
+      '-c', 'protocol.git.allow=always',
+      '-c', 'protocol.file.allow=never',
+      '-c', 'protocol.ext.allow=never',
+      '-c', 'credential.helper=',
+      ...credentialConfig,
+      '-c', `core.sshCommand=${ssh ? `"${ssh.replace(/\\/g, '/')}"` : 'false'}`,
+    ];
+    const environment = gitEnvironment();
+    environment.GIT_ALLOW_PROTOCOL = 'https:http:ssh:git';
+    if (ssh) environment.GIT_SSH = ssh;
+    return await executeWithStderr(root, args, networkConfig, environment, MAX_GIT_NETWORK_RUNTIME_MS);
+  } finally {
+    await fs.rm(hooksDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+export function pushBranchToOrigin(root: string, branch: string, force = false): Promise<{ stdout: string; stderr: string }> {
+  const ref = `refs/heads/${branch}`;
+  return executeNetwork(root, [
+    'push', '--set-upstream', '--recurse-submodules=no', ...(force ? ['--force-with-lease'] : []), 'origin', `${ref}:${ref}`,
+  ]);
 }
 
 interface AttributeBudget { bytes: number }
@@ -694,9 +727,8 @@ export class GitService {
     return this.worktreesRoot ?? path.join(root, MANAGED_DIRECTORY, 'worktrees');
   }
 
-  private async hooksDirectory(): Promise<string> {
-    await fs.mkdir(this.temporaryRoot, { recursive: true, mode: 0o700 });
-    return fs.mkdtemp(path.join(this.temporaryRoot, 'fate-ui-git-hooks-'));
+  private hooksDirectory(): Promise<string> {
+    return createHooksDirectory(this.temporaryRoot);
   }
 
   status(): Promise<GitStatus> {
@@ -1257,54 +1289,32 @@ export class GitService {
     const root = this.files.getRoot();
     const initial = await this.readStatus(root);
     if (!initial.repository) throw new Error('Git controls require a repository.');
-    const hooksDirectory = await this.hooksDirectory();
-    try {
-      const credentialConfig = await trustedCredentialConfig(root);
-      const ssh = trustedSshExecutable();
-      const networkConfig = [
-        ...await inheritedLineEndingConfig(root),
-        ...(await safeFilterConfig(root)),
-        '-c', `core.hooksPath=${hooksDirectory}`,
-        '-c', 'protocol.allow=never',
-        '-c', 'protocol.https.allow=always',
-        '-c', 'protocol.http.allow=always',
-        '-c', 'protocol.ssh.allow=always',
-        '-c', 'protocol.git.allow=always',
-        '-c', 'protocol.file.allow=never',
-        '-c', 'protocol.ext.allow=never',
-        '-c', 'credential.helper=',
-        ...credentialConfig,
-        '-c', `core.sshCommand=${ssh ? `"${ssh.replace(/\\/g, '/')}"` : 'false'}`,
-      ];
-      let args: string[];
-      if (operation === 'fetch') {
-        const remotes = (await execute(root, ['remote'], 64_000)).toString('utf8').split(/\r?\n/u).map((remote) => remote.trim()).filter(Boolean);
-        if (remotes.length === 0) throw new Error('Cannot fetch because no Git remote is configured. Add a remote, then try again.');
-        args = ['fetch', '--all', '--prune', '--no-recurse-submodules'];
+    let args: string[];
+    if (operation === 'fetch') {
+      const remotes = (await execute(root, ['remote'], 64_000)).toString('utf8').split(/\r?\n/u).map((remote) => remote.trim()).filter(Boolean);
+      if (remotes.length === 0) throw new Error('Cannot fetch because no Git remote is configured. Add a remote, then try again.');
+      args = ['fetch', '--all', '--prune', '--no-recurse-submodules'];
+    } else {
+      const branch = initial.branch;
+      if (!branch) throw new Error(`Cannot ${operation} from detached HEAD. Check out a branch first.`);
+      const upstream = await currentUpstream(root, branch);
+      if (operation === 'pull') {
+        if (!upstream) throw new Error('Current branch has no upstream configured. Push the branch first to publish it and set its upstream.');
+        args = ['pull', '--ff-only', '--no-rebase', '--no-recurse-submodules', upstream.remote, upstream.branch];
       } else {
-        const branch = initial.branch;
-        if (!branch) throw new Error(`Cannot ${operation} from detached HEAD. Check out a branch first.`);
-        const upstream = await currentUpstream(root, branch);
-        if (operation === 'pull') {
-          if (!upstream) throw new Error('Current branch has no upstream configured. Push the branch first to publish it and set its upstream.');
-          args = ['pull', '--ff-only', '--no-rebase', '--no-recurse-submodules', upstream.remote, upstream.branch];
-        } else {
-          const target = await resolvePushTarget(root, branch, upstream);
-          if (!target) throw new Error('Cannot push because no Git remote is configured. Add a remote, then try again.');
-          args = ['push', ...(upstream ? [] : ['--set-upstream']), '--recurse-submodules=no', target.remote, `HEAD:refs/heads/${target.branch}`];
-        }
+        const target = await resolvePushTarget(root, branch, upstream);
+        if (!target) throw new Error('Cannot push because no Git remote is configured. Add a remote, then try again.');
+        args = ['push', ...(upstream ? [] : ['--set-upstream']), '--recurse-submodules=no', target.remote, `HEAD:refs/heads/${target.branch}`];
       }
-      const output = await executeNetwork(root, args, networkConfig);
-      if (this.files.getRoot() !== root) throw new Error('The active project changed before the Git operation completed.');
-      this.files.invalidate(root);
-      this.statusRequest = null;
-      this.lastStatus = null;
-      this.historyRequest = null;
-      const status = await this.status();
-      return { operation, message: boundedGitMessage(operation, output.stdout, output.stderr), status };
-    } finally {
-      await fs.rm(hooksDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
+    const output = await executeNetwork(root, args, this.temporaryRoot);
+    if (this.files.getRoot() !== root) throw new Error('The active project changed before the Git operation completed.');
+    this.files.invalidate(root);
+    this.statusRequest = null;
+    this.lastStatus = null;
+    this.historyRequest = null;
+    const status = await this.status();
+    return { operation, message: boundedGitMessage(operation, output.stdout, output.stderr), status };
   }
 
   /** Restore one project-relative path to HEAD, or delete it when it is untracked. */

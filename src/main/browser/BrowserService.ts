@@ -523,7 +523,7 @@ export class BrowserService {
       if (decision.outcome === 'confirm' && (!this.options.confirmAction || !await this.options.confirmAction(action, decision.reason, {
         tabId,
         documentEpoch: tab.documentEpoch,
-      }))) {
+      }, activeSignal))) {
         throw new BrowserError('ACTION_BLOCKED', 'The browser navigation was not confirmed.');
       }
       assertBrowserOperationActive(activeSignal);
