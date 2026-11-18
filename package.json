@@ -1,6 +1,6 @@
 {
   "name": "pi-fategui",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "releaseName": "Mon Capitaine",
   "description": "A local-first desktop interface for the Pi coding agent",
   "type": "module",

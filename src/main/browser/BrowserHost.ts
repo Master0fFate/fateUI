@@ -156,7 +156,7 @@ export class BrowserHost {
     const service = new BrowserService(owner, {
       canonicalProjectPath: project.path,
       browserSessionId: sessionId,
-      confirmAction: (action, reason, binding) => this.requestConfirmation(entry, action, reason, binding),
+      confirmAction: (action, reason, binding, signal) => this.requestConfirmation(entry, action, reason, binding, signal),
       annotationOwner: () => ({ projectPath: project.path, sessionId }),
       onAppShortcut: (command) => {
         if (this.isForeground(entry)) this.options.command(owner, command);
@@ -265,8 +265,9 @@ export class BrowserHost {
     action: ProposedBrowserAction,
     reason: string,
     binding: BrowserConfirmationBinding,
+    signal?: AbortSignal,
   ): Promise<boolean> {
-    if (!this.isForeground(entry)) return Promise.resolve(false);
+    if (signal?.aborted || !this.isForeground(entry)) return Promise.resolve(false);
     const tab = entry.service.getState().tabs.find((candidate) => candidate.id === binding.tabId);
     const lease = entry.service.lease.getState();
     if (!tab || tab.documentEpoch !== binding.documentEpoch || lease?.ownerSessionId !== entry.sessionId) return Promise.resolve(false);
@@ -290,6 +291,9 @@ export class BrowserHost {
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => this.clearConfirmation(false), CONFIRMATION_TTL_MS);
       timer.unref?.();
+      const abort = () => {
+        if (this.pending?.confirmation.id === confirmation.id) this.clearConfirmation(false);
+      };
       this.pending = {
         confirmation,
         digest: confirmationDigest(confirmation.action, binding),
@@ -297,8 +301,12 @@ export class BrowserHost {
         leaseOwner: lease.ownerSessionId,
         entry,
         timer,
-        resolve,
+        resolve: (approved) => {
+          signal?.removeEventListener('abort', abort);
+          resolve(approved);
+        },
       };
+      signal?.addEventListener('abort', abort, { once: true });
       this.emitScoped(entry, { type: 'confirmation-requested', confirmation });
     });
   }

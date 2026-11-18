@@ -34,10 +34,10 @@ export function RecoveryReviewNotice({ projectPath, sessionId }: { projectPath: 
   };
 
   return (
-    <p className="composer-error" role="alert">
-      Unfinished before restart: {reasons.join(' · ')}{' '}
+    <p className="composer-error" role={error ? 'alert' : 'status'}>
+      Past work may be incomplete: {reasons.join(' · ')}{' '}
       <button type="button" className="activity-refresh" disabled={busy} onClick={() => void acknowledge()}>
-        <ShieldCheck size={10} />Continue
+        <ShieldCheck size={10} aria-hidden="true" />Dismiss
       </button>
       {error ? ` ${error}` : null}
     </p>

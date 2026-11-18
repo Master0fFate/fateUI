@@ -331,7 +331,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
     owned.push(() => events.dispose());
     workspaces = options.workspaceRegistration && options.workspaceMembership
       ? new WorkspaceRegistry({ projects, runtime, paths, registration: options.workspaceRegistration, isMember: options.workspaceMembership, checkoutOwnership,
-        assertStorageAdmission: (root, sessionId, principalId) => recoveryGate?.assertAdmission(root, sessionId, principalId),
+        assertStorageAdmission: () => recoveryGate?.assertAdmission(),
         waitForStorageAdmission: () => recoveryGate?.waitForPendingAdmissions() }) : null;
     const registry = workspaces;
     if (registry) owned.push(() => registry.dispose());
@@ -386,7 +386,7 @@ export async function createFateCore(options: FateCoreOptions): Promise<FateCore
         currentProjectPath: () => { const project = focused().project; return project?.trusted && !project.agentId ? project.path : null; },
         homePermission: (projectPath, sessionId, permission) => sessionPermissions.set(projectPath, sessionId, permission),
         sessionsRoot: paths.sessionsRoot,
-        assertAdmission: (root, sessionId) => recovery.assertAdmission(root, sessionId),
+        assertAdmission: () => recovery.assertAdmission(),
         ...(options.savedAgents.notify ? { notify: options.savedAgents.notify } : {}),
       }, new AgentRepository(path.join(paths.dataRoot, 'agents', 'v1')), options.savedAgents.legacy);
       owned.push(() => agents.dispose());

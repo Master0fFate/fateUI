@@ -181,7 +181,9 @@ describe('T28 bounded cold recovery', () => {
     expect(bytes).not.toContain('private-token-sentinel');
     const quota = new LifecycleRepository(path.join(f.root, 'profile', 'tiny'), 4096, 1);
     await quota.append(ref, 'running');
-    await expect(quota.append(ref, 'interrupted')).rejects.toThrow('STORAGE_UNAVAILABLE');
+    const interrupted = await quota.append(ref, 'interrupted');
+    expect(await new LifecycleRepository(path.join(f.root, 'profile', 'tiny'), 4096, 1).read())
+      .toEqual({ records: [interrupted], health: 'ok' });
   });
   it('retains complete index facts under partial tail, refuses further append and reports interior corruption', async () => {
     const f = await fixture(); const first = await f.repository.append(f.reference, 'running');
@@ -284,8 +286,7 @@ describe('T28 bounded cold recovery', () => {
       sessionId: f.sessionId, goalId: goal.id, goalRevision: 1, principalId: principal, checkout: facts, at: 1 }) + '\n');
     const coordinator = new RecoveryCoordinator(f.repository, sources);
     expect((await coordinator.recover()).records[0]?.status).toBe('unknown');
-    expect(() => coordinator.assertAdmission(f.project, f.sessionId)).toThrow('RECOVERY_REVIEW_REQUIRED');
-    expect(() => coordinator.assertAdmission(path.join(f.root, 'unrelated'), 'other')).not.toThrow();
+    expect(() => coordinator.assertAdmission()).not.toThrow();
     const other = createLocalIpcContext({ principalId: '50000000-0000-4000-8000-000000000001', clientId: '60000000-0000-4000-8000-000000000001', expiresAt: Date.now() + 60_000 });
     await expect(coordinator.inspectGoalReview(other, workspace, 1, f.sessionId, goal.id)).rejects.toThrow('FORBIDDEN');
     await expect(coordinator.inspectGoalReview(identity, workspace, 1, 'wrong-session', goal.id)).rejects.toThrow('FORBIDDEN');
@@ -295,16 +296,14 @@ describe('T28 bounded cold recovery', () => {
     expect(preview).toMatchObject({ outcome: 'UNKNOWN', revision: 1, checkout: facts });
     facts = { ...facts, head: 'c'.repeat(40) };
     await expect(coordinator.acknowledgeGoalReview(identity, workspace, 1, f.sessionId, goal.id, 1, preview.checkout, control)).rejects.toThrow('Checkout changed');
-    expect(() => coordinator.assertAdmission(f.project, f.sessionId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => coordinator.assertAdmission()).not.toThrow();
     facts = preview.checkout;
     await coordinator.acknowledgeGoalReview(identity, workspace, 1, f.sessionId, goal.id, 1, preview.checkout, control);
-    expect(() => coordinator.assertAdmission(f.project, f.sessionId, principal)).not.toThrow();
+    expect(() => coordinator.assertAdmission()).not.toThrow();
     expect((await fs.stat(legacyFile)).isFile()).toBe(true); // Historical v1 stays intact but never authorizes.
-    expect(() => coordinator.assertAdmission(f.project, f.sessionId, other.principalId)).toThrow('another principal');
     const restarted = new RecoveryCoordinator(f.repository, sources);
     expect((await restarted.recover()).records[0]?.status).toBe('unknown');
-    expect(() => restarted.assertAdmission(f.project, f.sessionId, principal)).not.toThrow();
-    expect(() => restarted.assertAdmission(f.project, f.sessionId, other.principalId)).toThrow('another principal');
+    expect(() => restarted.assertAdmission()).not.toThrow();
     authorized = other;
     const otherControl = { ...control, authorize: () => ({ ...control.authorize(), principalId: other.principalId }) };
     const originalSave = f.repository.saveGoalReview.bind(f.repository);
@@ -318,17 +317,14 @@ describe('T28 bounded cold recovery', () => {
     staged.mockRestore(); facts = preview.checkout;
     expect(await f.repository.readGoalReview(f.project, f.sessionId, goal.id, 1, facts))
       .toMatchObject({ stage: 'prepared', principalId: other.principalId });
-    expect(() => restarted.assertAdmission(f.project, f.sessionId, principal)).toThrow('RECOVERY_REVIEW_REQUIRED');
-    expect(() => restarted.assertAdmission(f.project, f.sessionId, other.principalId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => restarted.assertAdmission()).not.toThrow();
     expect((await restarted.recover()).records[0]?.status).toBe('unknown');
     const reopened = new RecoveryCoordinator(f.repository, sources);
     expect((await reopened.recover()).records[0]?.status).toBe('unknown');
-    expect(() => reopened.assertAdmission(f.project, f.sessionId, principal)).toThrow('RECOVERY_REVIEW_REQUIRED');
-    expect(() => reopened.assertAdmission(f.project, f.sessionId, other.principalId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => reopened.assertAdmission()).not.toThrow();
     const fresh = await reopened.inspectGoalReview(other, workspace, 1, f.sessionId, goal.id);
     await reopened.acknowledgeGoalReview(other, workspace, 1, f.sessionId, goal.id, fresh.revision, fresh.checkout, otherControl);
-    expect(() => reopened.assertAdmission(f.project, f.sessionId, other.principalId)).not.toThrow();
-    expect(() => reopened.assertAdmission(f.project, f.sessionId, principal)).toThrow('another principal');
+    expect(() => reopened.assertAdmission()).not.toThrow();
     authorized = identity;
     const uncertainSave = vi.spyOn(f.repository, 'saveGoalReview').mockImplementation(async (input) => {
       const saved = await originalSave(input);
@@ -338,33 +334,31 @@ describe('T28 bounded cold recovery', () => {
     await expect(reopened.acknowledgeGoalReview(identity, workspace, 1, f.sessionId, goal.id, 1, preview.checkout, control))
       .rejects.toThrow('Injected failure after prepared publication.');
     uncertainSave.mockRestore();
-    expect(() => reopened.assertAdmission(f.project, f.sessionId, principal)).toThrow('RECOVERY_REVIEW_REQUIRED');
-    expect(() => reopened.assertAdmission(f.project, f.sessionId, other.principalId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => reopened.assertAdmission()).not.toThrow();
     const afterUncertainSave = new RecoveryCoordinator(f.repository, sources);
     expect((await afterUncertainSave.recover()).records[0]?.status).toBe('unknown');
-    expect(() => afterUncertainSave.assertAdmission(f.project, f.sessionId, principal)).toThrow('RECOVERY_REVIEW_REQUIRED');
-    expect(() => afterUncertainSave.assertAdmission(f.project, f.sessionId, other.principalId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => afterUncertainSave.assertAdmission()).not.toThrow();
     facts = { ...facts, branch: 'changed-branch' };
     const drifted = new RecoveryCoordinator(f.repository, sources);
     await drifted.recover();
-    expect(() => drifted.assertAdmission(f.project, f.sessionId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => drifted.assertAdmission()).not.toThrow();
     facts = preview.checkout;
     goal = { ...goal, revision: 2 };
     const revised = new RecoveryCoordinator(f.repository, sources);
     await revised.recover();
-    expect(() => revised.assertAdmission(f.project, f.sessionId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => revised.assertAdmission()).not.toThrow();
     const reviewHash = createHash('sha256').update(JSON.stringify([f.project, f.sessionId, goal.id, 2, facts])).digest('hex');
     const blockedFile = path.join(f.root, 'profile', 'lifecycle', `review-v2-${reviewHash}.json`);
     await fs.mkdir(blockedFile);
     await expect(revised.acknowledgeGoalReview(identity, workspace, 1, f.sessionId, goal.id, 2, facts, control)).rejects.toThrow('STORAGE_UNAVAILABLE');
-    expect(() => revised.assertAdmission(f.project, f.sessionId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => revised.assertAdmission()).not.toThrow();
     await fs.rm(blockedFile, { recursive: true, force: true });
     await f.repository.append({ projectPath: f.project, sessionId: f.sessionId, requestId: 'uncertain-command', workspaceId: workspace, principalId: principal }, 'unknown');
     await revised.recover();
     await expect(revised.acknowledgeGoalReview(identity, workspace, 1, f.sessionId, goal.id, 2, facts, control)).rejects.toThrow('another uncertain execution');
-    expect(() => revised.assertAdmission(f.project, f.sessionId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+    expect(() => revised.assertAdmission()).not.toThrow();
   });
-  it('requires a fresh local-adapter principal to explicitly re-review UNKNOWN after owner restart', async () => {
+  it('keeps UNKNOWN review explicit without blocking admission after owner restart', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'fate-review-restart-')); roots.push(root);
     const project = path.join(root, 'project'); await fs.mkdir(project);
     const git = (...args: string[]) => execFileSync('git', args, { cwd: project, stdio: 'pipe' });
@@ -405,7 +399,7 @@ describe('T28 bounded cold recovery', () => {
           preview.revision, preview.checkout, { command, authorize });
         return identity.principalId;
       });
-      expect(() => first.core.recovery.assertAdmission(project, sessionId, firstPrincipal)).not.toThrow();
+      expect(() => first.core.recovery.assertAdmission()).not.toThrow();
     } finally { await first.dispose(); }
     const second = await registeredCore(root, project, goals);
     try {
@@ -413,18 +407,16 @@ describe('T28 bounded cold recovery', () => {
       expect(second.core.recovered.records.at(-1)?.status).toBe('unknown');
       await second.ipc.scoped(async ({ identity, handle, command, authorize }) => {
         expect(identity.principalId).not.toBe(firstPrincipal);
-        expect(() => second.core.recovery.assertAdmission(project, sessionId, identity.principalId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+        expect(() => second.core.recovery.assertAdmission()).not.toThrow();
         const preview = await second.core.recovery.inspectGoalReview(identity, handle.id, handle.generation, sessionId, goalId);
         await expect(second.core.recovery.acknowledgeGoalReview(identity, handle.id, handle.generation, sessionId, goalId,
           preview.revision, { ...preview.checkout, branch: 'unseen-branch' }, { command, authorize })).rejects.toThrow('Checkout changed');
-        expect(() => second.core.recovery.assertAdmission(project, sessionId, identity.principalId)).toThrow('RECOVERY_REVIEW_REQUIRED');
+        expect(() => second.core.recovery.assertAdmission()).not.toThrow();
         await second.core.recovery.acknowledgeGoalReview(identity, handle.id, handle.generation, sessionId, goalId,
           preview.revision, preview.checkout, { command, authorize });
-        expect(() => second.core.recovery.assertAdmission(project, sessionId, identity.principalId)).not.toThrow();
-        expect(() => second.core.recovery.assertAdmission(project, sessionId, firstPrincipal)).toThrow('RECOVERY_REVIEW_REQUIRED');
+        expect(() => second.core.recovery.assertAdmission()).not.toThrow();
         expect((await second.core.recovery.recover()).records.at(-1)?.status).toBe('unknown');
-        expect(() => second.core.recovery.assertAdmission(project, sessionId, identity.principalId)).not.toThrow();
-        expect(() => second.core.recovery.assertAdmission(project, sessionId, firstPrincipal)).toThrow('RECOVERY_REVIEW_REQUIRED');
+        expect(() => second.core.recovery.assertAdmission()).not.toThrow();
       });
       expect(second.adapter.invocations.filter((item) => item.kind === 'prompt')).toHaveLength(0);
       expect((await second.core.recovery.repository.read()).records.filter((item) => item.reference.goalId === goalId)).toHaveLength(1);
@@ -433,7 +425,7 @@ describe('T28 bounded cold recovery', () => {
   it('fences registered queue while checkpoint is pending or failed, but allows abort', async () => {
     const f = await fixture(); const coordinator = new RecoveryCoordinator(f.repository, f.sources);
     const runtime = { getState: () => ({ sessionId: f.sessionId }) };
-    const admission = new WorkspaceAdmissionQueue(runtime, 1, (sessionId) => coordinator.assertAdmission(f.project, sessionId));
+    const admission = new WorkspaceAdmissionQueue(runtime, 1, () => coordinator.assertAdmission());
     const command = { workspaceGeneration: 1, expectedSessionId: f.sessionId, selectionRevision: 0, controlGeneration: 1 };
     const authorize = () => ({ currentGeneration: 1, controlGeneration: 1, permission: true });
     const effect = vi.fn(async () => 'effect');
