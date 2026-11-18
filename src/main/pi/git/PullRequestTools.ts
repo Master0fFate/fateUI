@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { Type } from 'typebox';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { executeGitInWorktree } from '../../git/GitService';
+import { executeGitInWorktree, pushBranchToOrigin } from '../../git/GitService';
 
 const GH_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_CHARS = 16_000;
@@ -24,9 +24,10 @@ function text(content: string) {
 }
 
 async function currentBranch(cwd: string): Promise<string> {
-  const branch = (await executeGitInWorktree(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD'], 16_384).catch(() => Buffer.alloc(0))).toString('utf8').trim();
-  if (!branch) throw new Error('HEAD is detached. Check out a branch before pushing.');
-  return branch;
+  const ref = (await executeGitInWorktree(cwd, ['symbolic-ref', '--quiet', 'HEAD'], 16_384).catch(() => Buffer.alloc(0))).toString('utf8').trim();
+  const prefix = 'refs/heads/';
+  if (!ref.startsWith(prefix) || ref.length === prefix.length) throw new Error('HEAD is detached. Check out a branch before pushing.');
+  return ref.slice(prefix.length);
 }
 
 interface CheckRollup { name?: string; context?: string; conclusion?: string; state?: string; status?: string; detailsUrl?: string; workflowName?: string; __typename?: string }
@@ -51,8 +52,8 @@ export function createPullRequestTools(cwd: string, fullAccess: () => boolean): 
         guard();
         const branch = await currentBranch(cwd);
         if (DEFAULT_BRANCHES.has(branch)) throw new Error(`Refusing to push ${branch}. Create a feature branch first.`);
-        const output = await executeGitInWorktree(cwd, ['push', '--set-upstream', ...(params.force ? ['--force-with-lease'] : []), 'origin', `HEAD:refs/heads/${branch}`], 1024 * 1024);
-        return text(`Pushed ${branch} to origin.\n${output.toString('utf8').trim()}`.trim());
+        const { stdout, stderr } = await pushBranchToOrigin(cwd, branch, params.force);
+        return text([`Pushed ${branch} to origin.`, stdout.trim(), stderr.trim()].filter(Boolean).join('\n'));
       },
     }),
     defineTool({
@@ -73,7 +74,7 @@ export function createPullRequestTools(cwd: string, fullAccess: () => boolean): 
         const branch = await currentBranch(cwd);
         if (DEFAULT_BRANCHES.has(branch)) throw new Error(`Refusing to open a pull request from ${branch}. Create a feature branch first.`);
         const upstream = (await executeGitInWorktree(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], 16_384).catch(() => Buffer.alloc(0))).toString('utf8').trim();
-        if (!upstream) await executeGitInWorktree(cwd, ['push', '--set-upstream', 'origin', `HEAD:refs/heads/${branch}`], 1024 * 1024);
+        if (!upstream) await pushBranchToOrigin(cwd, branch);
         const url = await gh(cwd, ['pr', 'create', '--head', branch, '--title', params.title, '--body', params.body, ...(params.base ? ['--base', params.base] : []), ...(params.draft ? ['--draft'] : [])], signal);
         return text(`Pull request created: ${url.trim()}`);
       },
