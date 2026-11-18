@@ -60,6 +60,7 @@ export type BrowserConfirmationHandler = (
   action: ProposedBrowserAction,
   reason: string,
   binding: BrowserConfirmationBinding,
+  signal?: AbortSignal,
 ) => Promise<boolean>;
 export type BrowserDispatchGuard = (action: ProposedBrowserAction) => () => void;
 
@@ -97,7 +98,7 @@ export class BrowserActionExecutor {
     await this.cdp.send<DocumentResult>('DOM.getDocument', { depth: 0, pierce: true });
     let target = await this.resolveVerified(context, input.ref);
     const action = await this.actionForElement(target, 'click', context.origin);
-    const confirmed = await this.authorize(action, { tabId: context.tabId, documentEpoch: context.documentEpoch, ref: input.ref });
+    const confirmed = await this.authorize(action, { tabId: context.tabId, documentEpoch: context.documentEpoch, ref: input.ref }, context.signal);
     assertNotAborted(context.signal);
     target = await this.resolveVerified(context, input.ref);
     const currentAction = await this.actionForElement(target, 'click', context.origin);
@@ -169,7 +170,7 @@ export class BrowserActionExecutor {
       ...actionFor(target.handle, 'type', derivedConsequence(target.handle), context.origin),
       textClassification: classifyTypedText(input.text, target.handle, target.attributes),
     };
-    const confirmed = await this.authorize(action, { tabId: context.tabId, documentEpoch: context.documentEpoch, ref: input.ref });
+    const confirmed = await this.authorize(action, { tabId: context.tabId, documentEpoch: context.documentEpoch, ref: input.ref }, context.signal);
     assertNotAborted(context.signal);
     target = await this.resolveVerified(context, input.ref);
     const currentAction: ProposedBrowserAction = {
@@ -210,7 +211,7 @@ export class BrowserActionExecutor {
     assertActionCurrent(context);
     const stroke = normalizeKey(key);
     const initial = await this.actionForFocusedKey(context, stroke);
-    const confirmed = await this.authorize(initial.action, { tabId: context.tabId, documentEpoch: context.documentEpoch });
+    const confirmed = await this.authorize(initial.action, { tabId: context.tabId, documentEpoch: context.documentEpoch }, context.signal);
     assertNotAborted(context.signal);
     const current = await this.actionForFocusedKey(context, stroke);
     if (current.backendNodeId !== initial.backendNodeId || JSON.stringify(current.action) !== JSON.stringify(initial.action)) {
@@ -240,7 +241,7 @@ export class BrowserActionExecutor {
     const action: ProposedBrowserAction = {
       kind: 'scroll', origin: context.origin, frameOrigin: context.origin, consequence: 'none',
     };
-    const confirmed = await this.authorize(action, { tabId: context.tabId, documentEpoch: context.documentEpoch });
+    const confirmed = await this.authorize(action, { tabId: context.tabId, documentEpoch: context.documentEpoch }, context.signal);
     assertActionCurrent(context);
     this.assertStillAuthorized(action, confirmed);
     await this.withDispatchGuard(action, () => this.cdp.send('Input.dispatchMouseEvent', {
@@ -709,11 +710,11 @@ export class BrowserActionExecutor {
     }
   }
 
-  private async authorize(action: ProposedBrowserAction, binding: BrowserConfirmationBinding): Promise<boolean> {
+  private async authorize(action: ProposedBrowserAction, binding: BrowserConfirmationBinding, signal?: AbortSignal): Promise<boolean> {
     const decision = this.gate.evaluate(action);
     if (decision.outcome === 'block') throw new BrowserError('ACTION_BLOCKED', decision.reason);
     if (decision.outcome === 'allow') return false;
-    if (!await this.confirm(action, decision.reason, binding)) throw new BrowserError('ACTION_BLOCKED', 'The browser action was not confirmed.');
+    if (!await this.confirm(action, decision.reason, binding, signal)) throw new BrowserError('ACTION_BLOCKED', 'The browser action was not confirmed.');
     const currentDecision = this.gate.evaluate(action);
     if (currentDecision.outcome === 'block') throw new BrowserError('ACTION_BLOCKED', `The browser action is no longer allowed: ${currentDecision.reason}`);
     return true;

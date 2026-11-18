@@ -65,16 +65,9 @@ export class RecoveryCoordinator {
     if (!this.startupAllowed || this.unhealthy || this.pending.size === 0) return undefined;
     return Promise.all([...this.pending]).then(() => this.waitForPendingAdmissions());
   }
-  assertAdmission(projectPath?: string, sessionId?: string | null, principalId?: string): void {
+  assertAdmission(): void {
     if (this.unhealthy) this.heal();
     if (!this.admissionsAllowed) throw new Error(`STORAGE_UNAVAILABLE: ${this.unhealthy ?? 'A required lifecycle checkpoint is pending.'}`);
-    if (projectPath && sessionId) {
-      const key = JSON.stringify([projectPath, sessionId]);
-      if (this.reviewsInFlight.has(key)) throw new Error('RECOVERY_REVIEW_REQUIRED: an operator review is in progress.');
-      if ((this.blockedSessions.get(key)?.size ?? 0) > 0) throw new Error('RECOVERY_REVIEW_REQUIRED: This session has unresolved authoritative state.');
-      const reviewer = this.reviewedPrincipals.get(key);
-      if (reviewer && reviewer !== principalId) throw new Error('RECOVERY_REVIEW_REQUIRED: review belongs to another principal.');
-    }
   }
   blockersFor(projectPath: string, sessionId: string): string[] {
     return [...new Set((this.blockers.get(JSON.stringify([projectPath, sessionId])) ?? []).map((blocker) => blocker.reason))];

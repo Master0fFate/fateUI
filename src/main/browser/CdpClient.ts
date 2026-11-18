@@ -85,7 +85,7 @@ export class CdpClient implements BrowserCdpClient {
     if (this.disposed || !this.contents.debugger.isAttached()) {
       throw new BrowserError('CDP_UNAVAILABLE', 'Semantic browser control is not attached.', true);
     }
-    return this.contents.debugger.sendCommand(method, params, sessionId) as Promise<T>;
+    return withCommandTimeout(this.contents.debugger.sendCommand(method, params, sessionId) as Promise<T>, method);
   }
 
   waitForEvent<T>(method: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
@@ -170,6 +170,17 @@ export class CdpClient implements BrowserCdpClient {
       return false;
     }
   }
+}
+
+function withCommandTimeout<T>(operation: Promise<T>, method: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new BrowserError('CDP_UNAVAILABLE', `Chromium did not respond to ${method} within 15 seconds.`, true)), 15_000);
+    timer.unref?.();
+    void operation.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
 }
 
 function withHandshakeTimeout<T>(operation: Promise<T>, message: string): Promise<T> {

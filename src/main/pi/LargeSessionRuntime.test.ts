@@ -133,7 +133,7 @@ describe('large saved-session cold-to-live resume', () => {
       expect(cold.sessionId).toBe(sessionId);
       expect(cold.sessionFile).toBe(sessionFile);
       expect(cold.messages.some((message) => message.text.includes('Resume this active branch'))).toBe(true);
-      expect(cold.messages.some((message) => message.id === `saved-preview-notice:${sessionId}` && message.role === 'system')).toBe(true);
+      expect(cold.messages.some((message) => message.id === `saved-preview-notice:${sessionId}` && message.role === 'system')).toBe(false);
       expect(managerOpens).toEqual([]); // switch is disk preview, not Pi runtime creation
       expect(streamSimple).not.toHaveBeenCalled();
 

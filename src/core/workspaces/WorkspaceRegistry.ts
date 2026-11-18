@@ -21,7 +21,7 @@ export interface WorkspaceRegistryOptions {
   readonly isMember: (identity: RequestContext, workspaceId: string) => boolean;
   readonly makeAdmission?: (runtime: WorkspaceHandle['runtime'], generation: number) => WorkspaceAdmissionPort<WorkspaceHandle['runtime']>;
   /** Host-only storage/recovery fence. Never sourced from a request. */
-  readonly assertStorageAdmission?: (root?: string, sessionId?: string | null, principalId?: string) => void;
+  readonly assertStorageAdmission?: () => void;
   readonly waitForStorageAdmission?: () => Promise<void> | undefined;
   readonly maxWorkspaces?: number;
 }
@@ -53,7 +53,7 @@ export class WorkspaceRegistry {
     // The desktop must still capture it for safe reads and abort when storage
     // is pending or failed. Creation and replacement remain fenced below.
     if (existing && existing.runtime === this.options.runtime.peekWorkspace(root)) return existing;
-    this.options.assertStorageAdmission?.(root);
+    this.options.assertStorageAdmission?.();
     if (existing && this.busy(existing)) throw new Error('Cannot replace an active workspace.');
     const pending = this.pending.get(root);
     if (pending) return pending;
@@ -66,7 +66,7 @@ export class WorkspaceRegistry {
 
   private async create(root: string, project: ProjectState): Promise<WorkspaceHandle> {
     const files = await FilesystemService.forRoot(root);
-    this.options.assertStorageAdmission?.(root);
+    this.options.assertStorageAdmission?.();
     if (files.getRoot() !== root || this.options.registration.isRegistered(root) !== true || this.stopping) {
       throw new Error('Workspace registration changed before runtime startup.');
     }
@@ -74,7 +74,7 @@ export class WorkspaceRegistry {
     // scoped host calls. The registry must not acquire a second lock.
     this.options.runtime.registerKnownWorkspace(project);
     const runtime = await this.options.runtime.acquireWorkspace(root);
-    this.options.assertStorageAdmission?.(root);
+    this.options.assertStorageAdmission?.();
     if (this.options.checkoutOwnership && !this.options.runtime.ownsCheckout(root)) throw new Error('A live workspace runtime requires checkout ownership.');
     if (this.options.registration.isRegistered(root) !== true || this.stopping) {
       await this.options.runtime.closeProjectPath(root);
@@ -91,7 +91,7 @@ export class WorkspaceRegistry {
         ? new GitService(files, path.join(this.options.paths.dataRoot, 'worktrees'), this.options.paths.attachmentRoot, this.options.checkoutOwnership)
         : new GitService(files, undefined, undefined, this.options.checkoutOwnership), runtime,
       admission: this.options.makeAdmission?.(runtime, generation) ?? new WorkspaceAdmissionQueue(runtime, generation,
-        (sessionId, principalId) => this.options.assertStorageAdmission?.(root, sessionId, principalId),
+        () => this.options.assertStorageAdmission?.(),
         () => this.options.waitForStorageAdmission?.()),
     });
     runtime.setSelectionListener((sessionId) => handle.admission.observeSelection(sessionId));

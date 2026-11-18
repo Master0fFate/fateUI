@@ -150,7 +150,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async navigate(input: Parameters<PiBrowserToolHost['navigate']>[0]) {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     const tabId = activeTabId(service);
     await service.navigate(tabId, input.url, 'agent', input.signal);
     await waitForPage(service, tabId, input.signal);
@@ -158,7 +158,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async snapshot(input: Parameters<PiBrowserToolHost['snapshot']>[0]) {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     const tabId = activeTabId(service);
     return this.ownedSnapshot(service, input.sessionId, tabId, {
       mode: input.mode,
@@ -168,7 +168,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async click(input: Parameters<PiBrowserToolHost['click']>[0]): Promise<BrowserToolActionOutput> {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     const tabId = activeTabId(service);
     const action = await service.click(tabId, { ref: input.ref, ...(input.signal ? { signal: input.signal } : {}) });
     await waitForPage(service, tabId, input.signal);
@@ -176,7 +176,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async type(input: Parameters<PiBrowserToolHost['type']>[0]): Promise<BrowserToolActionOutput> {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     const tabId = activeTabId(service);
     const action = await service.type(tabId, {
       ref: input.ref,
@@ -188,7 +188,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async press(input: Parameters<PiBrowserToolHost['press']>[0]): Promise<BrowserToolActionOutput> {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     const tabId = activeTabId(service);
     const action = await service.press(tabId, input.key, input.signal);
     await waitForPage(service, tabId, input.signal);
@@ -196,7 +196,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async scroll(input: Parameters<PiBrowserToolHost['scroll']>[0]): Promise<BrowserToolActionOutput> {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     const tabId = activeTabId(service);
     const action = await service.scroll(tabId, input.deltaX, input.deltaY, input.signal);
     await waitForPage(service, tabId, input.signal);
@@ -204,15 +204,16 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async tabs(input: Parameters<PiBrowserToolHost['tabs']>[0]): Promise<readonly BrowserToolTab[]> {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     this.assertServiceOwner(input.sessionId, service);
     return listedTabs(service);
   }
 
   async createTab(input: Parameters<PiBrowserToolHost['createTab']>[0]) {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     const tabId = await service.createUserTab('about:blank');
     try {
+      input.signal?.throwIfAborted();
       this.assertServiceOwner(input.sessionId, service);
       const url = input.url?.trim();
       if (!url || url === 'about:blank') return { tabId, snapshot: null };
@@ -226,14 +227,14 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   async selectTab(input: Parameters<PiBrowserToolHost['selectTab']>[0]) {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     this.assertServiceOwner(input.sessionId, service);
     service.activateTab(input.tabId);
     return listedTabs(service);
   }
 
   async closeTab(input: Parameters<PiBrowserToolHost['closeTab']>[0]) {
-    const service = await this.serviceFor(input.sessionId);
+    const service = await this.serviceFor(input.sessionId, input.signal);
     await service.closeTab(input.tabId);
     this.assertServiceOwner(input.sessionId, service);
     return listedTabs(service);
@@ -262,7 +263,8 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
     return { projectPath: known.projectPath, sessionId };
   }
 
-  private async serviceFor(sessionId: string): Promise<BrowserService> {
+  private async serviceFor(sessionId: string, signal?: AbortSignal): Promise<BrowserService> {
+    signal?.throwIfAborted();
     const expectedRoot = this.resolveSessionService ? this.registeredRoot(sessionId) : this.activeRoot;
     if (!expectedRoot || expectedRoot.sessionId !== sessionId) throw browserOwnershipError();
     this.assertActiveRoot(expectedRoot);
@@ -273,6 +275,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
         : this.ensureService;
       if (!ensure) throw new Error('Open the Browser workspace for the active trusted project before using browser tools.');
       service = await ensure();
+      signal?.throwIfAborted();
       this.assertActiveRoot(expectedRoot);
       if ((this.resolveSessionService ? this.resolveSessionService(expectedRoot) : this.resolveService()) !== service) throw browserOwnershipError();
     }
@@ -288,10 +291,12 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
     service.lease.assertOwner(expectedRoot.sessionId);
     if (!service.getState().activeTabId) {
       await service.ensureTab();
+      signal?.throwIfAborted();
       this.assertActiveRoot(expectedRoot);
       if ((this.resolveSessionService ? this.resolveSessionService(expectedRoot) : this.resolveService()) !== service) throw browserOwnershipError();
       service.lease.assertOwner(expectedRoot.sessionId);
     }
+    signal?.throwIfAborted();
     this.assertActiveRoot(expectedRoot);
     return service;
   }
