@@ -192,12 +192,14 @@ describe('BrowserActionExecutor enforcement', () => {
     const confirm = vi.fn(async () => true);
     const executor = new BrowserActionExecutor(fixture.cdp, fixture.refs, new BrowserActionGate(fixture.policy), confirm);
 
-    await executor.click(ACTION_CONTEXT, { ref: fixture.ref });
+    const { signal } = new AbortController();
+    await executor.click({ ...ACTION_CONTEXT, signal }, { ref: fixture.ref });
 
     expect(confirm).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'submit', consequence: 'account', destinationUrl: 'https://example.test/finish' }),
       expect.any(String),
       expect.objectContaining({ tabId: 't1', documentEpoch: 1, ref: fixture.ref }),
+      signal,
     );
     expect(fixture.calls).toContain('Input.dispatchMouseEvent');
   });
@@ -246,6 +248,7 @@ describe('BrowserActionExecutor enforcement', () => {
       expect.objectContaining({ kind: 'download', consequence: 'external-data-transfer', destinationUrl: 'https://example.test/export' }),
       expect.any(String),
       expect.any(Object),
+      undefined,
     );
   });
 
@@ -302,6 +305,7 @@ describe('BrowserActionExecutor enforcement', () => {
       expect.objectContaining({ kind: 'submit', destinationUrl: 'https://receive.test/submit' }),
       expect.any(String),
       expect.any(Object),
+      undefined,
     );
     expect(fixture.policy.canInteract('https://receive.test')).toBe(false);
     expect(policyChanged).toHaveBeenCalledOnce();
@@ -320,6 +324,7 @@ describe('BrowserActionExecutor enforcement', () => {
       expect.objectContaining({ kind: 'submit', destinationUrl: 'https://example.test/checkout' }),
       expect.any(String),
       expect.any(Object),
+      undefined,
     );
   });
 
