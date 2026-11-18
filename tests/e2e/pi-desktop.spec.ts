@@ -1409,7 +1409,8 @@ test('first launch, project, prompt, tool, diff, Git graph, worktrees, and sessi
       toggleTransitionDuration: getComputedStyle(document.querySelector<HTMLElement>('.settings-toggle > span')!).transitionDuration,
     }));
     const normalVisualProfile = await readVisualProfile();
-    expect(normalVisualProfile.appBackgroundImage).not.toBe('none');
+    expect(normalVisualProfile.appBackgroundImage).toBe('none');
+    expect(normalVisualProfile.overlayBackdropFilter).not.toBe('none');
 
     await assertSettingsGeometryStable(async () => {
       await performanceMode.click();
