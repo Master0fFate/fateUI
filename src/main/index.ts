@@ -34,6 +34,8 @@ import { BrowserRuntimeBridge } from './pi/BrowserRuntimeBridge';
 import { ComputerUseService } from './computer/ComputerUseService';
 import { isElevated, relaunchElevated } from './computer/elevation';
 import type { PiRuntimeService } from './pi/PiRuntimeService';
+import { DesktopMonitorWatches } from './pi/DesktopMonitorWatches';
+import { McpConfigService } from './pi/McpConfigService';
 import { ConnectionProfileStore } from './connections/ConnectionProfileStore';
 import { ConnectionProfileEditor } from './connections/ConnectionProfileEditor';
 import { ConnectionSelectionStore } from './connections/ConnectionSelectionStore';
@@ -159,6 +161,8 @@ let desktopTray: Tray | null = null;
 let runtime: PiRuntimeService;
 let connections: DesktopConnectionRouter | null = null;
 let remoteOutcomes: RemoteOutcomeStore | null = null;
+let monitorWatches: DesktopMonitorWatches | null = null;
+let monitorShutdown: Promise<void> | null = null;
 const projects = new TargetProjectService(() => connections?.isLocal !== false);
 const files = new FilesystemService(undefined, new DesktopFileActions());
 const git = new GitService(files, undefined, undefined, hostCheckoutOwnership());
@@ -232,6 +236,7 @@ const shutdown = new ShutdownCoordinator({
     // The desktop coordinator stays the sole exit owner. Fence the core now,
     // before terminal teardown or any asynchronous host cleanup.
     hostStopping = true;
+    monitorShutdown = monitorWatches?.dispose() ?? null;
     core?.shutdownCore();
     rememberWindowPlacement(dispatcher.activeHandle(), windowState);
     desktopTray?.destroy();
@@ -240,6 +245,7 @@ const shutdown = new ShutdownCoordinator({
   disposeSync: () => { terminal?.dispose(); music.dispose(); computerUse.dispose(); rendererNetworkProxy.dispose(); },
   disposeAsync: () => [
     connections?.close() ?? Promise.resolve(),
+    monitorShutdown ?? Promise.resolve(),
     core?.shutdownCore() ?? coreStartup?.then((created) => created.shutdownCore()) ?? Promise.resolve({ status: 'settled' as const }),
     speech.dispose(),
     hotkey.dispose(),
@@ -498,7 +504,24 @@ app.whenReady().then(async () => {
       void computerUse.setEnabled(true);
     }
   }
-  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy });
+  if (hostStopping) return;
+  const desktopRuntime = core.runtime;
+  const monitorConnectors = new McpConfigService(core.paths.dataRoot);
+  const desktopWatches = new DesktopMonitorWatches({
+    isLocal: () => !hostStopping && connections?.isLocal === true,
+    trustedRoots: () => projects.trustedProjectPaths(),
+    connectors: () => monitorConnectors.list(),
+    selectedTarget: ({ workspaceRoot, sessionId }) => {
+      const service = desktopRuntime.getFocused();
+      const { project, sessionId: selected } = service.getState(false);
+      if (project?.path !== workspaceRoot || !project.trusted || project.agentId || selected !== sessionId
+        || desktopRuntime.peekWorkspace(workspaceRoot) !== service) return null;
+      return { isSaved: () => service.hasMonitorWatchSession(sessionId) };
+    },
+  });
+  monitorWatches = desktopWatches;
+  desktopRuntime.subscribeMonitorTargetInvalidation((root, sessionId) => desktopWatches.clear(root, sessionId));
+  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy, monitorWatches: desktopWatches });
   // Refresh every models.dev-managed provider's model list once per Fate GUI
   // start. Runs beside startup, never blocking it; offline keeps the cache.
   // A saved remote target never starts local scheduled work or an automatic provider refresh.
@@ -510,6 +533,7 @@ app.whenReady().then(async () => {
     });
   }
   connections.subscribe((state) => {
+    if (state.kind !== 'local') desktopWatches.clear();
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed() && state.kind === 'remote') browserHost?.setAppOverlay(window, true);
     }

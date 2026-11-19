@@ -3,6 +3,7 @@ import {
   compactInputSchema,
   emptyInputSchema,
   ipcChannels,
+  monitorWatchesSnapshotSchema,
   piEventBatchSchema,
   promptAcceptanceSchema,
   promptInputSchema,
@@ -63,12 +64,16 @@ import {
   taskReorderInputSchema,
   taskUpdateInputSchema,
 } from '../shared/contracts/tasks';
-import { invoke, subscribe } from './transport';
+import { ignoreResult, invoke, subscribe } from './transport';
 import { monitorDashboardSchema, monitorReadInputSchema } from '../shared/contracts/monitorDashboard';
+import { monitorWatchRequestSchema, monitorWatchScopeSchema, monitorWatchStopSchema } from '../shared/contracts/monitorWatches';
 
 export const runtimeApi = {
   getRuntimeState: () => invoke(ipcChannels.runtimeGetState, emptyInputSchema, runtimeStateSchema),
   getMonitorDashboard: (input = {}) => invoke(ipcChannels.runtimeMonitorDashboard, monitorReadInputSchema, monitorDashboardSchema, input),
+  getMonitorWatches: (input) => invoke(ipcChannels.runtimeMonitorWatches, monitorWatchScopeSchema, monitorWatchesSnapshotSchema, input),
+  startMonitorWatch: (input) => invoke(ipcChannels.runtimeMonitorWatchStart, monitorWatchRequestSchema, ignoreResult, input),
+  stopMonitorWatch: (input) => invoke(ipcChannels.runtimeMonitorWatchStop, monitorWatchStopSchema, ignoreResult, input),
   prompt: (input) => invoke(ipcChannels.runtimePrompt, promptInputSchema, promptAcceptanceSchema, input),
   optimizePrompt: (text, options) => invoke(ipcChannels.runtimeOptimizePrompt, promptOptimizationInputSchema, promptOptimizationResultSchema, { text, advanced: options?.advanced ?? false }),
   abort: () => invoke(ipcChannels.runtimeAbort, emptyInputSchema, abortResultSchema),

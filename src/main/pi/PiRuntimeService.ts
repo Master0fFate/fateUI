@@ -108,6 +108,7 @@ import { prepareFateProviderStorage } from './FateProviderStorage';
 import { ModelsDevService } from './modelsdev/ModelsDevService';
 import { ModelsDevStore } from './modelsdev/ModelsDevStore';
 import { buildSessionReferenceContext } from './SessionReferenceContext';
+import { sessionProjectMatches } from './SessionProjectIdentity';
 import { PiSessionTitleGenerator, type SessionTitleGenerator } from './PiSessionTitleGenerator';
 import { activeToolsForPermission, createProjectConfinedTools, type ProjectToolAccess } from './PiToolPolicy';
 import type { AttestationSink } from './provenance/attestationRecord';
@@ -3932,6 +3933,39 @@ export class PiRuntimeService {
     const goal = this.project ? this.goalMax.get(this.project.path, session.sessionId) : null;
     const outcome = agentRunOutcome(session, slot.runFailed || Boolean(goal && goal.status !== 'completed'));
     settle(goal?.failure ? { ...outcome, error: goal.failure.message } : outcome);
+  }
+
+  async hasMonitorWatchSession(sessionId: string): Promise<boolean> {
+    const project = this.project;
+    if (!project?.trusted || this.hostStopping || !sessionId) return false;
+    const generation = this.initialization;
+    const isCurrent = () => this.project === project && project.trusted && this.initialization === generation && !this.hostStopping;
+    try {
+      const livePath = this.findLiveSlot(sessionId)?.runtime.session.sessionFile;
+      const sessionPath = livePath ?? (await this.sessionRepository.resolve(project.path, sessionId))?.path;
+      const root = path.resolve(this.paths?.sessionsRoot ?? defaultSessionsRoot());
+      const directory = projectSessionDirectory(project.path, root);
+      if (!isCurrent() || !sessionPath || !isSafeSessionPath(root, sessionPath) || path.dirname(path.resolve(sessionPath)) !== directory) return false;
+      const [canonicalRoot, canonicalDirectory, stat] = await Promise.all([fs.realpath(root), fs.realpath(directory), fs.lstat(sessionPath)]);
+      if (!isCurrent() || canonicalDirectory !== path.join(canonicalRoot, path.basename(directory)) || !stat.isFile() || stat.isSymbolicLink()) return false;
+      const sameFile = (current: typeof stat) => current.isFile() && !current.isSymbolicLink() && current.dev === stat.dev && current.ino === stat.ino;
+      const handle = await fs.open(sessionPath, 'r');
+      try {
+        if (!sameFile(await handle.stat())) return false;
+        const bytes = Buffer.alloc(64 * 1024);
+        const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+        const end = bytes.subarray(0, bytesRead).indexOf(10);
+        if (end < 0) return false;
+        const header = JSON.parse(bytes.subarray(0, end).toString('utf8')) as { type?: unknown; id?: unknown; cwd?: unknown } | null;
+        if (header?.type !== 'session' || header.id !== sessionId || !sessionProjectMatches(header.cwd, project.path)) return false;
+      } finally {
+        await handle.close();
+      }
+      const [current, canonicalFile] = await Promise.all([fs.lstat(sessionPath), fs.realpath(sessionPath)]);
+      return sameFile(current) && path.dirname(canonicalFile) === canonicalDirectory && isCurrent();
+    } catch {
+      return false;
+    }
   }
 
   async listSessions(query = ''): Promise<SessionSummary[]> {

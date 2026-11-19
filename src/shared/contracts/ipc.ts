@@ -4,6 +4,7 @@ import { memoryLearningSettingsSchema, learningTurnSchema, type LearningApi } fr
 import { agentChannels, agentInboxChannels, type AgentsApi } from './agents';
 import type { GoogleClientInput, GoogleConnectInput, GoogleStatus } from './google';
 import type { MonitorDashboard, MonitorReadInput } from './monitorDashboard';
+import { monitorWatchResultSchema, monitorWatchSourceSchema, type MonitorWatchRequest, type MonitorWatchesSnapshot } from './monitorWatches';
 import { MAX_SPEECH_STREAM_FEED_SAMPLES, SPEECH_PCM_BYTES_PER_SAMPLE } from '../speech';
 import {
   SUBAGENT_DISPLAY_NAME_MAX_LENGTH,
@@ -150,6 +151,9 @@ export const ipcChannels = {
   runtimeHistoryImages: 'runtime:history-images',
   runtimeHistoryPage: 'runtime:history-page',
   runtimeMonitorDashboard: 'runtime:monitor-dashboard',
+  runtimeMonitorWatches: 'runtime:monitor-watches',
+  runtimeMonitorWatchStart: 'runtime:monitor-watch-start',
+  runtimeMonitorWatchStop: 'runtime:monitor-watch-stop',
   runtimePrompt: 'runtime:prompt',
   runtimeOptimizePrompt: 'runtime:optimize-prompt',
   runtimeAbort: 'runtime:abort',
@@ -1288,6 +1292,18 @@ export const projectOpenInputSchema = projectPathInputSchema.extend({ target: pr
 export const projectSessionListInputSchema = z.object({ projectPath: z.string().min(1).max(32_768), query: z.string().max(500).default('') }).strict();
 export const projectDeleteSessionsResultSchema = z.object({ deleted: z.number().int().nonnegative().max(100_000), skipped: z.number().int().nonnegative().max(100_000) }).strict();
 export const sessionIdInputSchema = z.object({ sessionId: z.string().min(1).max(500) }).strict();
+export const monitorWatchesSnapshotSchema = z.object({
+  connectors: z.array(z.string()),
+  watches: z.array(z.object({
+    id: z.string().uuid(),
+    source: monitorWatchSourceSchema,
+    state: z.enum(['waiting', 'backoff', 'completed', 'stopped', 'expired', 'failed']),
+    result: monitorWatchResultSchema.optional(),
+    wake: z.literal(false),
+    expiresAt: z.number().int().nonnegative().max(8_640_000_000_000_000),
+  }).transform(({ result, ...status }) => ({ ...status, ...(result === undefined ? {} : { result }) }))),
+  wakeAvailable: z.literal(false),
+}) satisfies z.ZodType<MonitorWatchesSnapshot, z.ZodTypeDef, unknown>;
 export const sessionDeleteInputSchema = z.object({ sessionId: z.string().min(1).max(500), projectPath: z.string().min(1).max(32_768).optional() }).strict();
 export const sessionRenameInputSchema = z.object({
   sessionId: z.string().min(1).max(500),
@@ -1730,6 +1746,9 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   onBrowserEvents: (listener: (events: BrowserEvent[]) => void) => () => void;
   getRuntimeState: () => Promise<RuntimeState>;
   getMonitorDashboard: (input?: MonitorReadInput) => Promise<MonitorDashboard>;
+  getMonitorWatches: (scope: Pick<MonitorWatchRequest, 'workspaceRoot' | 'sessionId'>) => Promise<MonitorWatchesSnapshot>;
+  startMonitorWatch: (request: MonitorWatchRequest) => Promise<void>;
+  stopMonitorWatch: (input: Pick<MonitorWatchRequest, 'workspaceRoot' | 'sessionId'> & { id: string }) => Promise<void>;
   prompt: (input: PromptInput) => Promise<PromptAcceptance>;
   optimizePrompt: (text: string, options?: PromptOptimizationOptions) => Promise<PromptOptimizationResult>;
   abort: () => Promise<{ aborted: boolean }>;

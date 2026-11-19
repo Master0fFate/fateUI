@@ -258,4 +258,11 @@ export function getTerminalApiOptional(): ManualTerminalApi | undefined {
   return api.desktop;
 }
 
+export function getMonitorWatchesApiOptional(): Pick<DesktopOnlyApi, 'getMonitorWatches' | 'startMonitorWatch' | 'stopMonitorWatch'> | undefined {
+  const desktop = getDesktopApiOptional();
+  if (getWebApiOptional() || typeof desktop?.getMonitorWatches !== 'function'
+    || typeof desktop.startMonitorWatch !== 'function' || typeof desktop.stopMonitorWatch !== 'function') return undefined;
+  return desktop;
+}
+
 export function installDesktopFateApi(): void { installFateApi(bootstrapDesktopFateApi()); }

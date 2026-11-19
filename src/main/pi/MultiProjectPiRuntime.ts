@@ -164,6 +164,7 @@ export class MultiProjectPiRuntime {
   private readonly lifecycleHooks = new Map<string, { beforeDispose(service: PiRuntimeService): void; onEvicted(): void }>();
   private readonly checkoutOwners = new Map<string, OwnerLock>();
   private readonly focusListeners = new Set<() => void>();
+  private readonly monitorTargetInvalidations = new Set<(projectPath: string, sessionId?: string) => void>();
   private readonly servicePaths = new WeakMap<PiRuntimeService, string>();
   private readonly checkoutOwnership: CheckoutOwnership | null;
   private stopping = false;
@@ -222,6 +223,7 @@ export class MultiProjectPiRuntime {
         disposeRuntime: async (service) => {
           const projectPath = service.getState(false).project?.path;
           const lifecycle = projectPath ? this.lifecycleHooks.get(projectPath) : undefined;
+          if (projectPath) this.invalidateMonitorTargets(projectPath);
           lifecycle?.beforeDispose(service);
           if (projectPath) {
             try { this.rememberAttention(projectPath, this.mergeRememberedAttention(projectPath, await service.listSessions())); } catch { /* Disposal must still release the runtime. */ }
@@ -386,13 +388,25 @@ export class MultiProjectPiRuntime {
     return this.bootService.setProjectPreview(project, sessions);
   }
 
+  subscribeMonitorTargetInvalidation(listener: (projectPath: string, sessionId?: string) => void): () => void {
+    this.monitorTargetInvalidations.add(listener);
+    return () => { this.monitorTargetInvalidations.delete(listener); };
+  }
+
+  private invalidateMonitorTargets(projectPath: string, sessionId?: string): void {
+    for (const listener of this.monitorTargetInvalidations) listener(projectPath, sessionId);
+  }
+
   async closeProject(): Promise<RuntimeState> {
+    const root = this.manager.focusedProjectPath;
+    if (root) this.invalidateMonitorTargets(root);
     await this.manager.closeFocused();
     return this.bootService.setProjectPreview(null, [], true);
   }
 
   async closeProjectPath(projectPath: string): Promise<void> {
     if (this.admissionGuards.get(projectPath)?.()) throw new Error('Workspace admission is active.');
+    this.invalidateMonitorTargets(projectPath);
     await this.manager.close(projectPath);
     this.attentionByProject.delete(projectPath);
   }
@@ -402,6 +416,7 @@ export class MultiProjectPiRuntime {
   }
 
   async deleteSessionsForPath(projectPath: string): Promise<{ deleted: number; skipped: number }> {
+    this.invalidateMonitorTargets(projectPath);
     const live = this.manager.get(projectPath);
     const result = await (live ?? this.getFocused()).deleteSessionsForPath(projectPath);
     this.attentionByProject.delete(projectPath);
@@ -410,6 +425,8 @@ export class MultiProjectPiRuntime {
 
   async deleteSession(sessionId: string, projectPath?: string): Promise<RuntimeState> {
     const focused = this.getFocused();
+    const root = projectPath ?? focused.getState(false).project?.path;
+    if (root) this.invalidateMonitorTargets(root, sessionId);
     const live = projectPath === undefined ? undefined : this.manager.get(projectPath);
     const background = live && live !== focused ? live : undefined;
     if (projectPath !== undefined && background) {

@@ -23,6 +23,8 @@ import { googleClientInputSchema, googleConnectInputSchema, googleStatusSchema }
 import { McpConfigService } from '../pi/McpConfigService';
 import { McpService } from '../pi/McpService';
 import { PiMigrationService } from '../pi/PiMigrationService';
+import type { DesktopMonitorWatches } from '../pi/DesktopMonitorWatches';
+import { monitorWatchRequestSchema, monitorWatchScopeSchema, monitorWatchStopSchema } from '../../shared/contracts/monitorWatches';
 import packageManifest from '../../../package.json';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -58,6 +60,7 @@ import {
   mcpServerListSchema,
   mcpProbeInputSchema,
   mcpProbeResultSchema,
+  monitorWatchesSnapshotSchema,
   piMigrationReportSchema,
   piMigrationResultSchema,
   musicClearResultSchema,
@@ -234,6 +237,7 @@ export interface IpcServices {
   learning?: LearningService;
   agents?: AgentsService;
   google?: GoogleAccount;
+  monitorWatches?: DesktopMonitorWatches;
   terminal: TerminalService;
   logs: AppLogService;
   music: Pick<MusicService, 'getStatus' | 'load' | 'resolveTrack' | 'clearQueue' | 'reset' | 'setDurationSink'>;
@@ -529,7 +533,7 @@ async function applyPendingRecovery(
   await recovery?.markClean();
 }
 
-export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
+export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, google, monitorWatches, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
   const sessionHandlers = createSessionHandlers(runtime);
   const runtimeHandlers = createRuntimeHandlers(runtime, (projectPath) => projects.prepareSessionListPath(projectPath));
   const goalHandlers = createGoalHandlers(runtime);
@@ -1048,6 +1052,21 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     historyPageSchema.parse(runtime.loadHistoryPage(historyPageInputSchema.parse(input))));
   handle(ipcChannels.runtimeMonitorDashboard, (event, input) => core
     ? coreAdapter(event).monitor(input) : agentHandlers.desktopMonitor(input));
+  const watchService = () => {
+    if (!monitorWatches) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Monitor watches are unavailable.', retryable: false });
+    return monitorWatches;
+  };
+  handle(ipcChannels.runtimeMonitorWatches, (event, input) => coreAdapter(event).monitorSession(monitorWatchScopeSchema.parse(input),
+    async (root, sessionId) => monitorWatchesSnapshotSchema.parse(await watchService().snapshot(root, sessionId))));
+  handle(ipcChannels.runtimeMonitorWatchStart, (event, input) => {
+    const request = monitorWatchRequestSchema.parse(input);
+    return coreAdapter(event).monitorSession(request, (workspaceRoot, sessionId, current) =>
+      watchService().start({ workspaceRoot, sessionId, source: request.source, wake: request.wake }, current));
+  });
+  handle(ipcChannels.runtimeMonitorWatchStop, (event, input) => {
+    const request = monitorWatchStopSchema.parse(input);
+    return coreAdapter(event).monitorSession(request, (root, sessionId) => watchService().stop(root, sessionId, request.id));
+  });
   handle(ipcChannels.runtimePrompt, async (event, input) => runRuntimeMutation('sending a prompt', () => core
     ? coreAdapter(event).prompt(input) : runtimeHandlers.prompt(input)));
   handle(ipcChannels.runtimeOptimizePrompt, async (_event, input) => runRuntimeMutation('improving a prompt', async () => {
