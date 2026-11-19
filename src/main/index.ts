@@ -1,5 +1,5 @@
 import { resolveStatePersistenceBackend } from '../shared/v2FeaturePolicy';
-import { app, BrowserWindow, dialog, protocol, safeStorage, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, protocol, safeStorage, session, shell, systemPreferences, type Tray } from 'electron';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { createFateCore } from '../core/createFateCore';
 import { hostCheckoutOwnership } from '../core/ownership/CheckoutOwnership';
@@ -55,6 +55,7 @@ import { runUpdaterSmoke } from './updates/updaterSmoke';
 import { WindowStateService } from './windowState';
 import { LaunchDispatcher } from './windows/launchDispatcher';
 import { createAppWindowFactory, rememberWindowPlacement } from './windows/appWindows';
+import { canParkOnDesktopTray, createDesktopTray } from './windows/desktopTray';
 import { appCommandSchema, ipcChannels } from '../shared/contracts/ipc';
 import { browserEventBatchSchema } from '../shared/contracts/browser';
 
@@ -154,6 +155,7 @@ let core: FateCore | null = null;
 let coreStartup: Promise<FateCore> | null = null;
 let hostStopping = false;
 let startupFailed = false;
+let desktopTray: Tray | null = null;
 let runtime: PiRuntimeService;
 let connections: DesktopConnectionRouter | null = null;
 let remoteOutcomes: RemoteOutcomeStore | null = null;
@@ -232,6 +234,8 @@ const shutdown = new ShutdownCoordinator({
     hostStopping = true;
     core?.shutdownCore();
     rememberWindowPlacement(dispatcher.activeHandle(), windowState);
+    desktopTray?.destroy();
+    desktopTray = null;
   },
   disposeSync: () => { terminal?.dispose(); music.dispose(); computerUse.dispose(); rendererNetworkProxy.dispose(); },
   disposeAsync: () => [
@@ -299,6 +303,7 @@ function wireSmoke(window: BrowserWindow): void {
 }
 
 let windows: ReturnType<typeof createAppWindowFactory>;
+let openAppWindow: (() => void) | undefined;
 let pendingConnectionProfile = parseConnectionProfile(process.argv);
 async function openLaunchConnection(profile: string): Promise<void> {
   if (!connections) { pendingConnectionProfile = profile; return; }
@@ -317,12 +322,8 @@ if (instanceProfile.mode === 'single' && instancePrimaryApp) {
   app.on('second-instance', (_event, commandLine, workingDirectory, additionalData) => {
     // A contender probes occupied Chromium slots; this is not a request to
     // focus the owner or forward a project/connection into its live runtime.
-    if (isMultiInstanceProbe(commandLine, additionalData)) return;
-    const window = dispatcher.activeHandle();
-    if (window) {
-      if (window.isMinimized()) window.restore();
-      window.focus();
-    }
+    if (isMultiInstanceProbe(commandLine, additionalData) || hostStopping || startupFailed) return;
+    openAppWindow?.();
     try {
       const connectionProfile = parseConnectionProfile(commandLine);
       if (connectionProfile) { void openLaunchConnection(connectionProfile).catch(reportLaunchError); return; }
@@ -412,6 +413,7 @@ app.whenReady().then(async () => {
   terminal = new TerminalService(files, runtime, settings, logs);
   windows = createAppWindowFactory({
     logs, windowState, terminal, projects, dispatcher, reportLaunchError, consumeLaunchError, rendererPolicy,
+    canCloseToTray: () => !hostStopping && !startupFailed && canParkOnDesktopTray(desktopTray),
     preloadPath: path.join(currentDirectory, '../preload/index.cjs'), rendererPath,
     ...(process.env.PI_DESKTOP_SMOKE === '1' ? { installSmoke: wireSmoke } : {}),
     ...(developmentUrl ? { developmentUrl } : {}),
@@ -516,11 +518,22 @@ app.whenReady().then(async () => {
   void hotkey.applySpeechSettings((await settings.load()).speech).then((status) => {
     if (!status.pushToTalkAvailable) logs.write('warn', 'speech', status.reason ?? 'Push-to-talk is unavailable on this platform.');
   });
+  if (hostStopping) return;
   windows.installMenu();
   windows.createWindow({ initial: true });
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) windows.createWindow({ initial: true });
-  });
+  openAppWindow = () => {
+    if (!hostStopping && !startupFailed) windows.openWindow();
+  };
+  try {
+    desktopTray = createDesktopTray({
+      openWindow: openAppWindow,
+      newWindow: () => { if (!hostStopping && !startupFailed) windows.createWindow(); },
+      hideWindows: () => windows.hideWindows(),
+    });
+  } catch (error) {
+    logs.write('warn', 'app', `Desktop tray unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  app.on('activate', openAppWindow);
 }).catch((error: unknown) => {
   startupFailed = true;
   const failure = desktopStartupFailure(error);

@@ -159,6 +159,11 @@
       {
         "from": "build/cli",
         "to": "cli"
+      },
+      {
+        "from": "build",
+        "to": "tray",
+        "filter": ["icon.ico", "icons/32x32.png", "trayTemplate.png", "trayTemplate@2x.png"]
       }
     ],
     "asarUnpack": [

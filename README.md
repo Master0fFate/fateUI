@@ -208,6 +208,8 @@ Preserve existing behavior outside the requested scope.
 
 Later `fate` launches reuse the running workspace. **File → New Window** opens another synced view. In the current V2 candidate, `--new-instance` selects a separate Chromium profile slot, but startup is refused while another core owns the same canonical Fate data root. Independent shared-data runtimes remain an unresolved ownership requirement. [Sessions and processes →](docs/sessions-and-processes.md) · [V2 candidate status →](docs/v2/current-status.md)
 
+On Windows and macOS, closing the last Fate UI window hides it to the tray without stopping the app or reloading the window. Double-click the tray icon or choose **Open Fate UI** from its menu to restore it. On Linux, the last window minimizes so it remains accessible from the taskbar even if your desktop doesn't show tray icons. Desktops with tray support can also use their native tray activation or **Open Fate UI** from the tray menu; some shells require an extension to display StatusNotifierItem icons. Closing an extra window still closes that window. To stop the app, choose **Quit Fate UI**.
+
 ## Local-first, with explicit boundaries
 
 Projects, session history, settings, and credentials are stored locally. **Prompts and selected context are sent to the AI provider you configure.** Browser pages, provider discovery, optional downloads, and other network-enabled features also use the network; local-first does not mean offline-only.
