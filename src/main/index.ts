@@ -516,7 +516,7 @@ app.whenReady().then(async () => {
       const { project, sessionId: selected } = service.getState(false);
       if (project?.path !== workspaceRoot || !project.trusted || project.agentId || selected !== sessionId
         || desktopRuntime.peekWorkspace(workspaceRoot) !== service) return null;
-      return { isSaved: () => service.hasMonitorWatchSession(sessionId) };
+      return service.createMonitorWatchTarget(sessionId, () => desktopRuntime.hasQueuedWorkspaceWork(workspaceRoot));
     },
   });
   monitorWatches = desktopWatches;

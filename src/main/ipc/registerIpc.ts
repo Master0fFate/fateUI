@@ -1061,7 +1061,7 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
   handle(ipcChannels.runtimeMonitorWatchStart, (event, input) => {
     const request = monitorWatchRequestSchema.parse(input);
     return coreAdapter(event).monitorSession(request, (workspaceRoot, sessionId, current) =>
-      watchService().start({ workspaceRoot, sessionId, source: request.source, wake: request.wake }, current));
+      watchService().start({ ...request, workspaceRoot, sessionId }, current));
   });
   handle(ipcChannels.runtimeMonitorWatchStop, (event, input) => {
     const request = monitorWatchStopSchema.parse(input);

@@ -11,19 +11,37 @@ const MAX_HISTORY = 24;
 const MAX_COMPLETIONS = 256;
 
 type Connector = Extract<McpServerDefinition, { transport: 'stdio' }>;
-type Target = { isSaved(): Promise<boolean> };
+export interface MonitorWakeInput {
+  id: string;
+  source: MonitorWatchRequest['source'];
+  result: MonitorWatchResult;
+  followUp: string;
+}
+
+export interface MonitorWakeFence {
+  signal: AbortSignal;
+  current(): boolean;
+  revalidate(): Promise<void>;
+}
+
+export interface MonitorWatchTarget {
+  isSaved(): Promise<boolean>;
+  answer?(input: MonitorWakeInput, fence: MonitorWakeFence, onStart: () => void): Promise<string | null>;
+  report?(id: string, text: string, fence: MonitorWakeFence, onCommit: () => void): Promise<void>;
+}
 interface MonitorDependencies {
   isLocal(): boolean;
   trustedRoots(): Promise<readonly string[]>;
   connectors(): Promise<readonly McpServerDefinition[]>;
-  selectedTarget(request: MonitorWatchRequest): Target | null;
+  selectedTarget(request: MonitorWatchRequest): MonitorWatchTarget | null;
 }
 interface Watch {
   request: MonitorWatchRequest;
   key: string;
   status: MonitorWatchStatus;
   controller: AbortController;
-  target: Target;
+  target: MonitorWatchTarget;
+  answer?: string;
   connector?: Connector;
   nextCheck: number;
   failures: number;
@@ -39,6 +57,7 @@ export class DesktopMonitorWatches {
   private readonly history: Watch[] = [];
   private readonly consumed = new Set<string>();
   private readonly working = new Set<Watch>();
+  private readonly answering = new Set<string>();
   private readonly settling = new Set<Promise<void>>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private ticking = false;
@@ -57,7 +76,7 @@ export class DesktopMonitorWatches {
     const connectors = await this.connectors();
     if (!this.deps.isLocal() || this.disposed) throw new Error('Monitor watches require the local desktop.');
     const matches = (watch: Watch) => watch.request.workspaceRoot === workspaceRoot && watch.request.sessionId === sessionId;
-    return { connectors: connectors.map(({ name }) => name), wakeAvailable: false,
+    return { connectors: connectors.map(({ name }) => name), wakeAvailable: true,
       watches: [...this.watches.values(), ...this.history].filter(matches).map(({ status }) => ({ ...status })) };
   }
 
@@ -68,6 +87,7 @@ export class DesktopMonitorWatches {
     if (this.consumed.size + this.watches.size + this.pending >= MAX_COMPLETIONS) throw new Error('The desktop watch limit for this process has been reached.');
     const target = this.deps.selectedTarget(request);
     if (!target) throw new Error('Open the original trusted saved chat before starting a watch.');
+    if (request.wake && (!target.answer || !target.report)) throw new Error('A configured chat model is required for an automatic Monitor reply.');
     const generation = this.generation;
     this.pending++;
     try {
@@ -120,6 +140,8 @@ export class DesktopMonitorWatches {
   private finish(watch: Watch, state: MonitorWatchStatus['state']): void {
     if (!this.watches.delete(watch.status.id)) return;
     watch.status.state = state;
+    if (watch.status.wakeStatus === 'queued' || watch.status.wakeStatus === 'answering') watch.status.wakeStatus = 'failed';
+    delete watch.answer;
     watch.controller.abort();
     this.history.unshift(watch);
     this.history.length = Math.min(this.history.length, MAX_HISTORY);
@@ -146,7 +168,9 @@ export class DesktopMonitorWatches {
       if (!await watch.target.isSaved()) { this.clear(watch.request.workspaceRoot, watch.request.sessionId); continue; }
       if (!this.live(watch) || this.working.size >= MAX_WATCHES || this.working.has(watch) || Date.now() < watch.nextCheck) continue;
       this.working.add(watch);
-      const operation = this.step(watch).catch(() => { if (this.live(watch)) this.finish(watch, 'failed'); })
+      const operation = (watch.status.result === undefined ? this.step(watch) : this.wake(watch)).catch(() => {
+        if (this.live(watch)) this.finish(watch, watch.status.result === undefined ? 'failed' : 'completed');
+      })
         .finally(() => { this.working.delete(watch); this.settling.delete(operation); });
       this.settling.add(operation);
     }
@@ -173,16 +197,54 @@ export class DesktopMonitorWatches {
       watch.nextCheck = Date.now() + POLL_MS;
       return;
     }
-    const roots = await this.deps.trustedRoots().catch((): string[] => []);
-    if (!this.live(watch)) return;
-    if (!roots.includes(watch.request.workspaceRoot)) { this.clear(watch.request.workspaceRoot); return; }
-    const pinned = watch.connector;
-    if (pinned && !(await this.connectors()).some((item) => sameConnector(pinned, item))) { this.finish(watch, 'stopped'); return; }
-    if (!this.live(watch)) return;
-    if (!await watch.target.isSaved()) { this.clear(watch.request.workspaceRoot, watch.request.sessionId); return; }
-    if (!this.live(watch)) return;
+    await this.revalidate(watch);
     this.consumed.add(watch.key);
     watch.status.result = result;
-    this.finish(watch, 'completed');
+    watch.status.state = 'completed';
+    if (!watch.request.wake) { this.finish(watch, 'completed'); return; }
+    watch.status.wakeStatus = 'queued';
+    watch.nextCheck = 0;
+    await this.wake(watch);
+  }
+
+  private async revalidate(watch: Watch): Promise<void> {
+    const { workspaceRoot, sessionId } = watch.request;
+    const [roots, configs, saved] = await Promise.all([
+      this.deps.trustedRoots(), watch.connector ? this.connectors() : Promise.resolve([]), watch.target.isSaved(),
+    ]);
+    if (this.live(watch)) {
+      if (!roots.includes(workspaceRoot)) this.clear(workspaceRoot);
+      else if (!saved) this.clear(workspaceRoot, sessionId);
+      else if (watch.connector && !configs.some((item) => sameConnector(watch.connector!, item))) this.finish(watch, 'stopped');
+    }
+    if (!this.live(watch)) throw new Error('The Monitor watch is no longer eligible.');
+  }
+
+  private async wake(watch: Watch): Promise<void> {
+    const { request } = watch;
+    const { id, result, expiresAt } = watch.status;
+    if (!request.wake || result === undefined || !watch.target.answer || !watch.target.report) throw new Error('Monitor reply unavailable.');
+    const { workspaceRoot, sessionId, source, followUp } = request;
+    const key = JSON.stringify([workspaceRoot, sessionId]);
+    if (this.answering.has(key)) return;
+    this.answering.add(key);
+    const signal = AbortSignal.any([watch.controller.signal, AbortSignal.timeout(Math.max(1, expiresAt - Date.now()))]);
+    const fence: MonitorWakeFence = {
+      signal, current: () => this.live(watch) && !signal.aborted,
+      revalidate: () => this.revalidate(watch),
+    };
+    try {
+      if (watch.answer === undefined) {
+        const text = await watch.target.answer({ id, source, result, followUp }, fence, () => { watch.status.wakeStatus = 'answering'; });
+        if (text === null || !fence.current()) return;
+        watch.answer = text;
+      }
+      await watch.target.report(id, watch.answer, fence, () => {
+        watch.status.wakeStatus = 'reported';
+        this.finish(watch, 'completed');
+      });
+    } finally {
+      this.answering.delete(key);
+    }
   }
 }

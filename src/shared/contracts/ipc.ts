@@ -4,7 +4,7 @@ import { memoryLearningSettingsSchema, learningTurnSchema, type LearningApi } fr
 import { agentChannels, agentInboxChannels, type AgentsApi } from './agents';
 import type { GoogleClientInput, GoogleConnectInput, GoogleStatus } from './google';
 import type { MonitorDashboard, MonitorReadInput } from './monitorDashboard';
-import { monitorWatchResultSchema, monitorWatchSourceSchema, type MonitorWatchRequest, type MonitorWatchesSnapshot } from './monitorWatches';
+import { monitorWakeStatusSchema, monitorWatchResultSchema, monitorWatchSourceSchema, type MonitorWatchRequest, type MonitorWatchesSnapshot } from './monitorWatches';
 import { MAX_SPEECH_STREAM_FEED_SAMPLES, SPEECH_PCM_BYTES_PER_SAMPLE } from '../speech';
 import {
   SUBAGENT_DISPLAY_NAME_MAX_LENGTH,
@@ -661,6 +661,7 @@ export const clipboardWriteResultSchema = z.object({ written: z.literal(true) })
 export const runtimeMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(['user', 'assistant', 'system', 'tool']),
+  origin: z.literal('monitor').optional(),
   text: z.string().max(65_000),
   reasoning: z.string().max(65_000).optional(),
   images: z.array(runtimeImageSchema).max(8).optional(),
@@ -1299,10 +1300,11 @@ export const monitorWatchesSnapshotSchema = z.object({
     source: monitorWatchSourceSchema,
     state: z.enum(['waiting', 'backoff', 'completed', 'stopped', 'expired', 'failed']),
     result: monitorWatchResultSchema.optional(),
-    wake: z.literal(false),
+    wake: z.boolean(),
+    wakeStatus: monitorWakeStatusSchema.optional(),
     expiresAt: z.number().int().nonnegative().max(8_640_000_000_000_000),
-  }).transform(({ result, ...status }) => ({ ...status, ...(result === undefined ? {} : { result }) }))),
-  wakeAvailable: z.literal(false),
+  }).transform(({ result, wakeStatus, ...status }) => ({ ...status, ...(result === undefined ? {} : { result }), ...(wakeStatus === undefined ? {} : { wakeStatus }) }))),
+  wakeAvailable: z.boolean(),
 }) satisfies z.ZodType<MonitorWatchesSnapshot, z.ZodTypeDef, unknown>;
 export const sessionDeleteInputSchema = z.object({ sessionId: z.string().min(1).max(500), projectPath: z.string().min(1).max(32_768).optional() }).strict();
 export const sessionRenameInputSchema = z.object({

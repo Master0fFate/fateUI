@@ -337,6 +337,10 @@ export class MultiProjectPiRuntime {
     else this.admissionGuards.delete(projectPath);
   }
 
+  hasQueuedWorkspaceWork(projectPath: string): boolean {
+    return this.admissionGuards.get(projectPath)?.() === true;
+  }
+
   /** One synchronous close fence shared by explicit close, idle eviction and replacement. */
   setWorkspaceLifecycleHooks(projectPath: string,
     hooks: { beforeDispose(service: PiRuntimeService): void; onEvicted(): void } | null): void {

@@ -11,7 +11,12 @@ export type MonitorWatchSource = z.infer<typeof monitorWatchSourceSchema>;
 export const monitorWatchResultSchema = z.enum(['success', 'failure', 'cancelled', 'other']);
 export type MonitorWatchResult = z.infer<typeof monitorWatchResultSchema>;
 export const monitorWatchScopeSchema = z.object({ workspaceRoot: z.string().min(1).max(4096), sessionId: identifier }).strict();
-export const monitorWatchRequestSchema = monitorWatchScopeSchema.extend({ source: monitorWatchSourceSchema, wake: z.literal(false) }).strict();
+export const MONITOR_FOLLOW_UP_MAX = 2_000;
+export const monitorWatchRequestSchema = z.discriminatedUnion('wake', [
+  monitorWatchScopeSchema.extend({ source: monitorWatchSourceSchema, wake: z.literal(false) }).strict(),
+  monitorWatchScopeSchema.extend({ source: monitorWatchSourceSchema, wake: z.literal(true), followUp: z.string().trim().min(1).max(MONITOR_FOLLOW_UP_MAX) }).strict(),
+]);
+export const monitorWakeStatusSchema = z.enum(['queued', 'answering', 'reported', 'failed']);
 export const monitorWatchStopSchema = monitorWatchScopeSchema.extend({ id: z.string().uuid() }).strict();
 export type MonitorWatchRequest = z.infer<typeof monitorWatchRequestSchema>;
 export type MonitorWatchStatus = {
@@ -19,7 +24,8 @@ export type MonitorWatchStatus = {
   source: MonitorWatchSource;
   state: 'waiting' | 'backoff' | 'completed' | 'stopped' | 'expired' | 'failed';
   result?: MonitorWatchResult;
-  wake: false;
+  wake: boolean;
+  wakeStatus?: z.infer<typeof monitorWakeStatusSchema>;
   expiresAt: number;
 };
-export type MonitorWatchesSnapshot = { connectors: string[]; watches: MonitorWatchStatus[]; wakeAvailable: false };
+export type MonitorWatchesSnapshot = { connectors: string[]; watches: MonitorWatchStatus[]; wakeAvailable: boolean };

@@ -52,6 +52,8 @@
 .monitor-watch-fields label { display: grid; gap: 4px; color: var(--theme-text-soft); }
 .monitor-watch-fields :is(input, select) { width: 100%; min-width: 0; min-height: 28px; border: 1px solid var(--theme-border); border-radius: var(--surface-control-radius, 4px); padding: 4px 6px; background: var(--theme-panel); color: var(--theme-text); font: inherit; }
 .monitor-watch-fields :is(input, select):focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 1px; }
+.monitor-watch-fields .monitor-watch-opt-in { display: flex; align-items: start; gap: 8px; }
+.monitor-watch-opt-in input[type='checkbox'] { flex: none; width: auto; min-height: 0; margin: 3px 0 0; accent-color: var(--theme-accent); }
 .monitor-watch-start.activity-refresh { justify-self: start; min-height: 26px; border-color: var(--theme-accent); background: var(--theme-accent-soft); color: var(--theme-accent); }
 .monitor-watches-note, .monitor-watches small { color: var(--theme-subtle); }
 .monitor-watch-list { margin: 0; padding: 0; list-style: none; }

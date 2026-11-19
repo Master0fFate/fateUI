@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { monitorWatchSourceSchema, type MonitorWatchRequest, type MonitorWatchSource, type MonitorWatchStatus, type MonitorWatchesSnapshot } from '../../../shared/contracts/monitorWatches';
+import { MONITOR_FOLLOW_UP_MAX, monitorWatchSourceSchema, type MonitorWatchRequest, type MonitorWatchSource, type MonitorWatchStatus, type MonitorWatchesSnapshot } from '../../../shared/contracts/monitorWatches';
 import { getMonitorWatchesApiOptional } from '../../platform/api';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 
@@ -16,6 +16,7 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
   const [readError, setReadError] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [wake, setWake] = useState(false);
   const [kind, setKind] = useState<MonitorWatchSource['kind']>('github-actions');
   const request = useRef(0);
   const reading = useRef(false);
@@ -78,7 +79,10 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
         : 'Select an enabled connector and enter a valid event ID and revision.');
       return;
     }
-    void mutate(() => api.startMonitorWatch({ workspaceRoot, sessionId, source: parsed.data, wake: false }), 'start');
+    const scope = { workspaceRoot, sessionId, source: parsed.data };
+    const followUp = field('followUp');
+    if (wake && !followUp) { setActionError('Enter an instruction for the automatic reply.'); return; }
+    void mutate(() => api.startMonitorWatch(wake ? { ...scope, wake: true, followUp } : { ...scope, wake: false }), 'start');
   };
 
   return <section className="monitor-watches" aria-label="Completion watches">
@@ -100,7 +104,11 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
           <label>Event ID<input name="eventId" autoComplete="off" required maxLength={80} /></label>
           <label>Revision<input name="revision" autoComplete="off" required maxLength={80} /></label>
         </>}
-        <p className="monitor-watches-note">Results stay in Monitor. No chat turn starts.</p>
+        <label className="monitor-watch-opt-in"><input type="checkbox" checked={wake} onChange={(event) => setWake(event.target.checked)} /> Automatically reply in this chat when the watch completes</label>
+        {wake ? <>
+          <label>Follow-up instruction<input name="followUp" placeholder="Summarize the result and suggest a next step" required maxLength={MONITOR_FOLLOW_UP_MAX} /></label>
+          <p className="monitor-watches-note">When this chat is idle, its model receives the completion facts and your instruction. The reply is saved here without switching chats or running tools.</p>
+        </> : <p className="monitor-watches-note">Without an automatic reply, results stay in Monitor.</p>}
         <button type="submit" className="activity-refresh monitor-watch-start" disabled={kind === 'mcp' && !snapshot?.connectors.length}>Start watch</button>
       </fieldset>
     </form>
@@ -109,12 +117,13 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
       : !snapshot ? <p role="status" className="monitor-watches-note">Loading watches…</p>
         : snapshot.watches.length === 0 ? <p className="monitor-watches-note">No watches for this session.</p>
           : <ul className="monitor-watch-list" aria-label="Session watches">
-            {snapshot.watches.map(({ id, source, state, result, expiresAt }) => {
-              const canStop = state === 'waiting' || state === 'backoff';
+            {snapshot.watches.map(({ id, source, state, result, expiresAt, wakeStatus }) => {
+              const canStop = state === 'waiting' || state === 'backoff' || wakeStatus === 'queued' || wakeStatus === 'answering';
+              const reply = wakeStatus && { queued: 'Reply queued', answering: 'Preparing reply', reported: 'Reply saved in chat', failed: 'Reply not saved' }[wakeStatus];
               const label = source.kind === 'github-actions' ? `${source.repo} · Run ${source.runId}` : `${source.connector} · Event ${source.eventId}`;
               return <li key={id} className="monitor-watch-row">
                 <div><strong>{label}</strong><small>{source.kind === 'github-actions' ? source.sha : `Revision ${source.revision}`}</small>
-                  <span>{stateLabels[state]}{result ? ` · ${result}` : ''}</span>
+                  <span>{stateLabels[state]}{result ? ` · ${result}` : ''}{reply ? ` · ${reply}` : ''}</span>
                   {canStop ? <small>Expires <time dateTime={new Date(expiresAt).toISOString()}>{new Date(expiresAt).toLocaleString()}</time></small> : null}
                 </div>
                 {canStop ? <button type="button" className="activity-refresh" aria-label={`Stop watch: ${label}`} disabled={busy}

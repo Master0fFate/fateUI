@@ -103,7 +103,9 @@ import { expandMultipleSkillCommands, parseCompactCommand, promoteInlineResource
 import { createPiExtensionUiBridge, emptyExtensionUiState, type ExtensionNoticeLevel, type PiExtensionUiBridge } from './PiExtensionUi';
 import { QuestionnaireCoordinator } from './QuestionnaireCoordinator';
 import { PiDesktopError, authRequiredError, normalizeError } from './errors';
-import { defaultSessionsRoot, isSafeSessionPath, persistHyp3rc0d3Session, PiSessionRepository, sessionDisplayTitle, type SessionSnapshot } from './PiSessionRepository';
+import { defaultSessionsRoot, isSafeSessionPath, persistHyp3rc0d3Session, PiSessionRepository, sessionDisplayTitle, type MonitorSessionFile, type SessionSnapshot } from './PiSessionRepository';
+import type { MonitorWakeFence, MonitorWatchTarget } from './DesktopMonitorWatches';
+import { MONITOR_REPLY_MAX, MONITOR_REPLY_SYSTEM_PROMPT, createMonitorModel, monitorReplyContent } from './monitor/MonitorReply';
 import { prepareFateProviderStorage } from './FateProviderStorage';
 import { ModelsDevService } from './modelsdev/ModelsDevService';
 import { ModelsDevStore } from './modelsdev/ModelsDevStore';
@@ -843,7 +845,7 @@ function toModelInfo(model: { provider: string; id: string; name: string; reason
 
 function toMessage(message: unknown, id: string, timelinePosition: number): RuntimeMessage | null {
   if (!message || typeof message !== 'object') return null;
-  const value = message as { role?: unknown; timestamp?: unknown; isError?: unknown; stopReason?: unknown; content?: unknown; display?: unknown };
+  const value = message as { role?: unknown; timestamp?: unknown; isError?: unknown; stopReason?: unknown; content?: unknown; display?: unknown; origin?: unknown };
   const role = value.role === 'user'
     ? 'user'
     : value.role === 'assistant'
@@ -853,7 +855,8 @@ function toMessage(message: unknown, id: string, timelinePosition: number): Runt
         : null;
   if (!role) return null;
   const timestamp = typeof value.timestamp === 'number' ? value.timestamp : 0;
-  const result: RuntimeMessage = { id, role, text: safeText(messageText(message)), timestamp, timelinePosition };
+  const result: RuntimeMessage = { id, role, text: safeText(messageText(message)), timestamp, timelinePosition,
+    ...(value.origin === 'monitor' ? { origin: 'monitor' } : {}) };
   if (Array.isArray(value.content)) {
     let reasoning = '';
     for (let index = 0; index < Math.min(value.content.length, MAX_MESSAGE_CONTENT_BLOCKS); index += 1) {
@@ -1177,7 +1180,10 @@ function sessionHistoryFromPersistedBranch(branch: readonly Record<string, unkno
   const projected: unknown[] = [];
   for (const entry of branch) {
     const timestamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
-    if (entry.type === 'message') {
+    const reply = monitorReplyContent(entry);
+    if (reply) {
+      projected.push({ role: 'assistant', origin: 'monitor', content: reply, timestamp: Number.isFinite(timestamp) ? timestamp : 0 });
+    } else if (entry.type === 'message') {
       const message = entry.message;
       projected.push(message && typeof message === 'object' && !('timestamp' in message)
         ? { ...(message as Record<string, unknown>), timestamp: Number.isFinite(timestamp) ? timestamp : 0 }
@@ -1227,7 +1233,10 @@ function sessionHistory(session: AgentSession): readonly unknown[] {
   } else {
     for (const entry of branch) {
       const timestamp = Date.parse(entry.timestamp);
-      if (entry.type === 'message') {
+      const reply = entry.type === 'custom' ? monitorReplyContent(entry) : undefined;
+      if (reply) {
+        projected.push({ role: 'assistant', origin: 'monitor', content: reply, timestamp: Number.isFinite(timestamp) ? timestamp : 0 });
+      } else if (entry.type === 'message') {
         const message: unknown = entry.message;
         projected.push(message && typeof message === 'object' && !('timestamp' in message)
           ? { ...(message as Record<string, unknown>), timestamp: Number.isFinite(timestamp) ? timestamp : 0 }
@@ -1401,6 +1410,7 @@ export class PiRuntimeService {
   private executionAdmissionGuard: () => void = () => undefined;
   private readonly pendingTitleGenerations = new Set<Promise<void>>();
   private readonly pendingModelOperations = new Set<Promise<unknown>>();
+  private readonly monitorBusyPrompts = new Map<string, number>();
   private readonly pendingPermissionChanges = new Set<Promise<void>>();
   private providerLoginResponse: { id: string; resolve: (value: string) => void; reject: (error: Error) => void; detachAbort?: () => void } | null = null;
   private providerLoginRuntimeInitialization: Promise<ModelRuntime> | null = null;
@@ -2340,6 +2350,23 @@ export class PiRuntimeService {
   }
 
   async prompt(input: PromptInput, skipCommandExpansion = false, preparedPrompt = false, replayedMessage?: QueuedMessageRecord,
+    assertAdmission?: () => void): Promise<PromptAcceptance> {
+    const sessionId = this.selectedSessionId;
+    const release = sessionId ? this.holdMonitorPrompt(sessionId) : undefined;
+    try { return await this.promptSelected(input, skipCommandExpansion, preparedPrompt, replayedMessage, assertAdmission); }
+    finally { release?.(); }
+  }
+
+  private holdMonitorPrompt(sessionId: string): () => void {
+    this.monitorBusyPrompts.set(sessionId, (this.monitorBusyPrompts.get(sessionId) ?? 0) + 1);
+    return () => {
+      const count = this.monitorBusyPrompts.get(sessionId) ?? 0;
+      if (count > 1) this.monitorBusyPrompts.set(sessionId, count - 1);
+      else this.monitorBusyPrompts.delete(sessionId);
+    };
+  }
+
+  private async promptSelected(input: PromptInput, skipCommandExpansion: boolean, preparedPrompt: boolean, replayedMessage: QueuedMessageRecord | undefined,
     assertAdmission?: () => void): Promise<PromptAcceptance> {
     if (this.hostStopping) throw new Error('The core is shutting down; prompts are closed.');
     if (!skipCommandExpansion && !preparedPrompt && !replayedMessage && /^\/reload$/iu.test(input.text.trim())) {
@@ -3935,9 +3962,119 @@ export class PiRuntimeService {
     settle(goal?.failure ? { ...outcome, error: goal.failure.message } : outcome);
   }
 
-  async hasMonitorWatchSession(sessionId: string): Promise<boolean> {
+  createMonitorWatchTarget(sessionId: string, workspaceHasQueuedWork: () => boolean): MonitorWatchTarget {
     const project = this.project;
-    if (!project?.trusted || this.hostStopping || !sessionId) return false;
+    const generation = this.initialization;
+    const modelRuntime = this.modelRuntime;
+    const selected = this.findLiveSlot(sessionId);
+    const cold = this.coldSession;
+    const coldModel = cold?.snapshot.summary.id === sessionId ? cold.model : null;
+    const model = selected?.runtime.session.model ?? (coldModel ? modelRuntime?.getModel(coldModel.provider, coldModel.id) : null);
+    const permission = selected?.permissionLevel ?? cold?.permissionLevel;
+    let original: MonitorSessionFile | undefined;
+    const target: MonitorWatchTarget = {
+      isSaved: async () => {
+        if (!project || this.project !== project || generation !== this.initialization) return false;
+        const file = await this.findMonitorWatchSession(sessionId);
+        if (!file) return false;
+        original ??= file;
+        return original.path === file.path && original.ino === file.ino && original.dev === file.dev;
+      },
+    };
+    if (!project?.trusted || !modelRuntime || !model || !permission) return target;
+    const scope = () => {
+      const live = this.findLiveSlot(sessionId);
+      const cold = this.coldSession?.snapshot.summary.id === sessionId ? this.coldSession : null;
+      return { live, cold, owner: live ?? cold };
+    };
+    const admit = (fence: MonitorWakeFence) => {
+      if (!fence.current() || fence.signal.aborted || this.hostStopping || this.project !== project || !project.trusted
+        || this.initialization !== generation || this.modelRuntime !== modelRuntime || !original
+        || !this.allowsRecoveredContinuation(sessionId)) throw new Error('Monitor reply admission changed.');
+      this.executionAdmissionGuard();
+      this.assertPermissionPublication();
+      const { owner } = scope();
+      if (owner) {
+        this.assertPermissionAdmission(owner);
+        if (owner.permissionLevel !== permission) throw new Error('Monitor chat permissions changed.');
+      }
+    };
+    const idle = () => !workspaceHasQueuedWork() && this.monitorSessionIdle(sessionId);
+    const ready = async (fence: MonitorWakeFence) => {
+      admit(fence);
+      if (!idle()) return false;
+      if (await this.permissionForColdSession(project.path, sessionId, fence.current) !== permission) throw new Error('Monitor chat permissions changed.');
+      await fence.revalidate();
+      admit(fence);
+      return idle();
+    };
+    target.answer = async ({ source, result, followUp }, fence, onStart) => {
+      if (!await ready(fence)) return null;
+      admit(fence);
+      if (!idle()) return null;
+      if (!this.models.some(({ provider, id }) => provider === model.provider && id === model.id)) throw new Error('Monitor chat model is unavailable.');
+      const signal = AbortSignal.any([fence.signal, AbortSignal.timeout(45_000)]);
+      const inference = await createMonitorModel(this.paths?.dataRoot, model, signal);
+      if (!await ready(fence)) return null;
+      signal.throwIfAborted();
+      admit(fence);
+      if (!idle()) return null;
+      onStart();
+      const response = await this.trackModelOperation(() => inference.runtime.completeSimple(inference.model, {
+        systemPrompt: MONITOR_REPLY_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: JSON.stringify({ source, result, followUp }), timestamp: Date.now() }],
+      }, { maxTokens: 640, timeoutMs: 45_000, maxRetries: 0, signal }));
+      signal.throwIfAborted();
+      if (response.stopReason !== 'stop' && response.stopReason !== 'length' && response.stopReason !== 'toolUse') throw new Error('Monitor inference was not completed.');
+      const text = response.content.flatMap((part) => part.type === 'text' ? [part.text] : []).join('').trim();
+      if (!text || text.length > MONITOR_REPLY_MAX) throw new Error('Monitor inference returned no usable text.');
+      return text;
+    };
+    target.report = async (id, text, fence, onCommit) => {
+      if (!await ready(fence)) return;
+      const commit = async (): Promise<void> => {
+        if (!await ready(fence)) return;
+        admit(fence);
+        if (!idle()) return;
+        const { live, cold } = scope();
+        this.sessionRepository.appendMonitorReply(project.path, sessionId, original!, live?.runtime.session.sessionManager, { id, text }, () => {
+          admit(fence);
+          if (!idle()) throw new Error('Monitor chat is no longer idle.');
+        });
+        onCommit();
+        if (live) live.modifiedAt = new Date().toISOString();
+        if (cold) {
+          const snapshot = await this.loadColdSession(project.path, cold.snapshot.summary).catch(() => null);
+          if (snapshot && this.coldSession === cold && this.project === project) cold.snapshot = snapshot;
+        }
+        if (this.project === project && this.initialization === generation) {
+          this.mergeLiveSessionSummaries();
+          this.emitState(this.selectedSessionId === sessionId);
+        }
+      };
+      const result = this.replacementQueue.then(commit);
+      this.replacementQueue = result.then(() => undefined, () => undefined);
+      return result;
+    };
+    return target;
+  }
+
+  private monitorSessionIdle(sessionId: string): boolean {
+    if (this.replacementActive || this.monitorBusyPrompts.has(sessionId) || this.hasOwnedAgentWork(sessionId)
+      || this.goalMax.hasRunnableGoal(sessionId) || (this.selectedSessionId === sessionId && this.promptOptimizationActive)) return false;
+    const slot = this.findLiveSlot(sessionId);
+    if (!slot) return true;
+    const session = slot.runtime.session;
+    return !this.sessionHasActiveWork(session) && slot.sessionTurnPhase === 'idle' && slot.activeRunId === null
+      && !slot.bindingPromise && !slot.queueMutationActive && !slot.compactionReleaseActive && !slot.compactionReleaseTimer
+      && !slot.startingQueuedMessage && slot.pendingDirectIntentIds.size === 0 && slot.queuedMessages.length === 0
+      && slot.heldCompactionMessages.length === 0 && slot.recentlyDequeued.length === 0 && slot.deferredChildMessages.length === 0
+      && (session.getSteeringMessages?.().length ?? 0) === 0 && (session.getFollowUpMessages?.().length ?? 0) === 0;
+  }
+
+  private async findMonitorWatchSession(sessionId: string): Promise<MonitorSessionFile | undefined> {
+    const project = this.project;
+    if (!project?.trusted || this.hostStopping || !sessionId) return;
     const generation = this.initialization;
     const isCurrent = () => this.project === project && project.trusted && this.initialization === generation && !this.hostStopping;
     try {
@@ -3945,27 +4082,25 @@ export class PiRuntimeService {
       const sessionPath = livePath ?? (await this.sessionRepository.resolve(project.path, sessionId))?.path;
       const root = path.resolve(this.paths?.sessionsRoot ?? defaultSessionsRoot());
       const directory = projectSessionDirectory(project.path, root);
-      if (!isCurrent() || !sessionPath || !isSafeSessionPath(root, sessionPath) || path.dirname(path.resolve(sessionPath)) !== directory) return false;
+      if (!isCurrent() || !sessionPath || !isSafeSessionPath(root, sessionPath) || path.dirname(path.resolve(sessionPath)) !== directory) return;
       const [canonicalRoot, canonicalDirectory, stat] = await Promise.all([fs.realpath(root), fs.realpath(directory), fs.lstat(sessionPath)]);
-      if (!isCurrent() || canonicalDirectory !== path.join(canonicalRoot, path.basename(directory)) || !stat.isFile() || stat.isSymbolicLink()) return false;
+      if (!isCurrent() || canonicalDirectory !== path.join(canonicalRoot, path.basename(directory)) || !stat.isFile() || stat.isSymbolicLink()) return;
       const sameFile = (current: typeof stat) => current.isFile() && !current.isSymbolicLink() && current.dev === stat.dev && current.ino === stat.ino;
       const handle = await fs.open(sessionPath, 'r');
       try {
-        if (!sameFile(await handle.stat())) return false;
+        if (!sameFile(await handle.stat())) return;
         const bytes = Buffer.alloc(64 * 1024);
         const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
         const end = bytes.subarray(0, bytesRead).indexOf(10);
-        if (end < 0) return false;
+        if (end < 0) return;
         const header = JSON.parse(bytes.subarray(0, end).toString('utf8')) as { type?: unknown; id?: unknown; cwd?: unknown } | null;
-        if (header?.type !== 'session' || header.id !== sessionId || !sessionProjectMatches(header.cwd, project.path)) return false;
+        if (header?.type !== 'session' || header.id !== sessionId || !sessionProjectMatches(header.cwd, project.path)) return;
       } finally {
         await handle.close();
       }
       const [current, canonicalFile] = await Promise.all([fs.lstat(sessionPath), fs.realpath(sessionPath)]);
-      return sameFile(current) && path.dirname(canonicalFile) === canonicalDirectory && isCurrent();
-    } catch {
-      return false;
-    }
+      if (sameFile(current) && path.dirname(canonicalFile) === canonicalDirectory && isCurrent()) return { path: sessionPath, dev: stat.dev, ino: stat.ino };
+    } catch { return undefined; }
   }
 
   async listSessions(query = ''): Promise<SessionSummary[]> {
