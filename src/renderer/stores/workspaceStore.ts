@@ -565,8 +565,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     try {
       const git = await getFateApi().getGitStatus();
       if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === gitStatusRequestSequence) {
-        set({ git, gitLoading: false });
-        if (selected && get().selectedChange === selected) await get().selectChange(selected, true);
+        const keepSelection = selected && get().selectedChange === selected;
+        if (keepSelection && (!git.repository || !git.truncated && !git.changes.some((change) => change.path === selected))) {
+          set({ git, gitLoading: false, selectedChange: null, diff: null, hunks: null, diffLoading: false });
+        } else {
+          set({ git, gitLoading: false });
+          if (keepSelection) await get().selectChange(selected, true);
+        }
       }
     } catch (error) {
       if (isCurrentGitGeneration(expectedProject, generation) && requestSequence === gitStatusRequestSequence) {
