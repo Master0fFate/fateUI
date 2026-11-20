@@ -1,6 +1,7 @@
 import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from './monacoRuntime';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
+import { fileLineCount, type DiffLineRange } from '../diffs/diffNoteModel';
 import CssWorker from 'monaco-editor/language/css/css.worker.js?worker';
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 import HtmlWorker from 'monaco-editor/language/html/html.worker.js?worker';
@@ -66,11 +67,28 @@ export function FileMonacoViewer({ value, language, path }: { value: string; lan
   );
 }
 
-export function DiffMonacoViewer({ original, modified, language, path }: { original: string; modified: string; language: string; path: string }) {
+export interface DiffViewerProps {
+  original: string;
+  modified: string;
+  language: string;
+  path: string;
+  review?: {
+    split: boolean;
+    mark: DiffLineRange | null;
+    revealMark: boolean;
+    requestRef: MutableRefObject<(() => void) | null>;
+    onRequest: (range: DiffLineRange | null) => void;
+  };
+}
+
+export function DiffMonacoViewer({ original, modified, language, path, review }: DiffViewerProps) {
   const { theme, fontFamily } = useMonacoAppearance();
   const viewerId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const requestRef = review?.requestRef;
+  const request = useRef(review?.onRequest);
+  useLayoutEffect(() => { request.current = review?.onRequest; }, [review?.onRequest]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -98,6 +116,42 @@ export function DiffMonacoViewer({ original, modified, language, path }: { origi
   }, [path, viewerId]);
 
   useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !requestRef) return;
+    const before = editor.getOriginalEditor();
+    const after = editor.getModifiedEditor();
+    const lineCounts = { original: fileLineCount(original), modified: fileLineCount(modified) };
+    let focused: DiffLineRange['side'] | null = before.hasTextFocus() ? 'original' : after.hasTextFocus() ? 'modified' : null;
+    let ready = false;
+    const addNote = (side: DiffLineRange['side'] | null) => {
+      const selection = side === 'original' ? before.getSelection() : side === 'modified' ? after.getSelection() : null;
+      if (!ready || !side || !selection) { request.current?.(null); return; }
+      const start = selection.startLineNumber;
+      const end = selection.endLineNumber - Number(selection.endLineNumber > start && selection.endColumn === 1);
+      const computed = (editor as typeof editor & { getDiffComputationResult?: () => { quitEarly: boolean } | null }).getDiffComputationResult?.();
+      const valid = computed?.quitEarly === false && end <= lineCounts[side] && editor.getLineChanges()?.some((change) => side === 'original'
+        ? start >= change.originalStartLineNumber && end <= change.originalEndLineNumber
+        : start >= change.modifiedStartLineNumber && end <= change.modifiedEndLineNumber);
+      request.current?.(valid ? { side, start, end } : null);
+    };
+    requestRef.current = () => addNote(focused);
+    const bindings = [editor.onDidUpdateDiff(() => { ready = true; })];
+    for (const [side, codeEditor] of [['original', before], ['modified', after]] as const) {
+      bindings.push(codeEditor.onDidFocusEditorText(() => { focused = side; }));
+      bindings.push(codeEditor.addAction({
+        id: 'fate.diff.localNote', label: 'Add or edit local note',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyN],
+        contextMenuGroupId: 'navigation',
+        run: () => addNote(side),
+      }));
+    }
+    return () => {
+      requestRef.current = null;
+      for (const binding of bindings) binding.dispose();
+    };
+  }, [requestRef, original, modified, path]);
+
+  useEffect(() => {
     const models = editorRef.current?.getModel();
     if (!models) return;
     // A same-path refresh updates live models without replacing or disposing them.
@@ -111,6 +165,28 @@ export function DiffMonacoViewer({ original, modified, language, path }: { origi
     monaco.editor.setTheme(theme);
     editorRef.current?.updateOptions({ fontFamily });
   }, [theme, fontFamily, path]);
+
+  useEffect(() => {
+    if (!requestRef) return;
+    const editor = editorRef.current;
+    editor?.updateOptions({ renderSideBySide: review?.split ?? false, useInlineViewWhenSpaceIsLimited: false, ignoreTrimWhitespace: false });
+    editor?.getOriginalEditor().updateOptions({ ariaLabel: 'Before diff editor' });
+    editor?.getModifiedEditor().updateOptions({ ariaLabel: 'After diff editor' });
+  }, [path, requestRef, review?.split]);
+
+  const mark = review?.mark;
+  useEffect(() => {
+    if (!mark) return;
+    const editor = editorRef.current;
+    const codeEditor = mark.side === 'original' ? editor?.getOriginalEditor() : editor?.getModifiedEditor();
+    if (!codeEditor || mark.end > (codeEditor.getModel()?.getLineCount() ?? 0)) return;
+    const decorations = codeEditor.createDecorationsCollection([{
+      range: new monaco.Range(mark.start, 1, mark.end, 1),
+      options: { isWholeLine: true, linesDecorationsClassName: 'diff-local-note-mark' },
+    }]);
+    if (review?.revealMark) codeEditor.revealLinesInCenterIfOutsideViewport(mark.start, mark.end);
+    return () => decorations.clear();
+  }, [mark, path, review?.revealMark, review?.split]);
 
   return <div ref={containerRef} style={{ height: '100%', width: '100%' }} />;
 }

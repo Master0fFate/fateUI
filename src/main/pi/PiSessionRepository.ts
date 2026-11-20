@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, writeFileSync } from 'node:fs';
 import { lstat, open, opendir, readdir, realpath, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
@@ -17,6 +17,13 @@ import { agentTeamSchema, type AgentTeam } from '../../shared/contracts/multiAge
 import { OversizedRecordFields, readSessionSnapshot, SessionSnapshotLimitError, type SnapshotRecord } from './SessionSnapshotReader';
 import { sessionProjectMatches } from './SessionProjectIdentity';
 import { HYP3RC0D3_CUSTOM_TYPE, hyp3rc0d3EntryEnabled } from './context/Hyp3rc0d3';
+import { MONITOR_REPLY_TYPE, monitorReplyContent } from './monitor/MonitorReply';
+
+export interface MonitorSessionFile {
+  path: string;
+  dev: number;
+  ino: number;
+}
 
 export interface SessionRepositorySource {
   /** `includeSearchText` is intentionally opt-in: normal sidebar loading must not scan every transcript. */
@@ -872,13 +879,14 @@ export class PiSessionRepository {
         const message = entry?.type === 'message' && isRecord(entry.message) ? entry.message : null;
         const displayedCustom = entry?.type === 'custom_message' && entry.display === true;
         const compaction = entry?.type === 'compaction';
-        if (message || displayedCustom || compaction) {
+        const monitorReply = entry && monitorReplyContent(entry);
+        if (message || displayedCustom || compaction || monitorReply) {
           const contentSource = message ?? entry!;
           const isTool = message?.role === 'toolResult';
-          const role = message?.role === 'user' || message?.role === 'assistant' ? message.role : 'system';
+          const role = monitorReply ? 'assistant' : message?.role === 'user' || message?.role === 'assistant' ? message.role : 'system';
           // Compaction summaries can include private context. Pi's timeline
           // shows only this fixed marker, so the history page does the same.
-          const content = compaction ? 'Context compacted' : messageText(contentSource);
+          const content = monitorReply || (compaction ? 'Context compacted' : messageText(contentSource));
           const encoded = Buffer.from(content, 'utf8');
           let limit = Math.min(4096, encoded.length);
           if (limit < encoded.length) while (limit > 0 && (encoded[limit]! & 0xc0) === 0x80) limit--;
@@ -948,6 +956,36 @@ export class PiSessionRepository {
       if (`${after.dev}:${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}` !== stamp) throw new Error('RESYNC_REQUIRED');
       return { items, nextOffset, stamp, oversizedItems, mediaOmitted };
     } finally { await handle.close(); }
+  }
+
+  appendMonitorReply(cwd: string, sessionId: string, file: MonitorSessionFile, live: SessionManager | undefined,
+    reply: { id: string; text: string }, assertCurrent: () => void): void {
+    const sessionPath = this.assertSafeSessionPaths([file.path])[0];
+    const directory = projectSessionDirectory(cwd, this.sessionsRoot);
+    if (!sessionPath || dirname(sessionPath) !== directory) throw new Error('Monitor chat path is unavailable.');
+    const assertFile = () => {
+      const stat = lstatSync(sessionPath);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.dev !== file.dev || stat.ino !== file.ino
+        || dirname(realpathSync(sessionPath)) !== join(realpathSync(this.sessionsRoot), basename(directory))) {
+        throw new Error('Monitor chat file changed.');
+      }
+      return stat;
+    };
+    if (!live) throw new Error('Open the original chat before saving a Monitor reply.');
+    assertCurrent();
+    assertFile();
+    const manager = live;
+    const header = manager.getHeader();
+    if (!manager.isPersisted() || manager.getSessionId() !== sessionId || !sessionProjectMatches(header?.cwd, cwd)
+      || !manager.getSessionFile() || resolve(manager.getSessionFile()!) !== sessionPath
+      || !manager.getEntries().some((entry) => entry.type === 'message' && (entry.message.role === 'user' || entry.message.role === 'assistant'))) {
+      throw new Error('Monitor chat is not a saved conversation.');
+    }
+    assertFile();
+    assertCurrent();
+    if (!manager.getEntries().some((entry) => entry.type === 'custom' && entry.customType === MONITOR_REPLY_TYPE
+      && isRecord(entry.data) && entry.data.id === reply.id)) manager.appendCustomEntry(MONITOR_REPLY_TYPE, reply);
+    this.invalidate(cwd);
   }
 
   async setHyp3rc0d3(cwd: string, sessionId: string, enabled: boolean, assertCurrent: () => void = () => undefined): Promise<void> {

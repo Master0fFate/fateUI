@@ -23,6 +23,8 @@ import { googleClientInputSchema, googleConnectInputSchema, googleStatusSchema }
 import { McpConfigService } from '../pi/McpConfigService';
 import { McpService } from '../pi/McpService';
 import { PiMigrationService } from '../pi/PiMigrationService';
+import type { DesktopMonitorWatches } from '../pi/DesktopMonitorWatches';
+import { monitorWatchRequestSchema, monitorWatchScopeSchema, monitorWatchStopSchema } from '../../shared/contracts/monitorWatches';
 import packageManifest from '../../../package.json';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -58,6 +60,7 @@ import {
   mcpServerListSchema,
   mcpProbeInputSchema,
   mcpProbeResultSchema,
+  monitorWatchesSnapshotSchema,
   piMigrationReportSchema,
   piMigrationResultSchema,
   musicClearResultSchema,
@@ -142,10 +145,13 @@ import { enabledModelIdentity } from '../../shared/modelVisibility';
 import { encodedImageSize, MAX_PROMPT_IMAGE_BYTES, MAX_PROMPT_IMAGE_DIMENSION, MAX_PROMPT_IMAGE_TOTAL_PIXELS } from '../pi/PiPromptImages';
 import type { FilesystemService } from '../files/FilesystemService';
 import type { GitService } from '../git/GitService';
+import { readPullRequestReview } from '../git/PullRequestReview';
+import { pullRequestReviewChannels, pullRequestReviewInputSchema, pullRequestReviewStatusSchema } from '../../shared/contracts/pullRequestReview';
 import type { PiRuntimeService } from '../pi/PiRuntimeService';
 import type { ProjectActivation, ProjectService } from '../projects/ProjectService';
 import type { SettingsService } from '../settings/SettingsService';
 import { registerSkinIpc } from '../settings/registerSkinIpc';
+import { registerWordReviewIpc } from './wordReviewIpc';
 import type { TerminalService } from '../terminal/TerminalService';
 import type { AppLogService } from '../logging/AppLogService';
 import type { MusicService } from '../music/MusicService';
@@ -224,6 +230,7 @@ export interface IpcServices {
   runtime: PiRuntimeService;
   /** The sole factory-owned Pi runtime. Tests may keep the legacy injected runtime. */
   core?: FateCore;
+  monitorCore?: FateCore;
   /** Sole process-wide command target. Remote failure never selects the legacy host. */
   connections?: DesktopConnectionRouter;
   connectionEditor?: ConnectionProfileEditor;
@@ -234,6 +241,7 @@ export interface IpcServices {
   learning?: LearningService;
   agents?: AgentsService;
   google?: GoogleAccount;
+  monitorWatches?: DesktopMonitorWatches;
   terminal: TerminalService;
   logs: AppLogService;
   music: Pick<MusicService, 'getStatus' | 'load' | 'resolveTrack' | 'clearQueue' | 'reset' | 'setDurationSink'>;
@@ -529,7 +537,7 @@ async function applyPendingRecovery(
   await recovery?.markClean();
 }
 
-export function registerIpc({ runtime, core, connections, connectionEditor, projects, files, git, settings, learning, agents, google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
+export function registerIpc({ runtime, core, monitorCore, connections, connectionEditor, projects, files, git, settings, learning, agents, google, monitorWatches, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser, attestations, checkpoints, newWindow, rendererPolicy }: IpcServices) {
   const sessionHandlers = createSessionHandlers(runtime);
   const runtimeHandlers = createRuntimeHandlers(runtime, (projectPath) => projects.prepareSessionListPath(projectPath));
   const goalHandlers = createGoalHandlers(runtime);
@@ -664,12 +672,12 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
   }
   const activationGate = createProjectActivationGate();
   const coreAdapters = new WeakMap<Electron.WebContents, CoreIpcAdapter>();
-  const coreAdapter = (event: Electron.IpcMainInvokeEvent): ReturnType<CoreIpcAdapter['forInvocation']> => {
-    if (!core?.workspaces) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'The desktop workspace registry is unavailable.', retryable: true });
+  const coreAdapter = (event: Electron.IpcMainInvokeEvent, target = core): ReturnType<CoreIpcAdapter['forInvocation']> => {
+    if (!target?.workspaces) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'The desktop workspace registry is unavailable.', retryable: true });
     const sender = event.sender;
     let adapter = coreAdapters.get(sender);
     if (!adapter) {
-      adapter = new CoreIpcAdapter(core.runtime, core.workspaces, () => {
+      adapter = new CoreIpcAdapter(target.runtime, target.workspaces, () => {
         const owner = BrowserWindow.fromWebContents(sender);
         return !sender.isDestroyed() && !!owner && !owner.isDestroyed() && !!sender.mainFrame
           && isTrustedRendererUrl(sender.mainFrame.url, rendererPolicy);
@@ -1048,6 +1056,21 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     historyPageSchema.parse(runtime.loadHistoryPage(historyPageInputSchema.parse(input))));
   handle(ipcChannels.runtimeMonitorDashboard, (event, input) => core
     ? coreAdapter(event).monitor(input) : agentHandlers.desktopMonitor(input));
+  const watchService = () => {
+    if (!monitorWatches) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Monitor watches are unavailable.', retryable: false });
+    return monitorWatches;
+  };
+  handle(ipcChannels.runtimeMonitorWatches, (event, input) => coreAdapter(event, core ?? monitorCore).monitorSession(monitorWatchScopeSchema.parse(input),
+    async (root, sessionId) => monitorWatchesSnapshotSchema.parse(await watchService().snapshot(root, sessionId))));
+  handle(ipcChannels.runtimeMonitorWatchStart, (event, input) => {
+    const request = monitorWatchRequestSchema.parse(input);
+    return coreAdapter(event, core ?? monitorCore).monitorSession(request, (workspaceRoot, sessionId, current) =>
+      watchService().start({ ...request, workspaceRoot, sessionId }, current));
+  });
+  handle(ipcChannels.runtimeMonitorWatchStop, (event, input) => {
+    const request = monitorWatchStopSchema.parse(input);
+    return coreAdapter(event, core ?? monitorCore).monitorSession(request, (root, sessionId) => watchService().stop(root, sessionId, request.id));
+  });
   handle(ipcChannels.runtimePrompt, async (event, input) => runRuntimeMutation('sending a prompt', () => core
     ? coreAdapter(event).prompt(input) : runtimeHandlers.prompt(input)));
   handle(ipcChannels.runtimeOptimizePrompt, async (_event, input) => runRuntimeMutation('improving a prompt', async () => {
@@ -1211,6 +1234,15 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
   });
   const desktopFiles = createFileHandlers(files);
   const desktopGit = createGitHandlers(git);
+  registerWordReviewIpc(handle, () => settings.getStoragePath(), async (event, run) => {
+    const documentIsCurrent = invocationGuards.get(event) ?? (() => false);
+    const generation = connections?.state.generation;
+    const current = () => documentIsCurrent() && (!connections || connections.isLocal && connections.state.generation === generation);
+    if (!current()) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Word review is only available for the local desktop project.', retryable: false });
+    return core
+      ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => run(workspace.files, current, { workspace, authorize }))
+      : run(files, current);
+  });
   handle(ipcChannels.filesList, (event, input) => core
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedFileHandlers(workspace, authorize).list(input)) : desktopFiles.list(input));
   handle(ipcChannels.filesSearch, (event, input) => core
@@ -1260,6 +1292,28 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedGitHandlers(workspace, authorize).status(input)) : desktopGit.status(input));
   handle(ipcChannels.gitDiff, (event, input) => core
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedGitHandlers(workspace, authorize).diff(input)) : desktopGit.diff(input));
+  handle(pullRequestReviewChannels.status, async (event, input) => {
+    const { projectPath, head, branch } = pullRequestReviewInputSchema.parse(input);
+    const documentIsCurrent = invocationGuards.get(event) ?? (() => false);
+    const generation = connections?.state.generation;
+    const targetIsCurrent = () => {
+      const project = runtime.getState(false).project;
+      return documentIsCurrent() && (connections === undefined || connections.isLocal && connections.state.generation === generation)
+        && project?.trusted === true && project.path === projectPath;
+    };
+    const review = async (root: string | null, current: () => boolean) => pullRequestReviewStatusSchema.parse(
+      root === projectPath && current() ? await readPullRequestReview(root, head, branch, current) : { kind: 'unavailable', head, reason: 'head-changed' });
+    if (!targetIsCurrent()) return review(null, targetIsCurrent);
+    if (core?.workspaces) {
+      return coreAdapter(event).scoped(async ({ handle: workspace, live }) => {
+        await workspace.files.assertBoundRootIdentity();
+        const status = await review(workspace.root, () => live() && targetIsCurrent());
+        await workspace.files.assertBoundRootIdentity();
+        return status;
+      });
+    }
+    return review(files.getRootOrNull(), () => targetIsCurrent() && files.getRootOrNull() === projectPath);
+  });
   handle(ipcChannels.gitCombinedDiff, (event, input) => core
     ? coreAdapter(event).scoped(({ handle: workspace, authorize }) => createScopedGitHandlers(workspace, authorize).desktopCombinedDiff(input)) : desktopGit.combinedDiff(input));
   handle(ipcChannels.gitWorktrees, (event, input) => core
@@ -1425,10 +1479,79 @@ export function registerIpc({ runtime, core, connections, connectionEditor, proj
     emptyInputSchema.parse(input);
     return mcpServerListSchema.parse(await mcpConfig.list());
   });
-  handle(ipcChannels.mcpSet, async (_event, input) => mcpServerListSchema.parse(await mcpConfig.save(mcpServerListSchema.parse(input))));
-  handle(ipcChannels.mcpProbe, async (_event, input) => {
+  const mcpInvocation = (event: Electron.IpcMainInvokeEvent) => {
+    const documentIsCurrent = invocationGuards.get(event);
+    const generation = connections?.state.generation;
+    const isCurrent = () => documentIsCurrent?.() === true
+      && (!connections || connections.isLocal && connections.state.generation === generation);
+    const assertCurrent = () => {
+      if (!isCurrent()) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The initiating window or local connection changed. Try again from Settings.', retryable: true });
+    };
+    assertCurrent();
+    return { isCurrent, assertCurrent };
+  };
+  let mcpSaveInProgress = false;
+  handle(ipcChannels.mcpSet, async (event, input) => {
+    const servers = mcpServerListSchema.parse(input);
+    const { assertCurrent } = mcpInvocation(event);
+    if (mcpSaveInProgress) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'An MCP settings save is already in progress.', retryable: true });
+    mcpSaveInProgress = true;
+    try {
+      const existing = await mcpConfig.list();
+      assertCurrent();
+      const approvals = servers.flatMap((server) => {
+        if (server.transport !== 'stdio' || !server.enabled) return [];
+        const previous = existing.find((item) => item.name === server.name);
+        if (previous?.transport === 'stdio' && previous.enabled && previous.command === server.command
+          && JSON.stringify(previous.args) === JSON.stringify(server.args)) return [];
+        const exact = JSON.stringify([server.command, ...server.args]).replace(/[^\x20-\x7e]|[&<>']/g,
+          (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+        if (exact.length > 960) {
+          throw new PiDesktopError({ code: 'INVALID_REQUEST', message: `Local MCP server ${server.name} has a command or arguments too long for native approval. Shorten them or save the server disabled.`, retryable: false });
+        }
+        return [{ name: server.name, exact: exact.match(/.{1,64}/g)!.join('\n') }];
+      });
+      for (const { name, exact } of approvals) {
+        assertCurrent();
+        const result = await dialog.showMessageBox(ownerWindow(event), {
+          type: 'warning',
+          title: 'Enable local MCP server',
+          message: `Allow ${name} to run a local command?`,
+          detail: `Fate may run this command as you, without asking again. Enable it only if you trust the command and its arguments.\n\nJSON list (command first, then arguments; line breaks are display wrapping):\n${exact}`,
+          buttons: ['Cancel', 'Enable local server'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        assertCurrent();
+        if (result.response !== 1) {
+          throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'Local MCP approval was canceled. No MCP settings were saved.', retryable: false });
+        }
+      }
+      const saved = await mcpConfig.update((current) => {
+        assertCurrent();
+        if (JSON.stringify(current) !== JSON.stringify(existing)) {
+          throw new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The saved MCP settings changed. Reopen Settings and review the current list before saving again.', retryable: true });
+        }
+        return servers;
+      }, assertCurrent);
+      monitorWatches?.recheckConnectors(saved);
+      return saved;
+    } finally {
+      mcpSaveInProgress = false;
+    }
+  });
+  handle(ipcChannels.mcpProbe, async (event, input) => {
     const { name } = mcpProbeInputSchema.parse(input);
-    const tools = await new McpService(await mcpConfig.list(), () => true).probe(name);
+    const { isCurrent, assertCurrent } = mcpInvocation(event);
+    const probe = await mcpConfig.withCurrent((servers) => {
+      assertCurrent();
+      const server = servers.find((item) => item.name === name && item.enabled);
+      if (!server) throw new PiDesktopError({ code: 'INVALID_REQUEST', message: `MCP server ${name} is not enabled. Check Settings > MCP.`, retryable: false });
+      return { tools: new McpService([server], isCurrent).probe(name) };
+    });
+    const tools = await probe.tools;
+    assertCurrent();
     return mcpProbeResultSchema.parse({ tools });
   });
   const googleAccount = () => {

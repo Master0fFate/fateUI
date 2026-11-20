@@ -58,7 +58,9 @@ import {
   checkpointRestoreRequestSchema,
   checkpointRestoreResultSchema,
 } from '../shared/contracts/mutationAttestation';
+import { wordReviewChannels, wordReviewReadInputSchema, wordReviewSaveNoteInputSchema, wordReviewSaveNoteResultSchema, wordReviewViewSchema } from '../shared/contracts/wordReview';
 import { invoke, subscribe, ignoreResult, discardResult } from './transport';
+import { pullRequestReviewChannels, pullRequestReviewInputSchema, pullRequestReviewStatusSchema } from '../shared/contracts/pullRequestReview';
 
 export const workspaceApi = {
   selectProject: () => invoke(ipcChannels.projectSelect, emptyInputSchema, runtimeStateSchema),
@@ -76,10 +78,13 @@ export const workspaceApi = {
   listFiles: (path = '') => invoke(ipcChannels.filesList, fileListInputSchema, fileListSchema, { path }),
   searchFiles: (query, limit = 300) => invoke(ipcChannels.filesSearch, fileSearchInputSchema, fileSearchResultSchema, { query, limit }),
   readFile: (path) => invoke(ipcChannels.filesRead, filePathInputSchema, filePreviewSchema, { path }),
+  readWordReview: (input) => invoke(wordReviewChannels.read, wordReviewReadInputSchema, wordReviewViewSchema, input),
+  saveWordReviewNote: (input) => invoke(wordReviewChannels.saveNote, wordReviewSaveNoteInputSchema, wordReviewSaveNoteResultSchema, input),
   revealFileLink: (path) => invoke(ipcChannels.filesRevealLink, filePathInputSchema, openFileResultSchema, { path }),
   showFileLinkContextMenu: async (path) => (await invoke(ipcChannels.filesShowLinkContextMenu, filePathInputSchema, openFileResultSchema, { path })).opened,
   openFile: (path) => invoke(ipcChannels.filesOpen, filePathInputSchema, openFileResultSchema, { path }),
   getGitStatus: () => invoke(ipcChannels.gitStatus, emptyInputSchema, gitStatusSchema),
+  getPullRequestStatus: (projectPath, head, branch) => invoke(pullRequestReviewChannels.status, pullRequestReviewInputSchema, pullRequestReviewStatusSchema, { projectPath, head, branch }),
   getGitDiff: (path) => invoke(ipcChannels.gitDiff, filePathInputSchema, gitDiffSchema, { path }),
   getGitCombinedDiff: () => invoke(ipcChannels.gitCombinedDiff, emptyInputSchema, gitCombinedDiffSchema),
   listGitWorktrees: () => invoke(ipcChannels.gitWorktrees, emptyInputSchema, gitWorktreeListSchema),

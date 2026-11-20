@@ -5,7 +5,8 @@ import { monitorItemSchema, type MonitorDashboard, type MonitorItem } from '../.
 import type { NetworkMonitor } from '../../../shared/protocol/diagnostics';
 import type { WebWorkspace } from '../../../client/WebFateApi';
 import { currentNetworkScope, useRuntimeStore, type ReadView } from '../../stores/runtimeStore';
-import { getFateApiOptional, getWebApiOptional, hasCapability } from '../../platform/api';
+import { getFateApiOptional, getMonitorWatchesApiOptional, getWebApiOptional, hasCapability } from '../../platform/api';
+import { MonitorWatchesPanel } from './MonitorWatchesPanel';
 import { unavailableExplanation } from '../../platform/capabilityPolicy';
 import { useUiStore } from '../../stores/uiStore';
 import { openAgentNotice } from '../../stores/agentsStore';
@@ -29,8 +30,10 @@ function DetailLink({ item }: { item: MonitorItem }) {
 export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & { readonly sessionId: string; readonly selectionRevision: number } } = {}) {
   const project = useRuntimeStore((state) => state.runtime.project);
   const desktopSessionId = useRuntimeStore((state) => state.runtime.sessionId);
+  const source = useRuntimeStore((state) => state.source);
   const sessionId = webScope?.sessionId ?? desktopSessionId;
   const [section, setSection] = useState<typeof SECTIONS[number]>('overview');
+  const [watchTab, setWatchTab] = useState(false);
   const [offset, setOffset] = useState(0);
   const [dashboard, setDashboard] = useState<MonitorDashboard | NetworkMonitor | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +54,8 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
   useEffect(() => () => { detailRequest.current++; }, []);
   const web = getWebApiOptional();
   const supported = webScope ? web?.supports('workspace.monitor') === true : hasCapability('monitor');
+  const watches = !webScope && source === 'desktop' && !web ? getMonitorWatchesApiOptional() : undefined;
+  const showWatches = watchTab && !!watches;
 
   useEffect(() => {
     setDashboard(null);
@@ -60,7 +65,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
 
   useEffect(() => {
     const api = getFateApiOptional();
-    if (!supported || !sessionId || (webScope ? !web : !project?.trusted || !api?.getMonitorDashboard)) return undefined;
+    if (showWatches || !supported || !sessionId || (webScope ? !web : !project?.trusted || !api?.getMonitorDashboard)) return undefined;
     let active = true;
     let busy = false;
     let revision: string | undefined;
@@ -78,17 +83,22 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
           || next.selectionRevision !== webScope.selectionRevision)) return;
         if (!webScope && (!('projectPath' in next) || !('sessionId' in next)
           || next.projectPath !== project?.path || next.sessionId !== sessionId)) return;
-        setDashboard((previous) => next.unchanged && previous?.revision === next.revision && previous.section === section && previous.offset === offset
-          ? { ...previous, checkedAt: next.checkedAt, overall: next.overall, sources: next.sources, sourceCheckedAt: next.sourceCheckedAt, counts: next.counts } : next);
-        revision = next.revision;
+        if (next.section !== section || next.offset !== offset) return;
         setError(null);
-      } catch (reason) {
+        const lastOffset = Math.floor(Math.max(0, next.total - 1) / PAGE_SIZE) * PAGE_SIZE;
+        if (offset > lastOffset) {
+          supersedeDetail();
+          setDashboard(null);
+          setOffset((value) => value === offset ? lastOffset : value);
+          return;
+        }
+        setDashboard((previous) => next.unchanged && previous?.revision === next.revision && previous.section === section && previous.offset === offset
+          ? { ...previous, checkedAt: next.checkedAt, overall: next.overall, sources: next.sources, sourceCheckedAt: next.sourceCheckedAt, counts: next.counts, total: next.total } : next);
+        revision = next.revision;
+      } catch {
         if (active) {
           if (webScope) setDashboard(null);
-          // Network failures can contain host/provider text. Do not print an
-          // arbitrary exception in the browser Monitor, even on a read error.
-          setError(webScope ? 'Monitor unavailable. Refresh the workspace and try again.'
-            : reason instanceof Error ? reason.message : 'Dashboard unavailable.');
+          setError(webScope ? 'Monitor unavailable. Refresh the workspace and try again.' : 'Dashboard unavailable. Refresh to try again.');
         }
       } finally { busy = false; }
     };
@@ -96,7 +106,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
     const timer = setInterval(() => { if (!document.hidden) void read(); }, 15_000);
     return () => { active = false; clearInterval(timer); };
   }, [supported, project?.path, project?.trusted, sessionId, webScope?.workspaceId, webScope?.workspaceGeneration,
-    webScope?.selectionRevision, section, offset, refresh]);
+    webScope?.selectionRevision, section, offset, refresh, showWatches, supersedeDetail]);
 
   const readDetail = async (id: string) => {
     const request = supersedeDetail();
@@ -160,7 +170,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
   if (!sessionId || (!webScope && !project?.trusted)) return <div className="monitor-dashboard monitor-panel monitor-dashboard--empty">
     <div className="inspector-empty"><LayoutDashboard size={22} aria-hidden="true" /><strong>Nothing to monitor</strong><p>Open a trusted project and session.</p></div>
   </div>;
-  const shown = dashboard && dashboard.section === section && dashboard.offset === offset
+  const shown = !showWatches && dashboard && dashboard.section === section && dashboard.offset === offset
     && (webScope ? !('projectPath' in dashboard) && dashboard.sessionId === webScope.sessionId
       && dashboard.selectionRevision === webScope.selectionRevision
       : 'projectPath' in dashboard && dashboard.projectPath === project?.path && dashboard.sessionId === sessionId)
@@ -178,9 +188,14 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
         <button type="button" className="activity-refresh" onClick={() => { supersedeDetail(); setRefresh((value) => value + 1); }}><RefreshCw size={10} aria-hidden="true" />Refresh</button>
       </header>
       <nav className="monitor-dashboard-sections activity-filters" aria-label="Dashboard sections">
-        {SECTIONS.map((name) => <button key={name} type="button" className="activity-chip" aria-current={section === name ? 'page' : undefined}
-          onClick={() => { supersedeDetail(); setSection(name); setOffset(0); }}>{SECTION_LABELS[name]}{name !== 'overview' && shown ? <>{' '}<span className="monitor-dashboard-count">{shown.counts[name]}</span></> : null}</button>)}
+        {SECTIONS.map((name) => <button key={name} type="button" className="activity-chip" aria-current={!showWatches && section === name ? 'page' : undefined}
+          onClick={() => { supersedeDetail(); setWatchTab(false); setSection(name); setOffset(0); }}>{SECTION_LABELS[name]}{name !== 'overview' && shown ? <>{' '}<span className="monitor-dashboard-count">{shown.counts[name]}</span></> : null}</button>)}
+        {watches ? <button type="button" className="activity-chip" aria-current={showWatches ? 'page' : undefined}
+          onClick={() => { supersedeDetail(); setWatchTab(true); }}>Watches</button> : null}
       </nav>
+      {showWatches && watches && project ? <div className="monitor-dashboard-body">
+        <MonitorWatchesPanel key={JSON.stringify([project.path, sessionId])} api={watches} workspaceRoot={project.path} sessionId={sessionId} refresh={refresh} />
+      </div> : <>
       {unknownSources.length > 0 ? <p className="monitor-dashboard-unknown activity-bounded"><TriangleAlert size={11} aria-hidden="true" /><span>Unavailable: {unknownSources.join(', ')}</span></p> : null}
       {shown?.sources.runs === 'partial' ? <p className="monitor-dashboard-unknown activity-bounded"><TriangleAlert size={11} aria-hidden="true" /><span>Runs: latest 1,000 only.</span></p> : null}
       {error ? <p role="alert" className="monitor-dashboard-error activity-status activity-status--error">{error}</p> : null}
@@ -231,6 +246,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
           `${name} ${shown.sourceCheckedAt[name] === null ? '—' : clock(shown.sourceCheckedAt[name]!)}`).join(' · ')}>
         <time dateTime={new Date(shown.checkedAt).toISOString()}>Checked {clock(shown.checkedAt)}</time>
       </footer> : null}
+      </>}
     </section>
   );
 }

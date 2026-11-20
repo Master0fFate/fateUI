@@ -17,7 +17,9 @@ import { desktopHostCapabilities, supportsHostOperation, type HostCapabilities }
 const senderError = () => new PiDesktopError({ code: 'INVALID_REQUEST', message: 'IPC is restricted to the application main frame.', retryable: false });
 const changedError = () => new PiDesktopError({ code: 'INVALID_REQUEST', message: 'The project or session changed during the operation.', retryable: true });
 
-type DesktopOwner = Pick<MultiProjectPiRuntime, 'asRouter' | 'peekWorkspace' | 'workspaceOrigin' | 'workspaceSelectionRevision'>;
+type DesktopOwner = Pick<MultiProjectPiRuntime, 'asRouter' | 'peekWorkspace' | 'workspaceOrigin' | 'workspaceSelectionRevision'>
+  & Partial<Pick<MultiProjectPiRuntime, 'onFocusChanged'>>;
+type MonitorWork<T> = (workspaceRoot: string, sessionId: string, current: () => boolean) => T | Promise<T>;
 type DesktopRegistry = Pick<WorkspaceRegistry, 'registerHostPath' | 'resolve'>;
 type Captured = {
   readonly identity: RequestContext;
@@ -46,6 +48,7 @@ export class CoreIpcAdapter {
     return {
       scoped: <T>(work: (captured: Captured) => T | Promise<T>) => this.scoped(work, guard),
       monitor: (input: unknown) => this.monitor(input, guard),
+      monitorSession: <T>(scope: { workspaceRoot: string; sessionId: string }, work: MonitorWork<T>) => this.monitorSession(scope, work, guard),
       abort: (input: unknown) => this.abort(input, guard),
       prompt: (input: unknown) => this.prompt(input, guard),
       select: (input: unknown) => this.select(input, guard),
@@ -135,6 +138,34 @@ export class CoreIpcAdapter {
         || result.projectPath !== handle.root || result.sessionId !== command.expectedSessionId) throw changedError();
       return result;
     }, senderGuard);
+  }
+
+  private async monitorSession<T>(scope: { workspaceRoot: string; sessionId: string }, work: MonitorWork<T>, senderGuard: () => boolean): Promise<T> {
+    if (!this.localTarget() || !senderGuard()) throw senderError();
+    if (this.hostCapabilities !== desktopHostCapabilities) throw new ProtocolFault('UNSUPPORTED_CAPABILITY');
+    const initial = this.runtime.asRouter().getState(false);
+    if (!initial.project?.trusted || initial.project.path !== scope.workspaceRoot || initial.sessionId !== scope.sessionId) throw changedError();
+    const root = initial.project.path;
+    const revision = this.runtime.workspaceSelectionRevision(root);
+    if (revision === null || !this.runtime.peekWorkspace(root)) throw changedError();
+    let focusChanged = false;
+    const unsubscribe = this.runtime.onFocusChanged?.(() => { focusChanged = true; });
+    const stillDisplayed = () => !focusChanged && this.runtime.workspaceSelectionRevision(root) === revision;
+    try {
+      return await this.scoped(async ({ handle, command, live }) => {
+        const sessionId = command.expectedSessionId;
+        if (root !== handle.root || !sessionId || sessionId !== initial.sessionId) throw changedError();
+        const current = () => {
+          if (!live() || !stillDisplayed() || this.runtime.asRouter().getState(false).sessionId !== sessionId) return false;
+          const selection = handle.admission.snapshot();
+          return selection.selectedSessionId === sessionId && selection.selectionRevision === command.selectionRevision;
+        };
+        if (!current()) throw changedError();
+        const result = await work(handle.root, sessionId, current);
+        if (!current()) throw changedError();
+        return result;
+      }, () => senderGuard() && stillDisplayed());
+    } finally { unsubscribe?.(); }
   }
 
   /** The three portable mutations use one dispatcher; rich desktop-only inputs use scoped handlers. */

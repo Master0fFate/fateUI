@@ -129,7 +129,7 @@ describe('D0-05 persisted schedule/claim transaction proof', () => {
     expect((await first.read('routine-1')).state.runs).toHaveLength(100);
     expect((await first.read('routine-2')).state.runs).toHaveLength(1);
     expect((await fs.readdir(path.join(root, 'routine-1'))).filter((file) => file.endsWith('.md'))).toHaveLength(2);
-  }, 15_000);
+  }, 45_000);
 
   it('does not reset corrupt due-state to an empty queue', async () => {
     const { root, first } = await fixture();

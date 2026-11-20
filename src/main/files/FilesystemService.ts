@@ -1,8 +1,9 @@
 import { UnsupportedHostCapabilityError, type HostFileReference, type LocalFileActionsPort } from '../../core/ports';
-import { promises as fs, type Dirent } from 'node:fs';
+import { constants, promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FileEntry, FileList, FilePreview, RuntimeImage } from '../../shared/contracts/ipc';
+import { isWordReviewPath, MAX_WORD_ARCHIVE_BYTES } from '../../shared/contracts/wordReview';
 import { PiDesktopError } from '../pi/errors';
 import { encodedImageSize, MAX_PROMPT_IMAGE_BYTES, MAX_PROMPT_IMAGE_DIMENSION, MAX_PROMPT_IMAGE_TOTAL_PIXELS } from '../pi/PiPromptImages';
 
@@ -788,6 +789,47 @@ export class FilesystemService {
       await this.assertOpenedFileConfined(relativePath, identity);
       this.assertRootOperation(operation);
       return preview;
+    } finally {
+      await handle.close();
+    }
+  }
+
+  captureWordReviewScope(): () => void {
+    const operation = this.rootOperation();
+    return () => this.assertRootOperation(operation);
+  }
+
+  async readWordReviewSource(relativePath: string): Promise<{ bytes: Buffer; canonicalPath: string }> {
+    const operation = this.rootOperation();
+    if (!isWordReviewPath(relativePath)) invalidPath('Select a .docx file to review.');
+    const absolute = await this.resolvePath(relativePath);
+    this.assertRootOperation(operation);
+    if (!isWordReviewPath(absolute)) invalidPath('Select a .docx file to review.');
+    const handle = await fs.open(absolute, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const stat = await handle.stat({ bigint: true });
+      if (!stat.isFile()) invalidPath('The requested path is not a file.');
+      if (stat.size > MAX_WORD_ARCHIVE_BYTES) invalidPath('Word preview is limited to .docx files of 16 MiB or less.');
+      await this.assertOpenedFileConfined(relativePath, stat);
+      this.assertRootOperation(operation);
+      const size = Number(stat.size);
+      const bytes = Buffer.alloc(size + 1);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+        this.assertRootOperation(operation);
+      }
+      const finalStat = await handle.stat({ bigint: true });
+      const canonicalPath = await this.resolvePath(relativePath);
+      await this.assertOpenedFileConfined(relativePath, stat);
+      this.assertRootOperation(operation);
+      if (canonicalPath !== absolute || offset !== size || finalStat.size !== stat.size
+        || finalStat.mtimeNs !== stat.mtimeNs || finalStat.ctimeNs !== stat.ctimeNs) {
+        invalidPath('The Word document changed while being read. Reopen it to review the current revision.');
+      }
+      return { bytes: bytes.subarray(0, size), canonicalPath };
     } finally {
       await handle.close();
     }

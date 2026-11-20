@@ -2855,6 +2855,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         onKeyboardAction={() => void submit(runtime.streaming || runtime.activeSessionRunning ? 'followUp' : 'prompt')}
       >
         {({ input, sendAction }) => <>
+        {optimizingPrompt && <span className="composer-prompt-beam" aria-hidden="true" />}
         <AppTooltip content={'Drag upward to enlarge the message input\nUse ↑ or ↓ while focused'}>
           <div
             className="composer-resize-handle"

@@ -163,6 +163,16 @@ function execute(root: string, args: string[], maxBuffer = MAX_GIT_OUTPUT, addit
 
 export { execute as executeGitInWorktree };
 
+export async function readGitReviewHead(root: string): Promise<string | null> {
+  try {
+    const head = (await execute(root, ['--no-replace-objects', 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], 1_024)).toString('utf8').trim();
+    return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(head) ? head : null;
+  } catch (error) {
+    if ((error as ExecFailure).code === 1) return null;
+    throw error;
+  }
+}
+
 let resolvedSshExecutable: string | null | undefined;
 
 function trustedSshExecutable(): string | null {
@@ -823,10 +833,13 @@ export class GitService {
   private async readStatus(root: string): Promise<GitStatus> {
     let statusOutput: string;
     let filterConfig: string[];
+    let head: string | null;
     try {
       await validateSelectedRoot(root);
-      filterConfig = (await Promise.all([inheritedLineEndingConfig(root), safeFilterConfig(root)])).flat();
-      statusOutput = (await execute(root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all', '--ignore-submodules=all'], MAX_GIT_OUTPUT, filterConfig)).toString('utf8');
+      const [observedHead, config, filters] = await Promise.all([readGitReviewHead(root), inheritedLineEndingConfig(root), safeFilterConfig(root)]);
+      head = observedHead;
+      filterConfig = [...config, ...filters];
+      statusOutput = (await execute(root, ['--no-replace-objects', 'status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all', '--ignore-submodules=all'], MAX_GIT_OUTPUT, filterConfig)).toString('utf8');
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : '';
       if (message.includes('not a git repository')) {
@@ -835,16 +848,17 @@ export class GitService {
       throw error;
     }
     const parsed = parsePorcelainStatus(statusOutput);
-    const [stats, remote] = await Promise.all([
-      execute(root, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', 'HEAD', '--'], MAX_GIT_OUTPUT, filterConfig)
+    const [stats, remote, currentHead] = await Promise.all([
+      head ? execute(root, ['--no-replace-objects', 'diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', head, '--'], MAX_GIT_OUTPUT, filterConfig)
         .then((numstat) => parseNumstat(numstat.toString('utf8')), (error: unknown) => {
           // Repositories without HEAD and oversized diff summaries still retain
           // useful status. Their directly-read untracked counts are filled below.
           const code = (error as ExecFailure).code;
           if (!outputTooLarge(error) && !(typeof code === 'number' && code !== 0)) throw error;
           return new Map<string, Numstat>();
-        }),
+        }) : new Map<string, Numstat>(),
       parsed.branch ? resolveRemoteTracking(root, parsed.branch) : { upstream: null, target: null },
+      readGitReviewHead(root),
     ]);
     const pushTarget = remote.target ? `${remote.target.remote}/${remote.target.branch}` : null;
     const truncated = parsed.changes.length > MAX_CHANGES;
@@ -872,6 +886,7 @@ export class GitService {
     });
     return {
       repository: true,
+      head: currentHead === head ? head : null,
       branch: parsed.branch,
       upstream: parsed.upstream,
       pushTarget,
@@ -1418,13 +1433,16 @@ export class GitService {
     await this.files.confinePath(relativePath);
     const root = this.files.getRoot();
     await validateSelectedRoot(root);
+    const head = await readGitReviewHead(root);
     const generation = this.statusGeneration;
-    const key = `${root}\0${generation}\0${relativePath}`;
+    const key = `${root}\0${generation}\0${head ?? ''}\0${relativePath}`;
     const cached = this.diffCache.get(key);
     if (cached) return cached;
     const pending = this.diffRequests.get(key);
     if (pending) return pending;
-    const request = this.readDiff(relativePath, root).then((value) => {
+    const request = this.readDiff(relativePath, root, head).then(async (diff) => {
+      if (await readGitReviewHead(root) !== head) throw new Error('HEAD changed while reading the diff. Refresh Git status.');
+      const value = { ...diff, head };
       if (this.files.getRoot() !== root || this.statusGeneration !== generation) {
         throw new Error('The active project changed before the Git diff completed.');
       }
@@ -1438,7 +1456,7 @@ export class GitService {
     return request;
   }
 
-  private async readDiff(relativePath: string, root: string): Promise<GitDiff> {
+  private async readDiff(relativePath: string, root: string, head: string | null): Promise<GitDiff> {
     const language = languageForPath(relativePath);
     const openable = isSafeExternalPath(relativePath);
     let modified: Buffer | null = null;
@@ -1463,7 +1481,7 @@ export class GitService {
     let original: Buffer | null = null;
     let headPath = relativePath;
     try {
-      const change = this.lastStatus?.root === root
+      const change = this.lastStatus?.root === root && this.lastStatus.value.head === head
         ? this.lastStatus.value.changes.find((entry) => entry.path === relativePath)
         : undefined;
       if (change?.oldPath) {
@@ -1474,8 +1492,8 @@ export class GitService {
       // Cached status metadata is an enhancement for rename previews.
     }
     try {
-      original = await execute(root, ['show', '--no-ext-diff', '--no-textconv', `HEAD:${headPath.split(path.sep).join('/')}`], MAX_FILE_PREVIEW_BYTES + 1);
-      if (original.length > MAX_FILE_PREVIEW_BYTES) {
+      if (head) original = await execute(root, ['--no-replace-objects', 'show', '--no-ext-diff', '--no-textconv', `${head}:${headPath.split(path.sep).join('/')}`], MAX_FILE_PREVIEW_BYTES + 1);
+      if (original && original.length > MAX_FILE_PREVIEW_BYTES) {
         return { path: relativePath, state: 'large', language, openable, message: 'The committed file is larger than the 1 MiB diff preview limit.' };
       }
     } catch (error) {
@@ -1484,7 +1502,9 @@ export class GitService {
       }
       const code = (error as ExecFailure).code;
       if (typeof code !== 'number' || code === 0) throw error;
-      // Exit 128 is expected for untracked files and repositories without HEAD.
+      if (!head) throw error;
+      const tree = await execute(root, ['--no-replace-objects', 'ls-tree', '-z', head, '--', `:(literal)${headPath}`], 32_768);
+      if (tree.length) return { path: relativePath, state: 'unavailable', language, openable, message: 'The committed file could not be read.' };
     }
 
     const originalValue = original ?? Buffer.alloc(0);

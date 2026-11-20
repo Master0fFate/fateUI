@@ -2,22 +2,12 @@ import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
+import { retryWindowsFileOperation as retryWhileBusy } from '../files/retryWindowsFileOperation';
 
 const MAX_BYTES = 1024 * 1024;
 const idPattern = /^[a-zA-Z0-9_-]{1,80}$/u;
 const digest = (source: string) => createHash('sha256').update(source).digest('hex');
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
-const busy = (error: unknown) => ['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '');
-
-async function retryWhileBusy<T>(operation: () => Promise<T>): Promise<T> {
-  for (let attempt = 1; ; attempt += 1) {
-    try { return await operation(); }
-    catch (error) {
-      if (process.platform !== 'win32' || attempt === 20 || !busy(error)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, attempt * 10));
-    }
-  }
-}
 
 export interface DefinitionDraft {
   metadata: Record<string, unknown>;

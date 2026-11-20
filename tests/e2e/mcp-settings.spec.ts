@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { saveMcpWithApproval } from './saveMcpWithApproval';
 
 test('MCP settings save an opt-in global server and persist across restart', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'fate-mcp-e2e-'));
@@ -27,8 +28,7 @@ test('MCP settings save an opt-in global server and persist across restart', asy
     await dialog.getByRole('textbox', { name: 'MCP server 1 command' }).fill(command);
     await dialog.getByRole('textbox', { name: 'MCP server 1 arguments' }).fill(JSON.stringify([fixture]));
     await dialog.getByRole('checkbox', { name: 'Enable MCP server 1' }).check();
-    await dialog.getByRole('button', { name: 'Save MCP servers' }).click();
-    await expect(dialog.getByRole('status')).toContainText('Saved. Reopen this project');
+    await saveMcpWithApproval(app, dialog, { name: 'docs', command, args: [fixture] });
     await dialog.getByRole('button', { name: 'Test saved server' }).click();
     await expect(dialog.getByRole('status')).toContainText('docs connected: 1 tools available (echo).');
     const config = JSON.parse(await readFile(path.join(root, 'data', 'mcp-servers.json'), 'utf8'));
@@ -42,5 +42,6 @@ test('MCP settings save an opt-in global server and persist across restart', asy
     dialog = page.getByRole('dialog', { name: 'Settings' });
     await dialog.getByRole('tab', { name: /MCP/ }).click();
     await expect(dialog.getByRole('textbox', { name: 'MCP server 1 command' })).toHaveValue(command);
+    await expect(dialog.getByRole('checkbox', { name: 'Enable MCP server 1' })).toBeChecked();
   } finally { await app?.close(); await rm(root, { recursive: true, force: true }); }
 });

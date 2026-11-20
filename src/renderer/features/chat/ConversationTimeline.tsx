@@ -92,10 +92,11 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
     if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
   }, []);
   if (!message || (message.role === 'assistant' && !message.text && !message.images?.length && !message.deferredImages)) return null;
-  const richContent = message.role === 'assistant' || message.role === 'system' || Boolean(message.images?.length || message.deferredImages);
+  const isMonitorReply = message.origin === 'monitor';
+  const richContent = !isMonitorReply && (message.role === 'assistant' || message.role === 'system' || Boolean(message.images?.length || message.deferredImages));
   const forkEntryId = forkEntryForMessage(messageId, forkMessageOrder, useRuntimeStore.getState().messagesById, forkPoints);
   const canFork = Boolean(forkEntryId && forkCapable && !streaming && !sessionOperation);
-  const label = message.role === 'user' ? 'You' : message.role === 'assistant' ? agentName ?? modelName : message.role === 'system' ? 'System' : 'Tool result';
+  const label = isMonitorReply ? 'Monitor' : message.role === 'user' ? 'You' : message.role === 'assistant' ? agentName ?? modelName : message.role === 'system' ? 'System' : 'Tool result';
   const forkUnavailable = forking
     ? 'Creating the new session…'
     : streaming
@@ -172,15 +173,15 @@ export const MessageRow = memo(function MessageRow({ messageId }: { messageId: s
         <MessageHeading role={message.role} label={label} />
         {richContent && !(message.role === 'assistant' && streamingThisMessage && !images?.length && !streamingOpenUI)
           ? <AssistantMarkdown text={message.text} images={images} interpretOpenUI={message.role === 'assistant'} isStreaming={streamingThisMessage} stateKey={JSON.stringify(['desktop', connectionGeneration, projectPath, sessionId, messageId])} onFollowUp={message.role === 'assistant' ? stageFollowUp : undefined} />
-          : <p className="message-plain"><MentionText text={message.text} /></p>}
+          : <p className="message-plain">{isMonitorReply ? message.text : <MentionText text={message.text} />}</p>}
       </article>
       <footer className="message-footer">
         <span className="message-footer-meta">{message.role === 'system' ? <><Plug size={11} aria-hidden="true" /><span className="icon-label">{label} <span aria-hidden="true">·</span> {formatMessageTimestamp(message.timestamp)}</span></> : <>{label} <span aria-hidden="true">·</span> {formatMessageTimestamp(message.timestamp)}</>}</span>
         <span className="message-footer-actions">
           <AppTooltip content={copied ? 'Copied' : message.text ? 'Copy message' : 'This message has no text to copy'} wrapTrigger><button className="message-action" type="button" aria-label={copied ? 'Message copied' : 'Copy message'} disabled={!message.text || copying} onClick={() => { void copyMessage(); }}><ActionContent text={copied ? 'done' : 'copy'}>{copied ? <Check size={14} /> : <Copy size={14} />}</ActionContent></button></AppTooltip>
           {message.role === 'user' && <AppTooltip content="Review a correction as learning; no model request is made yet" wrapTrigger><button className="message-action" type="button" aria-label="Learn from this correction" disabled={!message.text} onClick={() => useLearningStore.getState().show(message.text)}><ActionContent text="learn"><Brain size={14} /></ActionContent></button></AppTooltip>}
-          {message.role !== 'system' && <AppTooltip content={forkUnavailable ?? 'Fork from this message'} wrapTrigger><button className="message-action" type="button" aria-label="Fork from this message" disabled={!canFork || forking} onClick={() => { void forkMessage(); }}><ActionContent text="fork"><GitFork size={14} /></ActionContent></button></AppTooltip>}
-          {message.role === 'assistant' && <AppTooltip content={forkUnavailable ?? 'Try again from this prompt'} wrapTrigger><button className="message-action" type="button" aria-label="Try again" disabled={!canFork || forking} onClick={() => { void forkMessage(true); }}><ActionContent text="retry"><RotateCcw size={14} /></ActionContent></button></AppTooltip>}
+          {!isMonitorReply && message.role !== 'system' && <AppTooltip content={forkUnavailable ?? 'Fork from this message'} wrapTrigger><button className="message-action" type="button" aria-label="Fork from this message" disabled={!canFork || forking} onClick={() => { void forkMessage(); }}><ActionContent text="fork"><GitFork size={14} /></ActionContent></button></AppTooltip>}
+          {!isMonitorReply && message.role === 'assistant' && <AppTooltip content={forkUnavailable ?? 'Try again from this prompt'} wrapTrigger><button className="message-action" type="button" aria-label="Try again" disabled={!canFork || forking} onClick={() => { void forkMessage(true); }}><ActionContent text="retry"><RotateCcw size={14} /></ActionContent></button></AppTooltip>}
         </span>
       </footer>
     </div>

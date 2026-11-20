@@ -8,6 +8,6 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'node22',
     minify: false,
-    rollupOptions: { external: (id) => id === 'electron' || id.startsWith('node:') || id === '@earendil-works/pi-coding-agent' },
+    rollupOptions: { external: (id) => id === 'electron' || id.startsWith('node:') || id === 'yauzl' || id === '@earendil-works/pi-coding-agent' || id.startsWith('@modelcontextprotocol/sdk/') },
   },
 });

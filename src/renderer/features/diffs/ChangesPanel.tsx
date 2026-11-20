@@ -1,4 +1,4 @@
-import { getFateApi, getFateApiOptional } from '../../platform/api';
+import { getDesktopApiOptional, getFateApi, getFateApiOptional, getWebApiOptional } from '../../platform/api';
 import * as Popover from '@radix-ui/react-popover';
 import {
   ArrowDown,
@@ -42,8 +42,11 @@ import { writeClipboardText } from '../../lib/clipboard';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useWorkspaceStore } from '../../stores/workspaceStore';
-import { LazyDiffViewer, LazyFileViewer } from '../files/LazyMonaco';
-import { HunkStrip } from './HunkStrip';
+import { LazyFileViewer } from '../files/LazyMonaco';
+import { FileDiffReview, UnselectedDiffNotes, useLocalNotes } from './LocalDiffNotes';
+import { getLocalPullRequestReader, PullRequestStatus } from './PullRequestStatus';
+import { isReviewHead } from './diffNoteModel';
+import './diffReview.css';
 import { RasterImagePreview } from '../files/RasterImagePreview';
 import { selectChangeOrigins, writerConflictState, type ChangeOrigin, type FlightDeckTarget } from '../shell/flightDeck';
 
@@ -284,7 +287,7 @@ function CommitRow({ row }: { row: CommitGraphRow }) {
   );
 }
 
-function DiffPreview({ origins, onOrigin }: { origins: readonly ChangeOrigin[]; onOrigin: (origin: ChangeOrigin) => void }) {
+function DiffPreview({ origins, onOrigin, localProject }: { origins: readonly ChangeOrigin[]; onOrigin: (origin: ChangeOrigin) => void; localProject: string | null }) {
   const diff = useWorkspaceStore((state) => state.diff);
   const loading = useWorkspaceStore((state) => state.diffLoading);
   const combined = useWorkspaceStore((state) => state.combinedDiff);
@@ -292,6 +295,9 @@ function DiffPreview({ origins, onOrigin }: { origins: readonly ChangeOrigin[]; 
   const selected = useWorkspaceStore((state) => state.selectedChange);
   const openPath = useWorkspaceStore((state) => state.openPath);
   const git = useWorkspaceStore((state) => state.git);
+  const gitLoading = useWorkspaceStore((state) => state.gitLoading);
+  const selectChange = useWorkspaceStore((state) => state.selectChange);
+  const noteState = useLocalNotes(localProject);
   const selectedStatus = git?.changes.find((change) => change.path === selected);
   const deleted = selectedStatus?.indexStatus === 'D' || selectedStatus?.workTreeStatus === 'D';
   if (combinedLoading) return <div className="preview-loading"><span className="preview-spinner" /><span className="icon-label">Building combined working-tree diff…</span></div>;
@@ -301,8 +307,11 @@ function DiffPreview({ origins, onOrigin }: { origins: readonly ChangeOrigin[]; 
       <div className="preview-body"><LazyFileViewer value={combined.patch || 'Working tree clean'} language="diff" path="working-tree.diff" /></div>
     </div>
   );
-  if (loading) return <div className="preview-loading"><span className="preview-spinner" /><span className="icon-label">Building bounded diff…</span></div>;
-  if (!diff) return <div className="preview-placeholder"><FileDiff size={22} /><span>Select a changed file or a header metric to inspect</span></div>;
+  if (loading && !diff) return <div className="preview-loading"><span className="preview-spinner" /><span className="icon-label">Building bounded diff…</span></div>;
+  if (!diff) return <div className="file-preview">
+    {noteState && <UnselectedDiffNotes key={localProject} notes={noteState.notes} git={git} onSelect={(path) => void selectChange(path)} />}
+    <div className="preview-placeholder"><FileDiff size={22} /><span>Select a changed file or a header metric to inspect</span></div>
+  </div>;
   return (
     <div className="file-preview">
       <div className="preview-heading review-preview-heading">
@@ -313,12 +322,11 @@ function DiffPreview({ origins, onOrigin }: { origins: readonly ChangeOrigin[]; 
           {origins.slice(0, 4).map((origin) => <button type="button" key={origin.id} aria-label={`Open related activity from ${origin.actorLabel}`} onClick={() => onOrigin(origin)} title={`${origin.actorLabel} · ${origin.toolName}`}>{origin.actorLabel}</button>)}
         </div> : null}
       </div>
-      {diff.state === 'text' && <HunkStrip path={diff.path} />}
-      <div className="preview-body">
-        {diff.state === 'text' && <LazyDiffViewer original={diff.original ?? ''} modified={diff.modified ?? ''} language={diff.language} path={diff.path} />}
-        {diff.state === 'image' && <RasterImagePreview data={diff.imageData} mimeType={diff.mimeType} path={diff.path} detail={diff.message} />}
-        {diff.state !== 'text' && diff.state !== 'image' && <div className="preview-placeholder"><FileWarning size={22} /><strong>{diff.state === 'binary' ? 'Binary change' : diff.state === 'large' ? 'Diff too large' : 'Diff unavailable'}</strong><span>{diff.message ?? 'This change cannot be displayed.'}</span></div>}
-      </div>
+      <FileDiffReview key={JSON.stringify([localProject, diff.path])} diff={diff} git={git} noteState={noteState} refreshing={gitLoading || loading} />
+      {diff.state !== 'text' && <div className="preview-body">
+        {diff.state === 'image' ? <RasterImagePreview data={diff.imageData} mimeType={diff.mimeType} path={diff.path} detail={diff.message} />
+          : <div className="preview-placeholder"><FileWarning size={22} /><strong>{diff.state === 'binary' ? 'Binary change' : diff.state === 'large' ? 'Diff too large' : 'Diff unavailable'}</strong><span>{diff.message ?? 'This change cannot be displayed.'}</span></div>}
+      </div>}
     </div>
   );
 }
@@ -347,6 +355,7 @@ export function ChangesPanel() {
   const loadCombinedDiff = useWorkspaceStore((state) => state.loadCombinedDiff);
   const select = useWorkspaceStore((state) => state.selectChange);
   const runtime = useRuntimeStore(useShallow((state) => ({
+    source: state.source,
     project: state.runtime.project,
     sessionId: state.runtime.sessionId,
     streaming: state.runtime.streaming,
@@ -380,6 +389,7 @@ export function ChangesPanel() {
   const [worktreeBusy, setWorktreeBusy] = useState(false);
   const graph = useMemo(() => buildCommitGraphRows(history?.commits ?? []), [history?.commits]);
   const changes = useMemo(() => git?.changes ?? [], [git?.changes]);
+  const localProject = project && runtime.source === 'desktop' && runtime.project?.path === project && getDesktopApiOptional() && !getWebApiOptional() ? project : null;
   const selectedChange = changes.find((change) => change.path === selected);
   const origins = useMemo(() => selectChangeOrigins(selectedChange, {
     timelineOrder, timelineById, messagesById, toolsById, subagents, teams,
@@ -452,7 +462,11 @@ export function ChangesPanel() {
     try {
       await refresh();
         if (view === 'branch') await loadHistory(true);
-        const updated = useWorkspaceStore.getState().git;
+        const workspace = useWorkspaceStore.getState();
+        const updated = workspace.git;
+        if (view === 'diff' && localProject && workspace.projectPath === localProject && !workspace.selectedChange && selected && updated?.changes.some((change) => change.path === selected)) {
+          await select(selected);
+        }
         showToast({
           kind: 'success',
           title: 'Git status refreshed',
@@ -549,6 +563,7 @@ export function ChangesPanel() {
           </span>
           <MetricTooltip label={detached ? 'Refresh detached HEAD status' : 'Refresh Git status'}><button className="git-refresh-button" type="button" aria-label={detached ? 'Refresh detached HEAD status' : 'Refresh Git status'} disabled={controlsBusy} onClick={() => void refreshAll()}><ActionContent text={loading ? 'wait' : 'refresh'}><RefreshCw className={loading ? 'tool-spinner' : ''} size={13} /></ActionContent></button></MetricTooltip>
         </div>
+        {localProject && git?.repository && getLocalPullRequestReader() && <PullRequestStatus key={localProject} project={localProject} head={isReviewHead(git.head) ? git.head : null} branch={git.branch} busy={controlsBusy} />}
         {error && <div className="workspace-error" role="alert">{error}</div>}
         {reviewNotice && <div className="review-notice" role="status">{reviewNotice}</div>}
         {view === 'diff' ? (
@@ -584,7 +599,7 @@ export function ChangesPanel() {
           </div>
         ) : null}
         <HorizontalResizeHandle label="Resize changes list and preview" value={listHeight} minimum={minimum} maximum={maximum} onChange={resizeList} onReset={() => resizeList(240)} />
-        <DiffPreview origins={origins} onOrigin={(origin) => openTarget(origin.target)} />
+        <DiffPreview origins={origins} onOrigin={(origin) => openTarget(origin.target)} localProject={localProject} />
       </div>
   );
 }

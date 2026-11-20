@@ -17,6 +17,7 @@ export interface AppWindowFactoryDeps {
   projects: ProjectService;
   dispatcher: LaunchDispatcher<BrowserWindow>;
   reportLaunchError: (error: unknown) => void;
+  canCloseToTray: () => boolean;
   /** Consume and clear the launch-time argv parse error (once). */
   consumeLaunchError: () => unknown | null;
   rendererPolicy: ReturnType<typeof createTrustedRendererPolicy>;
@@ -29,6 +30,8 @@ export interface AppWindowFactoryDeps {
 
 export interface AppWindowFactory {
   createWindow(options?: { initial?: boolean }): BrowserWindow;
+  openWindow(): void;
+  hideWindows(): void;
   installMenu(): void;
 }
 
@@ -42,6 +45,45 @@ export function rememberWindowPlacement(window: BrowserWindow | null, windowStat
 }
 
 export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFactory {
+  const readyWindows = new Set<BrowserWindow>();
+  const parkedWindows = new Set<BrowserWindow>();
+
+  function isReadyWindow(window: BrowserWindow): boolean {
+    return !window.isDestroyed() && readyWindows.has(window) && !window.webContents.isLoadingMainFrame();
+  }
+
+  function parkWindow(window: BrowserWindow): void {
+    parkedWindows.add(window);
+    if (process.platform === 'linux') window.minimize();
+    else window.hide();
+  }
+
+  function openWindow(): void {
+    const window = deps.dispatcher.activeHandle();
+    if (!window) {
+      createWindow({ initial: true });
+      return;
+    }
+    for (const parked of parkedWindows) {
+      if (parked === window || !isReadyWindow(parked)) continue;
+      parkedWindows.delete(parked);
+      if (parked.isMinimized()) parked.restore();
+      else if (!parked.isVisible()) parked.showInactive();
+    }
+    if (!isReadyWindow(window)) return;
+    const wasParked = parkedWindows.delete(window);
+    if (window.isMinimized()) window.restore();
+    else if (wasParked && !window.isVisible()) window.show();
+    if (window.isVisible()) window.focus();
+  }
+
+  function hideWindows(): void {
+    if (!deps.canCloseToTray()) return;
+    for (const window of readyWindows) {
+      if (isReadyWindow(window) && window.isVisible() && !window.isMinimized()) parkWindow(window);
+    }
+  }
+
   function sendCommand(command: AppCommand): void {
     const window = deps.dispatcher.activeHandle();
     if (window) window.webContents.send(ipcChannels.appCommand, appCommandSchema.parse(command));
@@ -105,7 +147,11 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
     });
     const removeWindowZoomShortcuts = installWindowZoomShortcuts(window);
     const removeWindowFullscreenShortcut = installWindowFullscreenShortcut(window);
+    let loaded = false;
+    let shown = false;
     window.once('ready-to-show', () => {
+      shown = true;
+      if (loaded) readyWindows.add(window);
       if (placement.maximized) window.maximize();
       window.show();
     });
@@ -115,11 +161,16 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
     window.on('maximize', sendWindowState);
     window.on('unmaximize', sendWindowState);
     window.on('minimize', sendWindowState);
-    window.on('restore', sendWindowState);
+    window.on('restore', () => {
+      parkedWindows.delete(window);
+      sendWindowState();
+    });
     window.on('enter-full-screen', sendWindowState);
     window.on('leave-full-screen', sendWindowState);
-    window.webContents.on('did-fail-load', (_event, code, description) => {
-      if (code === -3 || window.isDestroyed()) return;
+    window.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
+      if (!isMainFrame || code === -3 || window.isDestroyed()) return;
+      loaded = false;
+      readyWindows.delete(window);
       void dialog.showMessageBox(window, {
         type: 'error',
         title: 'Fate UI could not start',
@@ -130,6 +181,8 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
     });
 
     window.webContents.once('did-finish-load', () => {
+      loaded = true;
+      if (shown) readyWindows.add(window);
       // Only the first window owns launch-time restore. Extra windows simply
       // hydrate from the shared runtime like any reconnecting renderer.
       if (!options.initial) return;
@@ -146,8 +199,16 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
 
     const ownerId = window.webContents.id;
     window.webContents.on('destroyed', () => deps.terminal.disposeOwner(ownerId));
-    window.on('close', () => rememberWindowPlacement(window, deps.windowState));
+    if (process.platform === 'win32') window.on('session-end', () => app.quit());
+    window.on('close', (event) => {
+      rememberWindowPlacement(window, deps.windowState);
+      if (!readyWindows.has(window) || !deps.canCloseToTray() || deps.dispatcher.openWindowCount() !== 1) return;
+      event.preventDefault();
+      parkWindow(window);
+    });
     window.on('closed', () => {
+      readyWindows.delete(window);
+      parkedWindows.delete(window);
       removeWindowZoomShortcuts();
       removeWindowFullscreenShortcut();
       // The browser host is shared across every window; the dispatcher's
@@ -202,5 +263,5 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
     Menu.setApplicationMenu(menu);
   }
 
-  return { createWindow, installMenu };
+  return { createWindow, openWindow, hideWindows, installMenu };
 }

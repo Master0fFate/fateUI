@@ -1,0 +1,114 @@
+.diff-pr-status,
+.diff-local-note,
+.diff-unselected-notes {
+  flex: none;
+  min-width: 0;
+  border-bottom: 1px solid var(--theme-border);
+  background: var(--theme-panel);
+  color: var(--theme-muted);
+  font: 11px/1.4 var(--font-interface);
+}
+
+.diff-pr-status,
+.diff-local-note-bar,
+.diff-local-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.diff-pr-status { padding: 3px 8px; }
+.diff-pr-status-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.diff-pr-status-copy[data-result] .diff-pr-status-primary { display: flex; min-width: 0; align-items: baseline; gap: 4px; }
+.diff-pr-status-primary strong { flex: none; color: var(--theme-text); font-weight: 600; }
+.diff-pr-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-pr-status-copy[data-result] > span + span { display: block; }
+.diff-pr-status-copy[data-stale],
+.diff-note-anchor[data-stale],
+.diff-local-feedback[data-stale] { color: var(--theme-warning); }
+
+.diff-review-button {
+  flex: none;
+  min-height: 22px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 1px 5px;
+  background: transparent;
+  color: var(--theme-text-soft);
+  font: inherit;
+  cursor: pointer;
+}
+.diff-review-button:hover:not(:disabled, [aria-disabled="true"]) { background: var(--theme-raised); color: var(--theme-text); }
+.diff-review-button:focus-visible,
+.diff-hunk-note:focus-visible,
+.diff-note-form textarea:focus-visible,
+.diff-unselected-notes > summary:focus-visible { outline: 1px solid var(--theme-accent); outline-offset: 1px; }
+.diff-review-button:disabled,
+.diff-review-button[aria-disabled="true"] { opacity: .55; cursor: default; }
+.diff-review-button[aria-pressed="true"],
+.diff-review-button[data-primary] { background: var(--theme-accent-soft); color: var(--theme-accent); }
+
+.diff-local-note {
+  flex-shrink: 1;
+  max-height: 55%;
+  padding: 2px 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.diff-local-note-bar { min-height: 22px; }
+.diff-local-note-bar > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.diff-local-note-bar > button:first-of-type:not(:only-of-type) { border-color: var(--theme-border); }
+.diff-note-anchor { color: var(--theme-text); font: 10px/1.4 var(--font-code); }
+.diff-local-feedback { margin: 4px 0; overflow-wrap: anywhere; }
+.diff-note-text {
+  max-height: 4.2em;
+  margin: 4px 0;
+  overflow: auto;
+  color: var(--theme-text-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-local-actions { flex-wrap: wrap; }
+.diff-note-form { display: grid; gap: 4px; margin-block: 2px 4px; }
+.diff-note-form textarea {
+  resize: vertical;
+  width: 100%;
+  min-height: 38px;
+  max-height: 120px;
+  padding: 4px 6px;
+  border: 1px solid var(--theme-border);
+  border-radius: 5px;
+  background: var(--theme-canvas);
+  color: var(--theme-text);
+  font: 11px/1.4 var(--font-interface);
+}
+.diff-local-note-mark { border-inline-start: 2px solid var(--theme-accent); }
+
+.hunk-row[data-local-notes] { grid-template-columns: minmax(0, 1fr) auto auto auto auto; gap: 4px; padding-inline: 6px; }
+.hunk-row[data-local-notes] .hunk-action { padding-inline: 4px; }
+.hunk-row[data-local-notes] .hunk-action svg { flex: none; }
+@container (max-width: 255px) {
+  .hunk-row[data-local-notes] { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+  .hunk-row[data-local-notes] .hunk-counts { display: none; }
+}
+.diff-note-ranges {
+  z-index: 90;
+  display: grid;
+  gap: 2px;
+  min-width: 130px;
+  max-width: min(260px, var(--radix-popover-content-available-width));
+  max-height: min(240px, var(--radix-popover-content-available-height));
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--theme-border);
+  border-radius: 7px;
+  background: var(--theme-raised);
+  color: var(--theme-muted);
+  font: 11px/1.4 var(--font-interface);
+}
+.diff-note-ranges button { text-align: left; }
+.diff-note-ranges button:hover:not(:disabled) { background: var(--theme-panel); }
+.diff-unselected-notes { padding: 3px 8px; }
+.diff-unselected-notes > summary { width: fit-content; cursor: pointer; }
+.diff-unselected-notes-list { max-height: 132px; overflow: auto; }
+.diff-unselected-notes-list > section { padding-block: 5px; border-top: 1px solid var(--theme-border); overflow-wrap: anywhere; }

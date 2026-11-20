@@ -157,9 +157,10 @@ describe('workspace inspector panels', () => {
     expect(searchFiles).not.toHaveBeenCalled();
   });
 
-  it('clears stale diff state before an explicit Git refresh', async () => {
+  it('retains the diff while refreshing and clears it when the file is no longer changed', async () => {
     const getGitStatus = vi.fn(async () => ({ repository: true, branch: 'main', upstream: 'origin/main', pushTarget: 'origin/main', ahead: 0, behind: 0, changes: [], additions: 0, deletions: 0, truncated: false }));
-    Object.defineProperty(window, 'piDesktop', { configurable: true, value: { getGitStatus } as unknown as PiDesktopApi });
+    const getGitDiff = vi.fn();
+    Object.defineProperty(window, 'piDesktop', { configurable: true, value: { getGitStatus, getGitDiff } as unknown as PiDesktopApi });
     useWorkspaceStore.setState({
       selectedChange: 'stale.ts',
       reviewedPaths: new Set(['stale.ts']),
@@ -169,9 +170,11 @@ describe('workspace inspector panels', () => {
     });
 
     const refresh = useWorkspaceStore.getState().refreshGit();
-    expect(useWorkspaceStore.getState()).toMatchObject({ selectedChange: null, diff: null, diffLoading: false, reviewPathRequest: null, reviewNotice: null });
+    expect(useWorkspaceStore.getState()).toMatchObject({ selectedChange: 'stale.ts', diff: { path: 'stale.ts' }, diffLoading: true, reviewPathRequest: null, reviewNotice: null });
     expect(useWorkspaceStore.getState().reviewedPaths.size).toBe(0);
     await refresh;
+    expect(useWorkspaceStore.getState()).toMatchObject({ selectedChange: null, diff: null, diffLoading: false });
+    expect(getGitDiff).not.toHaveBeenCalled();
   });
 
   it('clears review state when a Git operation replaces the change list', async () => {

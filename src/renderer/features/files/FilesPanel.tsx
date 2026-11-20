@@ -8,8 +8,10 @@ import { selectFileRows, useWorkspaceStore, type FileTreeRow } from '../../store
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import { LazyFileViewer } from './LazyMonaco';
 import { RasterImagePreview } from './RasterImagePreview';
+import { WordReviewPreview } from './WordReviewPreview';
 import { useSkinComponents } from '../../skins/SkinProvider';
-import { getWebApiOptional } from '../../platform/api';
+import { getWebApiOptional, getWordReviewApiOptional } from '../../platform/api';
+import { isWordReviewPath } from '../../../shared/contracts/wordReview';
 
 function FileRow({ entry, selected, expanded, loading, disabled, onActivate }: {
   entry: FileTreeRow; selected: boolean; expanded: boolean; loading: boolean; disabled: boolean;
@@ -34,7 +36,10 @@ function PreviewState() {
   const preview = useWorkspaceStore((state) => state.preview);
   const loading = useWorkspaceStore((state) => state.previewLoading);
   const selected = useWorkspaceStore((state) => state.selectedFile);
+  const project = useWorkspaceStore((state) => state.projectPath);
   const open = useWorkspaceStore((state) => state.openSelectedFile);
+  const wordReview = selected && isWordReviewPath(selected) ? getWordReviewApiOptional() : undefined;
+  if (wordReview && selected && project) return <WordReviewPreview key={JSON.stringify([project, selected])} path={selected} api={wordReview} />;
   if (loading) return <div className="preview-loading"><span className="preview-spinner" /><span className="icon-label">Reading {selected}…</span></div>;
   if (!preview) return <div className="preview-placeholder"><File size={22} /><span>Select a file to preview</span></div>;
   return <div className="file-preview">

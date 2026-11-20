@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import type { DesktopConnectionApi } from './connections';
+import type { WordReviewApi } from './wordReview';
+import { gitReviewHeadSchema, pullRequestReviewChannels, type PullRequestReviewStatus } from './pullRequestReview';
 import { memoryLearningSettingsSchema, learningTurnSchema, type LearningApi } from './learning';
 import { agentChannels, agentInboxChannels, type AgentsApi } from './agents';
 import type { GoogleClientInput, GoogleConnectInput, GoogleStatus } from './google';
 import type { MonitorDashboard, MonitorReadInput } from './monitorDashboard';
+import { monitorWakeStatusSchema, monitorWatchResultSchema, monitorWatchSourceSchema, type MonitorWatchRequest, type MonitorWatchesSnapshot } from './monitorWatches';
 import { MAX_SPEECH_STREAM_FEED_SAMPLES, SPEECH_PCM_BYTES_PER_SAMPLE } from '../speech';
 import {
   SUBAGENT_DISPLAY_NAME_MAX_LENGTH,
@@ -150,6 +153,9 @@ export const ipcChannels = {
   runtimeHistoryImages: 'runtime:history-images',
   runtimeHistoryPage: 'runtime:history-page',
   runtimeMonitorDashboard: 'runtime:monitor-dashboard',
+  runtimeMonitorWatches: 'runtime:monitor-watches',
+  runtimeMonitorWatchStart: 'runtime:monitor-watch-start',
+  runtimeMonitorWatchStop: 'runtime:monitor-watch-stop',
   runtimePrompt: 'runtime:prompt',
   runtimeOptimizePrompt: 'runtime:optimize-prompt',
   runtimeAbort: 'runtime:abort',
@@ -292,6 +298,7 @@ export const ipcChannels = {
   gitOperation: 'git:operation',
   gitRevertPath: 'git:revert-path',
   gitHunks: 'git:hunks',
+  gitPullRequestReview: pullRequestReviewChannels.status,
   gitRevertHunk: 'git:revert-hunk',
   sessionExport: 'session:export',
 } as const;
@@ -487,6 +494,7 @@ export const gitChangeSchema = z.object({
 });
 export const gitStatusSchema = z.object({
   repository: z.boolean(),
+  head: gitReviewHeadSchema.nullable().optional(),
   branch: z.string(),
   upstream: z.string().max(1_000).nullable(),
   pushTarget: z.string().max(1_000).nullable(),
@@ -499,6 +507,7 @@ export const gitStatusSchema = z.object({
 });
 export const gitDiffSchema = z.object({
   path: z.string().min(1),
+  head: gitReviewHeadSchema.nullable().optional(),
   state: z.enum(['text', 'image', 'binary', 'large', 'unavailable']),
   original: z.string().optional(),
   modified: z.string().optional(),
@@ -657,6 +666,7 @@ export const clipboardWriteResultSchema = z.object({ written: z.literal(true) })
 export const runtimeMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(['user', 'assistant', 'system', 'tool']),
+  origin: z.literal('monitor').optional(),
   text: z.string().max(65_000),
   reasoning: z.string().max(65_000).optional(),
   images: z.array(runtimeImageSchema).max(8).optional(),
@@ -1288,6 +1298,19 @@ export const projectOpenInputSchema = projectPathInputSchema.extend({ target: pr
 export const projectSessionListInputSchema = z.object({ projectPath: z.string().min(1).max(32_768), query: z.string().max(500).default('') }).strict();
 export const projectDeleteSessionsResultSchema = z.object({ deleted: z.number().int().nonnegative().max(100_000), skipped: z.number().int().nonnegative().max(100_000) }).strict();
 export const sessionIdInputSchema = z.object({ sessionId: z.string().min(1).max(500) }).strict();
+export const monitorWatchesSnapshotSchema = z.object({
+  connectors: z.array(z.string()),
+  watches: z.array(z.object({
+    id: z.string().uuid(),
+    source: monitorWatchSourceSchema,
+    state: z.enum(['waiting', 'backoff', 'completed', 'stopped', 'expired', 'failed']),
+    result: monitorWatchResultSchema.optional(),
+    wake: z.boolean(),
+    wakeStatus: monitorWakeStatusSchema.optional(),
+    expiresAt: z.number().int().nonnegative().max(8_640_000_000_000_000),
+  }).transform(({ result, wakeStatus, ...status }) => ({ ...status, ...(result === undefined ? {} : { result }), ...(wakeStatus === undefined ? {} : { wakeStatus }) }))),
+  wakeAvailable: z.boolean(),
+}) satisfies z.ZodType<MonitorWatchesSnapshot, z.ZodTypeDef, unknown>;
 export const sessionDeleteInputSchema = z.object({ sessionId: z.string().min(1).max(500), projectPath: z.string().min(1).max(32_768).optional() }).strict();
 export const sessionRenameInputSchema = z.object({
   sessionId: z.string().min(1).max(500),
@@ -1683,7 +1706,8 @@ export type ModelsDevAddInput = z.infer<typeof modelsDevAddInputSchema>;
 export type ModelsDevRemoveInput = z.infer<typeof modelsDevRemoveInputSchema>;
 export type ModelsDevMutationResult = z.infer<typeof modelsDevMutationResultSchema>;
 
-export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionApi {
+export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionApi, WordReviewApi {
+  getPullRequestStatus(projectPath: string, head: string, branch: string): Promise<PullRequestReviewStatus>;
   getAppInfo: () => Promise<AppInfo>;
   controlWindow: (action: WindowControlAction) => Promise<WindowState>;
   getWindowState: () => Promise<WindowState>;
@@ -1730,6 +1754,9 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   onBrowserEvents: (listener: (events: BrowserEvent[]) => void) => () => void;
   getRuntimeState: () => Promise<RuntimeState>;
   getMonitorDashboard: (input?: MonitorReadInput) => Promise<MonitorDashboard>;
+  getMonitorWatches: (scope: Pick<MonitorWatchRequest, 'workspaceRoot' | 'sessionId'>) => Promise<MonitorWatchesSnapshot>;
+  startMonitorWatch: (request: MonitorWatchRequest) => Promise<void>;
+  stopMonitorWatch: (input: Pick<MonitorWatchRequest, 'workspaceRoot' | 'sessionId'> & { id: string }) => Promise<void>;
   prompt: (input: PromptInput) => Promise<PromptAcceptance>;
   optimizePrompt: (text: string, options?: PromptOptimizationOptions) => Promise<PromptOptimizationResult>;
   abort: () => Promise<{ aborted: boolean }>;

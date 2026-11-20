@@ -1,0 +1,196 @@
+.word-review .word-review-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.word-review-sheet {
+  max-inline-size: 48rem;
+  margin-inline: auto;
+  padding: 16px 16px 24px;
+  color: var(--theme-text);
+}
+
+.word-review-header,
+.word-review-title,
+.word-review-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.word-review-header {
+  justify-content: space-between;
+}
+
+.word-review-title h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.word-review-title > svg {
+  color: var(--theme-accent);
+}
+
+.word-review-title > span {
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid var(--theme-border-strong);
+  color: var(--theme-muted);
+  font-size: 12px;
+}
+
+.word-review-description,
+.word-review-hint,
+.word-review-blank {
+  color: var(--theme-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.word-review-description {
+  margin: 8px 0 16px;
+}
+
+.word-review-paragraphs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-start: 1px solid var(--theme-border);
+}
+
+.word-review-paragraph {
+  display: grid;
+  grid-template-columns: 3ch minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0;
+  border-block-end: 1px solid var(--theme-border);
+}
+
+.word-review-anchor {
+  padding-block-start: 3px;
+  color: var(--theme-muted);
+  font: 11px/1.5 var(--font-code);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  user-select: none;
+}
+
+.word-review-text,
+.word-review-note p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.word-review-text {
+  font-size: 14px;
+  tab-size: 4;
+}
+
+.word-review-text[role='heading'] {
+  font-weight: 600;
+}
+
+.word-review-text:is([aria-level='1'], [aria-level='2']) {
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.word-review-note {
+  margin-block-start: 8px;
+  padding: 8px 12px;
+  border-inline-start: 2px solid var(--theme-accent);
+  background: var(--theme-raised);
+  font-size: 13px;
+}
+
+.word-review-note > span {
+  color: var(--theme-muted);
+  font-size: 11px;
+}
+
+.word-review .word-review-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-block-size: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--theme-border-strong);
+  border-radius: 5px;
+  color: var(--theme-text);
+  background: var(--theme-panel);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.word-review .word-review-note-action {
+  margin-block-start: 4px;
+  margin-inline-start: -4px;
+  padding-inline: 4px;
+  border-color: transparent;
+  color: var(--theme-muted);
+  background: transparent;
+}
+
+.word-review .word-review-button:hover:not(:disabled) {
+  color: var(--theme-text);
+  background: var(--theme-raised-hover);
+}
+
+.word-review .word-review-button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.word-review :is(button, textarea):focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 2px;
+}
+
+.word-review-editor {
+  display: grid;
+  gap: 8px;
+  margin-block-start: 8px;
+}
+
+.word-review-editor label {
+  color: var(--theme-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.word-review-editor textarea {
+  display: block;
+  inline-size: 100%;
+  min-block-size: 64px;
+  max-block-size: 240px;
+  padding: 8px;
+  resize: vertical;
+  border: 1px solid var(--theme-border-strong);
+  border-radius: 5px;
+  color: var(--theme-text);
+  background: var(--theme-raised);
+  font: inherit;
+  font-size: 13px;
+}
+
+.word-review .word-review-save {
+  border-color: var(--theme-accent);
+}
+
+.word-review-empty {
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--theme-border);
+  color: var(--theme-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.word-review-error {
+  color: var(--theme-danger);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

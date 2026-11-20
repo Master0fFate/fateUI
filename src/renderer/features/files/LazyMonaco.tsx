@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import type { DiffViewerProps } from './MonacoViewer';
 
 const FileViewer = lazy(() => import('./MonacoViewer').then((module) => ({ default: module.FileMonacoViewer })));
 const DiffViewer = lazy(() => import('./MonacoViewer').then((module) => ({ default: module.DiffMonacoViewer })));
@@ -11,6 +12,6 @@ export function LazyFileViewer(props: { value: string; language: string; path: s
   return <Suspense fallback={<Fallback />}><FileViewer {...props} /></Suspense>;
 }
 
-export function LazyDiffViewer(props: { original: string; modified: string; language: string; path: string }) {
+export function LazyDiffViewer(props: DiffViewerProps) {
   return <Suspense fallback={<Fallback />}><DiffViewer {...props} /></Suspense>;
 }
