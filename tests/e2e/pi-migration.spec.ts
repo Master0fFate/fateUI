@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { saveMcpWithApproval } from './saveMcpWithApproval';
 
 test('an existing Fate profile imports missing Pi providers and a local MCP server without the Pi CLI', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'fate-pi-switch-e2e-'));
@@ -10,9 +11,9 @@ test('an existing Fate profile imports missing Pi providers and a local MCP serv
   await Promise.all([mkdir(data), mkdir(agent)]);
   await writeFile(path.join(data, 'auth.json'), JSON.stringify({ fate: { type: 'api_key', key: 'FATE-SYNTHETIC' } }));
   await writeFile(path.join(agent, 'auth.json'), JSON.stringify({ pi: { type: 'api_key', key: 'PI-SYNTHETIC' } }));
-  await writeFile(path.join(agent, 'mcp.json'), JSON.stringify({ mcpServers: {
-    echo: { command: process.execPath, args: [path.resolve('tests/fixtures/mcp-echo.mjs')] },
-  } }));
+  const command = process.execPath;
+  const args = [path.resolve('tests/fixtures/mcp-echo.mjs')];
+  await writeFile(path.join(agent, 'mcp.json'), JSON.stringify({ mcpServers: { echo: { command, args } } }));
   const app = await electron.launch({
     args: [`--user-data-dir=${path.join(root, 'chromium')}`, path.resolve('.'), '--new-instance'],
     env: { ...process.env, VITE_DEV_SERVER_URL: '', FATE_GUI_DATA_DIR: data, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: '1' },
@@ -31,7 +32,11 @@ test('an existing Fate profile imports missing Pi providers and a local MCP serv
     const auth = JSON.parse(await readFile(path.join(data, 'auth.json'), 'utf8'));
     expect(Object.keys(auth).sort()).toEqual(['fate', 'pi']);
     const saved = JSON.parse(await readFile(path.join(data, 'mcp-servers.json'), 'utf8'));
-    expect(saved).toHaveLength(1);
+    expect(saved).toEqual([{ name: 'echo', enabled: false, transport: 'stdio', command, args }]);
+    const enabled = dialog.getByRole('checkbox', { name: 'Enable MCP server 1' });
+    await expect(enabled).not.toBeChecked();
+    await enabled.check();
+    await saveMcpWithApproval(app, dialog, { name: 'echo', command, args });
     await dialog.getByRole('button', { name: 'Test saved server' }).click();
     await expect(dialog.getByRole('status').filter({ hasText: 'echo connected' })).toContainText('echo connected: 1 tools available (echo).');
     expect((await readFile(path.join(agent, 'mcp.json'), 'utf8'))).toContain('mcpServers');
