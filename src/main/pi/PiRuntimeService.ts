@@ -459,6 +459,7 @@ export interface RunningSessionRef {
 
 interface RuntimeSlot {
   runtime: AgentSessionRuntime;
+  projectPath: string;
   projectGeneration: number;
   sessionGeneration: number;
   sessionInvalidated: boolean;
@@ -1355,6 +1356,8 @@ export class PiRuntimeService {
   private readonly hyp3rc0d3Forks = new WeakMap<AgentSessionRuntime, { source: AgentSession; apply(session: AgentSession): void }>();
   private resourceCache: { projectPath: string; commands: NonNullable<RuntimeState['commands']>; skills: NonNullable<RuntimeState['skills']> } | null = null;
   private readonly pendingDisposals = new Set<Promise<void>>();
+  private readonly sessionWriterTransitions = new Map<string, number>();
+  private readonly unsettledSessionWriters = new Set<string>();
   private readonly sessionAttention = new Map<string, SessionAttentionRecord>();
   private readonly manualSessionNames = new Set<string>();
   private readonly coldPendingModels = new Map<string, ModelInfo>();
@@ -2119,7 +2122,7 @@ export class PiRuntimeService {
         await runtime.dispose();
         return this.getState();
       }
-      const slot = this.createSlot(runtime, generation, attestationHandle);
+      const slot = this.createSlot(runtime, project.path, generation, attestationHandle);
       this.liveSlots.add(slot);
       this.selectedSlot = slot;
       this.configureRuntimeSlot(slot);
@@ -2930,15 +2933,20 @@ export class PiRuntimeService {
     const projectPath = this.project?.path;
     const modelRuntime = this.modelRuntime;
     if (!projectPath || !modelRuntime) return;
+    const sessionId = session.sessionId;
+    const sessionGeneration = slot.sessionGeneration;
+    const claimKey = this.sessionClaimKey(projectPath, sessionId);
     try {
       this.executionAdmissionGuard();
       const title = await this.sessionTitleGenerator.generate(prompt, modelRuntime, session);
-      const claimKey = this.sessionClaimKey(projectPath, session.sessionId);
       if (
         !title
         || initialization !== this.initialization
         || this.project?.path !== projectPath
         || this.manualSessionNames.has(claimKey)
+        || slot.disposed || slot.sessionInvalidated || slot.runtime.session !== session
+        || slot.sessionGeneration !== sessionGeneration || session.sessionId !== sessionId
+        || this.findLiveSlot(sessionId) !== slot || this.sessionWriterUnavailable(claimKey)
         || session.sessionName?.trim()
         || session.sessionManager?.getSessionName?.()?.trim()
       ) return;
@@ -3967,21 +3975,24 @@ export class PiRuntimeService {
     const generation = this.initialization;
     const modelRuntime = this.modelRuntime;
     const selected = this.findLiveSlot(sessionId);
-    const cold = this.coldSession;
-    const coldModel = cold?.snapshot.summary.id === sessionId ? cold.model : null;
-    const model = selected?.runtime.session.model ?? (coldModel ? modelRuntime?.getModel(coldModel.provider, coldModel.id) : null);
+    const cold = this.coldSession?.snapshot.summary.id === sessionId ? this.coldSession : null;
+    const coldChoice = cold?.pendingModel ?? cold?.model;
+    const model = cold ? (coldChoice ? modelRuntime?.getModel(coldChoice.provider, coldChoice.id) : null) : selected?.runtime.session.model;
     const permission = selected?.permissionLevel ?? cold?.permissionLevel;
+    const modelAvailable = () => Boolean(model && this.models.some(({ provider, id }) => provider === model.provider && id === model.id));
     let original: MonitorSessionFile | undefined;
     const target: MonitorWatchTarget = {
       isSaved: async () => {
         if (!project || this.project !== project || generation !== this.initialization) return false;
+        try { this.executionAdmissionGuard(); } catch { return false; }
         const file = await this.findMonitorWatchSession(sessionId);
         if (!file) return false;
         original ??= file;
         return original.path === file.path && original.ino === file.ino && original.dev === file.dev;
       },
     };
-    if (!project?.trusted || !modelRuntime || !model || !permission) return target;
+    if (!project?.trusted || !selected || !modelRuntime || !model || !permission || !modelAvailable()
+      || (coldChoice && (model.provider !== coldChoice.provider || model.id !== coldChoice.id))) return target;
     const scope = () => {
       const live = this.findLiveSlot(sessionId);
       const cold = this.coldSession?.snapshot.summary.id === sessionId ? this.coldSession : null;
@@ -4012,13 +4023,14 @@ export class PiRuntimeService {
       if (!await ready(fence)) return null;
       admit(fence);
       if (!idle()) return null;
-      if (!this.models.some(({ provider, id }) => provider === model.provider && id === model.id)) throw new Error('Monitor chat model is unavailable.');
+      if (!modelAvailable()) throw new Error('Monitor chat model is unavailable.');
       const signal = AbortSignal.any([fence.signal, AbortSignal.timeout(45_000)]);
       const inference = await createMonitorModel(this.paths?.dataRoot, model, signal);
       if (!await ready(fence)) return null;
       signal.throwIfAborted();
       admit(fence);
       if (!idle()) return null;
+      if (!modelAvailable()) throw new Error('Monitor chat model is unavailable.');
       onStart();
       const response = await this.trackModelOperation(() => inference.runtime.completeSimple(inference.model, {
         systemPrompt: MONITOR_REPLY_SYSTEM_PROMPT,
@@ -4060,12 +4072,15 @@ export class PiRuntimeService {
   }
 
   private monitorSessionIdle(sessionId: string): boolean {
-    if (this.replacementActive || this.monitorBusyPrompts.has(sessionId) || this.hasOwnedAgentWork(sessionId)
+    if (!this.project || this.sessionWriterUnavailable(this.sessionClaimKey(this.project.path, sessionId))
+      || this.replacementActive || this.monitorBusyPrompts.has(sessionId) || this.hasOwnedAgentWork(sessionId)
       || this.goalMax.hasRunnableGoal(sessionId) || (this.selectedSessionId === sessionId && this.promptOptimizationActive)) return false;
-    const slot = this.findLiveSlot(sessionId);
-    if (!slot) return true;
+    const slots = [...this.liveSlots].filter((slot) => !slot.disposed && slot.runtime.session.sessionId === sessionId);
+    if (slots.length === 0) return true;
+    if (slots.length !== 1) return false;
+    const slot = slots[0]!;
     const session = slot.runtime.session;
-    return !this.sessionHasActiveWork(session) && slot.sessionTurnPhase === 'idle' && slot.activeRunId === null
+    return !slot.sessionInvalidated && !this.sessionHasActiveWork(session) && slot.sessionTurnPhase === 'idle' && slot.activeRunId === null
       && !slot.bindingPromise && !slot.queueMutationActive && !slot.compactionReleaseActive && !slot.compactionReleaseTimer
       && !slot.startingQueuedMessage && slot.pendingDirectIntentIds.size === 0 && slot.queuedMessages.length === 0
       && slot.heldCompactionMessages.length === 0 && slot.recentlyDequeued.length === 0 && slot.deferredChildMessages.length === 0
@@ -4519,8 +4534,14 @@ export class PiRuntimeService {
       && !slot.disposed
       && this.selectedSlot === slot
       && slot.runtime.session === session;
+    const writerKey = this.sessionClaimKey(projectPath, session.sessionId);
+    if (this.sessionWriterUnavailable(writerKey)) throw this.activeOperationError('deleting a conversation path');
+    const settleWriter = this.beginSessionWriterTransition(writerKey);
+    let rewritten = false;
+    let reloaded = false;
     try {
       await this.sessionRepository.deleteBranch(projectPath, session.sessionId, entryId, activeLeafId);
+      rewritten = true;
       if (!ownsSession()) throw this.replacementSuperseded();
       // SessionManager only loads the rewritten tree through its public file
       // setter. Restore the prior active leaf because loading picks the final
@@ -4528,6 +4549,7 @@ export class PiRuntimeService {
       manager.setSessionFile(sessionFile);
       manager.branch(activeLeafId);
       session.agent.state.messages = stripReplayedFailedAssistants(manager.buildSessionContext().messages) as typeof session.agent.state.messages;
+      reloaded = true;
       if (!ownsSession()) throw this.replacementSuperseded();
       this.emitSystemMessage('Deleted the inactive conversation fork. The active path remains in this session.', 'info');
       await this.refreshSessions(true);
@@ -4537,6 +4559,9 @@ export class PiRuntimeService {
     } catch (error) {
       if (error instanceof PiDesktopError) throw error;
       throw new PiDesktopError({ code: 'INVALID_REQUEST', message: error instanceof Error ? error.message : 'The conversation path could not be deleted.', retryable: true });
+    } finally {
+      if (rewritten && !reloaded && !slot.disposed && slot.runtime.session === session) this.unsettledSessionWriters.add(writerKey);
+      settleWriter();
     }
   }
 
@@ -4656,11 +4681,12 @@ export class PiRuntimeService {
     this.unsubscribePermissionFailure();
   }
 
-  private createSlot(runtime: AgentSessionRuntime, projectGeneration: number, attestationHandle?: { slot: RuntimeSlot | null }): RuntimeSlot {
+  private createSlot(runtime: AgentSessionRuntime, projectPath: string, projectGeneration: number, attestationHandle?: { slot: RuntimeSlot | null }): RuntimeSlot {
     const owner: { slot: RuntimeSlot | null } = { slot: null };
     const now = new Date().toISOString();
     const slot: RuntimeSlot = {
       runtime,
+      projectPath,
       projectGeneration,
       sessionGeneration: 0,
       sessionInvalidated: false,
@@ -5788,13 +5814,28 @@ export class PiRuntimeService {
     if (captureDequeued && removed.length > 0) slot.recentlyDequeued = [...slot.recentlyDequeued, ...removed].slice(-MAX_QUEUED_MESSAGES);
   }
 
-  private async createAdditionalSlot(sessionPath?: string, expectedSessionId?: string): Promise<RuntimeSlot> {
+  private async createAdditionalSlot(...target: [] | [sessionPath: string, sessionId: string]): Promise<RuntimeSlot> {
+    if (target.length === 0 || !this.project?.trusted || !this.modelRuntime) return this.openAdditionalSlot();
+    const [sessionPath, sessionId] = target;
+    const writerKey = this.sessionClaimKey(this.project.path, sessionId);
+    if (this.sessionWriterUnavailable(writerKey) || this.findLiveSlot(sessionId)) throw this.activeOperationError('opening this saved session');
+    const settleWriter = this.beginSessionWriterTransition(writerKey);
+    try {
+      return await this.openAdditionalSlot(sessionPath, sessionId, writerKey);
+    } finally {
+      settleWriter();
+    }
+  }
+
+  private async openAdditionalSlot(sessionPath?: string, expectedSessionId?: string, writerKey?: string): Promise<RuntimeSlot> {
     if (!this.project?.trusted || !this.modelRuntime) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Open and trust a project before using Pi.', retryable: true });
     const project = this.project;
     const modelRuntime = this.modelRuntime;
     const generation = this.initialization;
     for (const slot of [...this.liveSlots]) {
-      if (slot !== this.selectedSlot && !slot.agentRunSettled && !this.sessionHasActiveWork(slot.runtime.session) && !this.hasOwnedAgentWork(slot.runtime.session.sessionId) && !this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId)) {
+      if (slot !== this.selectedSlot && !slot.agentRunSettled
+        && !this.sessionWriterTransitions.has(this.sessionClaimKey(slot.projectPath, slot.runtime.session.sessionId))
+        && !this.sessionHasActiveWork(slot.runtime.session) && !this.hasOwnedAgentWork(slot.runtime.session.sessionId) && !this.goalMax.hasRunnableGoal(slot.runtime.session.sessionId)) {
         await this.disposeSlot(slot, false);
         if (generation !== this.initialization || this.project !== project) throw this.replacementSuperseded();
       }
@@ -5817,8 +5858,11 @@ export class PiRuntimeService {
       rootSink,
       sessionPath && this.adapter.supportsDirectSessionRuntime ? sessionPath : undefined,
     );
+    const disposeUnattachedRuntime = () => runtime.dispose().catch(() => {
+      if (writerKey) this.unsettledSessionWriters.add(writerKey);
+    });
     if (generation !== this.initialization) {
-      await runtime.dispose().catch(() => undefined);
+      await disposeUnattachedRuntime();
       throw this.replacementSuperseded();
     }
     // SessionManager.open() may create a new, empty session when the file
@@ -5830,17 +5874,17 @@ export class PiRuntimeService {
       || !runtime.session.sessionFile
       || path.resolve(runtime.session.sessionFile) !== path.resolve(sessionPath)
     )) {
-      await runtime.dispose().catch(() => undefined);
+      await disposeUnattachedRuntime();
       throw new PiDesktopError({
         code: 'INVALID_REQUEST',
         message: 'The saved session changed before it could be resumed. Reopen it and try again; no message was sent.',
         retryable: true,
       });
     }
-    const slot = this.createSlot(runtime, generation, attestationHandle);
+    const slot = this.createSlot(runtime, project.path, generation, attestationHandle);
     this.liveSlots.add(slot);
-    this.configureRuntimeSlot(slot);
     try {
+      this.configureRuntimeSlot(slot);
       if (sessionPath && !this.adapter.supportsDirectSessionRuntime) {
         const result = await runtime.switchSession(sessionPath, { cwdOverride: project.path });
         if (generation !== this.initialization || slot.disposed) throw this.replacementSuperseded();
@@ -5859,7 +5903,9 @@ export class PiRuntimeService {
       if (generation !== this.initialization || slot.disposed) throw this.replacementSuperseded();
       return slot;
     } catch (error) {
-      await this.disposeSlot(slot, true).catch(() => undefined);
+      await this.disposeSlot(slot, true).catch(() => {
+        if (writerKey) this.unsettledSessionWriters.add(writerKey);
+      });
       throw error;
     }
   }
@@ -6387,8 +6433,8 @@ export class PiRuntimeService {
 
   /** Eviction must retain owned descendants and failed-to-stop writers, not only streamed text. */
   hasEvictionBlockingWork(): boolean {
-    if (this.replacementActive || this.promptOptimizationActive || this.pendingModelOperations.size > 0
-      || this.pendingTitleGenerations.size > 0 || this.pendingPermissionChanges.size > 0) return true;
+    if (this.replacementActive || this.promptOptimizationActive || this.sessionWriterTransitions.size > 0
+      || this.pendingModelOperations.size > 0 || this.pendingTitleGenerations.size > 0 || this.pendingPermissionChanges.size > 0) return true;
     return [...this.liveSlots].some((slot) => !slot.disposed && (slot.activeRunId !== null
       || this.sessionHasActiveWork(slot.runtime.session)
       || this.hasOwnedAgentWork(slot.runtime.session.sessionId)
@@ -6415,6 +6461,19 @@ export class PiRuntimeService {
 
   private sessionClaimKey(projectPath: string, sessionId: string): string {
     return `${projectPath}\0${sessionId}`;
+  }
+
+  private sessionWriterUnavailable(key: string): boolean {
+    return this.sessionWriterTransitions.has(key) || this.unsettledSessionWriters.has(key);
+  }
+
+  private beginSessionWriterTransition(key: string): () => void {
+    this.sessionWriterTransitions.set(key, (this.sessionWriterTransitions.get(key) ?? 0) + 1);
+    return () => {
+      const remaining = this.sessionWriterTransitions.get(key)! - 1;
+      if (remaining > 0) this.sessionWriterTransitions.set(key, remaining);
+      else this.sessionWriterTransitions.delete(key);
+    };
   }
 
   private rememberColdPendingModel(sessionId: string, model: ModelInfo): void {
@@ -6668,6 +6727,19 @@ export class PiRuntimeService {
 
   private async disposeSlot(slot: RuntimeSlot, abortRunning: boolean): Promise<void> {
     if (slot.disposePromise) return slot.disposePromise;
+    const writerKey = this.sessionClaimKey(slot.projectPath, slot.runtime.session.sessionId);
+    const settleWriter = this.beginSessionWriterTransition(writerKey);
+    try {
+      await this.releaseRuntimeSlot(slot, abortRunning);
+    } catch (error) {
+      this.unsettledSessionWriters.add(writerKey);
+      throw error;
+    } finally {
+      settleWriter();
+    }
+  }
+
+  private async releaseRuntimeSlot(slot: RuntimeSlot, abortRunning: boolean): Promise<void> {
     const settle = slot.agentRunSettled;
     slot.agentRunSettled = null;
     settle?.({ ...agentRunOutcome(slot.runtime.session, true), error: 'The run conversation closed before it finished.' });

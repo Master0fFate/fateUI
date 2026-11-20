@@ -165,7 +165,7 @@ export class PiMigrationService {
         const supportedKeys = new Set(['command', 'args', 'url', 'disabled', 'protocolVersion']);
         if (Object.keys(entry).some((key) => !supportedKeys.has(key)) || (entry.protocolVersion && entry.protocolVersion !== 'legacy')) { skipped++; warnings.push(`${name} needs its Pi MCP bridge or manual setup; Fate cannot preserve all its options.`); continue; }
         const candidate = typeof entry.command === 'string' && !entry.url
-          ? { name, enabled: entry.disabled !== true, transport: 'stdio', command: entry.command, args: entry.args ?? [] }
+          ? { name, enabled: false, transport: 'stdio', command: entry.command, args: entry.args ?? [] }
           : typeof entry.url === 'string' && !entry.command
             ? { name, enabled: entry.disabled !== true, transport: 'http', url: entry.url }
             : null;
@@ -174,7 +174,11 @@ export class PiMigrationService {
         found.set(name, parsed.data);
       }
     }
-    return { servers: [...found.values()].slice(0, Math.max(0, 32 - existing.length)), skipped: skipped + Math.max(0, found.size - (32 - existing.length)), warnings, piServers: [...piServers.values()] };
+    const servers = [...found.values()].slice(0, Math.max(0, 32 - existing.length));
+    if (servers.some((server) => server.transport === 'stdio')) {
+      warnings.unshift('Local command servers are imported disabled. Review and enable them in Settings > MCP.');
+    }
+    return { servers, skipped: skipped + Math.max(0, found.size - (32 - existing.length)), warnings, piServers: [...piServers.values()] };
   }
 
   async inspect(projectPath?: string): Promise<PiMigrationReport> {
@@ -271,27 +275,30 @@ export class PiMigrationService {
       const sourceName = typeof item === 'string' ? item : isObject(item) ? item.source : null;
       return typeof sourceName === 'string' && /(?:^|[/:])pi-mcp-adapter(?:@|$)/u.test(sourceName);
     });
-    const existing = bridge ? [] : await this.mcp.list();
-    const discovered = bridge ? null : await this.legacyMcp(existing);
     let providerEntriesImported = 0;
     let providerConflicts = 0;
-    for (const change of providerChanges) {
-      if (!change) continue;
-      if (change.added) await writePrivateObject(change.target, change.merged);
-      providerEntriesImported += change.added;
-      providerConflicts += change.conflicts;
-    }
+    const importProviders = async () => {
+      for (const change of providerChanges) {
+        if (!change) continue;
+        if (change.added) await writePrivateObject(change.target, change.merged);
+        providerEntriesImported += change.added;
+        providerConflicts += change.conflicts;
+      }
+    };
     let mcpServersImported = 0;
     let mcpServersSkipped = 0;
     if (bridge) {
+      await importProviders();
       warnings.push('Existing Pi MCP bridge kept. Fate did not add duplicate MCP servers.');
-    } else if (discovered) {
-      mcpServersSkipped = discovered.skipped;
-      warnings.push(...discovered.warnings);
-      if (discovered.servers.length) {
-        await this.mcp.save([...existing, ...discovered.servers]);
+    } else {
+      await this.mcp.update(async (existing) => {
+        const discovered = await this.legacyMcp(existing);
+        await importProviders();
+        mcpServersSkipped = discovered.skipped;
         mcpServersImported = discovered.servers.length;
-      }
+        warnings.push(...discovered.warnings);
+        return mcpServersImported ? [...existing, ...discovered.servers] : null;
+      });
     }
     if (providerConflicts) warnings.push('Some provider values differ. Fate kept its existing values; review them before uninstalling Pi.');
     return { providerEntriesImported, providerConflicts, mcpServersImported, mcpServersSkipped, warnings };

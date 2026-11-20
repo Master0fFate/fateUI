@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { McpServerDefinition } from '../../shared/contracts/ipc';
 import { monitorWatchRequestSchema, type MonitorWatchRequest, type MonitorWatchResult, type MonitorWatchesSnapshot, type MonitorWatchStatus } from '../../shared/contracts/monitorWatches';
-import { pollGitHub, waitForMcp } from './monitorSources';
+import { MonitorConnectorExitError, pollGitHub, waitForMcp } from './monitorSources';
 
 const TTL_MS = 60 * 60_000;
 const CHECK_MS = 5_000;
@@ -33,7 +33,8 @@ interface MonitorDependencies {
   isLocal(): boolean;
   trustedRoots(): Promise<readonly string[]>;
   connectors(): Promise<readonly McpServerDefinition[]>;
-  selectedTarget(request: MonitorWatchRequest): MonitorWatchTarget | null;
+  withConnectors?<T>(use: (servers: readonly McpServerDefinition[]) => T): Promise<T>;
+  selectedTarget(scope: Pick<MonitorWatchRequest, 'workspaceRoot' | 'sessionId'>): MonitorWatchTarget | null;
 }
 interface Watch {
   request: MonitorWatchRequest;
@@ -54,16 +55,17 @@ function sameConnector(left: Connector, right: Connector): boolean {
 
 export class DesktopMonitorWatches {
   private readonly watches = new Map<string, Watch>();
-  private readonly history: Watch[] = [];
+  private readonly history: { workspaceRoot: string; sessionId: string; status: MonitorWatchStatus }[] = [];
+  private readonly starting = new Set<{ workspaceRoot: string; sessionId: string; cancelled: boolean }>();
   private readonly consumed = new Set<string>();
   private readonly working = new Set<Watch>();
   private readonly answering = new Set<string>();
   private readonly settling = new Set<Promise<void>>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private ticking = false;
-  private pending = 0;
-  private generation = 0;
+
   private disposed = false;
+  private cleanupUnconfirmed = false;
 
   constructor(private readonly deps: MonitorDependencies) {}
 
@@ -75,21 +77,27 @@ export class DesktopMonitorWatches {
   async snapshot(workspaceRoot: string, sessionId: string): Promise<MonitorWatchesSnapshot> {
     const connectors = await this.connectors();
     if (!this.deps.isLocal() || this.disposed) throw new Error('Monitor watches require the local desktop.');
-    const matches = (watch: Watch) => watch.request.workspaceRoot === workspaceRoot && watch.request.sessionId === sessionId;
-    return { connectors: connectors.map(({ name }) => name), wakeAvailable: true,
-      watches: [...this.watches.values(), ...this.history].filter(matches).map(({ status }) => ({ ...status })) };
+    const matches = (scope: { workspaceRoot: string; sessionId: string }) => scope.workspaceRoot === workspaceRoot && scope.sessionId === sessionId;
+    const target = this.deps.selectedTarget({ workspaceRoot, sessionId });
+    const current = [...this.watches.values()].filter(({ request }) => matches(request));
+    return { connectors: connectors.map(({ name }) => name), wakeAvailable: Boolean(target?.answer && target.report),
+      watches: [...current, ...this.history.filter(matches)].map(({ status }) => ({ ...status })) };
+  }
+
+  hasActiveWork(workspaceRoot: string): boolean {
+    return [...this.watches.values()].some(({ request }) => request.workspaceRoot === workspaceRoot);
   }
 
   async start(input: unknown, scopeIsCurrent?: () => boolean): Promise<void> {
     const request = monitorWatchRequestSchema.parse(input);
     if (!this.deps.isLocal() || this.disposed) throw new Error('Monitor watches require the local desktop.');
-    if (this.watches.size + this.pending >= MAX_WATCHES || this.working.size + this.pending >= MAX_WATCHES) throw new Error('Stop a watch before adding another.');
-    if (this.consumed.size + this.watches.size + this.pending >= MAX_COMPLETIONS) throw new Error('The desktop watch limit for this process has been reached.');
+    if (this.watches.size + this.starting.size >= MAX_WATCHES || this.working.size + this.starting.size >= MAX_WATCHES) throw new Error('Stop a watch before adding another.');
+    if (this.consumed.size + this.watches.size + this.starting.size >= MAX_COMPLETIONS) throw new Error('The desktop watch limit for this process has been reached.');
     const target = this.deps.selectedTarget(request);
     if (!target) throw new Error('Open the original trusted saved chat before starting a watch.');
     if (request.wake && (!target.answer || !target.report)) throw new Error('A configured chat model is required for an automatic Monitor reply.');
-    const generation = this.generation;
-    this.pending++;
+    const admission = { workspaceRoot: request.workspaceRoot, sessionId: request.sessionId, cancelled: false };
+    this.starting.add(admission);
     try {
       const { source } = request;
       if (source.kind === 'github-actions') { source.repo = source.repo.toLowerCase(); source.sha = source.sha.toLowerCase(); }
@@ -97,7 +105,7 @@ export class DesktopMonitorWatches {
       if (source.kind === 'mcp' && !connector) throw new Error('Enable the local stdio connector in Settings > MCP before starting a watch.');
       const roots = await this.deps.trustedRoots();
       if (!roots.includes(request.workspaceRoot) || !await target.isSaved()) throw new Error('The original trusted saved chat is unavailable.');
-      if (generation !== this.generation || this.disposed || !this.deps.isLocal() || scopeIsCurrent?.() === false) {
+      if (admission.cancelled || this.disposed || !this.deps.isLocal() || scopeIsCurrent?.() === false) {
         throw new Error('Monitor scope changed before the watch could start.');
       }
       const key = JSON.stringify([request.workspaceRoot, request.sessionId, source.kind === 'mcp'
@@ -108,7 +116,7 @@ export class DesktopMonitorWatches {
         status: { id, source, state: 'waiting', wake: request.wake, expiresAt: Date.now() + TTL_MS }, nextCheck: 0, failures: 0 };
       this.watches.set(id, watch);
       this.schedule(0);
-    } finally { this.pending--; }
+    } finally { this.starting.delete(admission); }
   }
 
   stop(workspaceRoot: string, sessionId: string, id: string): void {
@@ -117,10 +125,10 @@ export class DesktopMonitorWatches {
   }
 
   clear(workspaceRoot?: string, sessionId?: string): void {
-    this.generation++;
-    const matches = ({ request }: Watch) => (workspaceRoot === undefined || request.workspaceRoot === workspaceRoot)
-      && (sessionId === undefined || request.sessionId === sessionId);
-    for (const watch of this.watches.values()) if (matches(watch)) this.finish(watch, 'stopped');
+    const matches = (scope: { workspaceRoot: string; sessionId: string }) => (workspaceRoot === undefined || scope.workspaceRoot === workspaceRoot)
+      && (sessionId === undefined || scope.sessionId === sessionId);
+    for (const admission of this.starting) if (matches(admission)) admission.cancelled = true;
+    for (const watch of this.watches.values()) if (matches(watch.request)) this.finish(watch, 'stopped');
     for (let i = this.history.length - 1; i >= 0; i--) if (matches(this.history[i]!)) this.history.splice(i, 1);
   }
 
@@ -128,6 +136,16 @@ export class DesktopMonitorWatches {
     this.disposed = true;
     this.clear();
     await Promise.allSettled(this.settling);
+    if (this.cleanupUnconfirmed) throw new MonitorConnectorExitError();
+  }
+
+  recheckConnectors(servers: readonly McpServerDefinition[]): void {
+    for (const watch of this.watches.values()) {
+      const pinned = watch.connector;
+      if (pinned && !servers.some((item) => item.transport === 'stdio' && item.enabled && sameConnector(pinned, item))) {
+        this.finish(watch, 'stopped');
+      }
+    }
   }
 
   private live(watch: Watch): boolean {
@@ -143,7 +161,8 @@ export class DesktopMonitorWatches {
     if (watch.status.wakeStatus === 'queued' || watch.status.wakeStatus === 'answering') watch.status.wakeStatus = 'failed';
     delete watch.answer;
     watch.controller.abort();
-    this.history.unshift(watch);
+    const { workspaceRoot, sessionId } = watch.request;
+    this.history.unshift({ workspaceRoot, sessionId, status: { ...watch.status } });
     this.history.length = Math.min(this.history.length, MAX_HISTORY);
     if (!this.watches.size && this.timer) { clearTimeout(this.timer); this.timer = undefined; }
   }
@@ -159,14 +178,17 @@ export class DesktopMonitorWatches {
   }
 
   private async tick(): Promise<void> {
+    const pending = [...this.watches.values()];
     const [roots, configs] = await Promise.all([this.deps.trustedRoots().catch((): string[] => []), this.connectors()]);
-    for (const watch of this.watches.values()) {
+    for (const watch of pending) {
       if (!this.live(watch)) continue;
       if (!roots.includes(watch.request.workspaceRoot)) { this.clear(watch.request.workspaceRoot); continue; }
       const pinned = watch.connector;
       if (pinned && !configs.some((item) => sameConnector(pinned, item))) { this.finish(watch, 'stopped'); continue; }
-      if (!await watch.target.isSaved()) { this.clear(watch.request.workspaceRoot, watch.request.sessionId); continue; }
-      if (!this.live(watch) || this.working.size >= MAX_WATCHES || this.working.has(watch) || Date.now() < watch.nextCheck) continue;
+      const saved = await watch.target.isSaved();
+      if (!this.live(watch)) continue;
+      if (!saved) { this.clear(watch.request.workspaceRoot, watch.request.sessionId); continue; }
+      if (this.working.size >= MAX_WATCHES || this.working.has(watch) || Date.now() < watch.nextCheck) continue;
       this.working.add(watch);
       const operation = (watch.status.result === undefined ? this.step(watch) : this.wake(watch)).catch(() => {
         if (this.live(watch)) this.finish(watch, watch.status.result === undefined ? 'failed' : 'completed');
@@ -180,10 +202,24 @@ export class DesktopMonitorWatches {
     const { source } = watch.request;
     const signal = AbortSignal.any([watch.controller.signal, AbortSignal.timeout(Math.max(1, watch.status.expiresAt - Date.now()))]);
     let result: MonitorWatchResult | undefined;
+    await this.revalidate(watch);
     try {
-      result = source.kind === 'github-actions' ? await pollGitHub(source, signal)
-        : await waitForMcp(source, watch.connector!, signal);
-    } catch {
+      if (source.kind === 'github-actions') result = await pollGitHub(source, signal);
+      else {
+        const launch = (servers: readonly McpServerDefinition[]) => {
+          const approved = servers.find((server): server is Connector => server.transport === 'stdio' && server.enabled && sameConnector(server, watch.connector!));
+          if (!approved || !this.live(watch)) throw new Error('The MCP watch connector is no longer enabled.');
+          return { outcome: waitForMcp(source, approved, signal) };
+        };
+        const pending = this.deps.withConnectors ? await this.deps.withConnectors(launch) : launch(await this.connectors());
+        result = await pending.outcome;
+      }
+    } catch (error) {
+      if (error instanceof MonitorConnectorExitError) {
+        this.cleanupUnconfirmed = true;
+        const retained = this.history.find((entry) => entry.status.id === watch.status.id);
+        if (retained) retained.status.state = 'failed';
+      }
       if (!this.live(watch)) return;
       if (source.kind === 'mcp' || ++watch.failures >= 5) { this.finish(watch, 'failed'); return; }
       watch.status.state = 'backoff';

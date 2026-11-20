@@ -511,6 +511,7 @@ app.whenReady().then(async () => {
     isLocal: () => !hostStopping && connections?.isLocal === true,
     trustedRoots: () => projects.trustedProjectPaths(),
     connectors: () => monitorConnectors.list(),
+    withConnectors: (use) => monitorConnectors.withCurrent(use),
     selectedTarget: ({ workspaceRoot, sessionId }) => {
       const service = desktopRuntime.getFocused();
       const { project, sessionId: selected } = service.getState(false);
@@ -520,8 +521,9 @@ app.whenReady().then(async () => {
     },
   });
   monitorWatches = desktopWatches;
+  desktopRuntime.setMonitorWorkspacePins((root) => desktopWatches.hasActiveWork(root));
   desktopRuntime.subscribeMonitorTargetInvalidation((root, sessionId) => desktopWatches.clear(root, sessionId));
-  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : {}), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy, monitorWatches: desktopWatches });
+  const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : { monitorCore: core }), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy, monitorWatches: desktopWatches });
   // Refresh every models.dev-managed provider's model list once per Fate GUI
   // start. Runs beside startup, never blocking it; offline keeps the cache.
   // A saved remote target never starts local scheduled work or an automatic provider refresh.

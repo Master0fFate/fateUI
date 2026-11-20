@@ -20,6 +20,8 @@ The renderer has no Node.js, Electron, filesystem, credential, shell, or child-p
 - The **preload** exposes only narrow, named, Zod-validated methods and events.
 - The **renderer** is presentation-only and must never gain Node, Electron, filesystem, credential, shell, or child-process access.
 
+Word review reads only bounded, project-confined `.docx` files in the main process and sends structured text, not document HTML, across IPC. Its paragraph notes are stored in the desktop data folder. Diff notes stay in this desktop profile; neither kind of note becomes an agent instruction. The desktop PR status query uses the authenticated `gh` executable outside the project, is gated to the trusted active checkout, and returns a bounded summary for an exact commit. It does not write to GitHub.
+
 ## Trust model
 
 Every project — opened from the terminal or picked by hand — gets the same **Trust / Open without Pi / Cancel** choice. Project-local resources (for example `.pi/agents`, `.pi` themes) never bypass that decision. The manual terminal remains visually distinct from Pi-generated tool execution.

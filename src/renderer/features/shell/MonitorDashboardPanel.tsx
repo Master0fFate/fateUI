@@ -83,17 +83,22 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
           || next.selectionRevision !== webScope.selectionRevision)) return;
         if (!webScope && (!('projectPath' in next) || !('sessionId' in next)
           || next.projectPath !== project?.path || next.sessionId !== sessionId)) return;
-        setDashboard((previous) => next.unchanged && previous?.revision === next.revision && previous.section === section && previous.offset === offset
-          ? { ...previous, checkedAt: next.checkedAt, overall: next.overall, sources: next.sources, sourceCheckedAt: next.sourceCheckedAt, counts: next.counts } : next);
-        revision = next.revision;
+        if (next.section !== section || next.offset !== offset) return;
         setError(null);
-      } catch (reason) {
+        const lastOffset = Math.floor(Math.max(0, next.total - 1) / PAGE_SIZE) * PAGE_SIZE;
+        if (offset > lastOffset) {
+          supersedeDetail();
+          setDashboard(null);
+          setOffset((value) => value === offset ? lastOffset : value);
+          return;
+        }
+        setDashboard((previous) => next.unchanged && previous?.revision === next.revision && previous.section === section && previous.offset === offset
+          ? { ...previous, checkedAt: next.checkedAt, overall: next.overall, sources: next.sources, sourceCheckedAt: next.sourceCheckedAt, counts: next.counts, total: next.total } : next);
+        revision = next.revision;
+      } catch {
         if (active) {
           if (webScope) setDashboard(null);
-          // Network failures can contain host/provider text. Do not print an
-          // arbitrary exception in the browser Monitor, even on a read error.
-          setError(webScope ? 'Monitor unavailable. Refresh the workspace and try again.'
-            : reason instanceof Error ? reason.message : 'Dashboard unavailable.');
+          setError(webScope ? 'Monitor unavailable. Refresh the workspace and try again.' : 'Dashboard unavailable. Refresh to try again.');
         }
       } finally { busy = false; }
     };
@@ -101,7 +106,7 @@ export function MonitorDashboardPanel({ webScope }: { webScope?: WebWorkspace & 
     const timer = setInterval(() => { if (!document.hidden) void read(); }, 15_000);
     return () => { active = false; clearInterval(timer); };
   }, [supported, project?.path, project?.trusted, sessionId, webScope?.workspaceId, webScope?.workspaceGeneration,
-    webScope?.selectionRevision, section, offset, refresh, showWatches]);
+    webScope?.selectionRevision, section, offset, refresh, showWatches, supersedeDetail]);
 
   const readDetail = async (id: string) => {
     const request = supersedeDetail();

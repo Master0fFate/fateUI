@@ -46,15 +46,16 @@ export function rememberWindowPlacement(window: BrowserWindow | null, windowStat
 
 export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFactory {
   const readyWindows = new Set<BrowserWindow>();
-  const hiddenWindows = new Set<BrowserWindow>();
+  const parkedWindows = new Set<BrowserWindow>();
+
+  function isReadyWindow(window: BrowserWindow): boolean {
+    return !window.isDestroyed() && readyWindows.has(window) && !window.webContents.isLoadingMainFrame();
+  }
 
   function parkWindow(window: BrowserWindow): void {
-    if (process.platform === 'linux') {
-      window.minimize();
-    } else {
-      hiddenWindows.add(window);
-      window.hide();
-    }
+    parkedWindows.add(window);
+    if (process.platform === 'linux') window.minimize();
+    else window.hide();
   }
 
   function openWindow(): void {
@@ -63,20 +64,23 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
       createWindow({ initial: true });
       return;
     }
-    for (const hidden of hiddenWindows) {
-      if (hidden !== window && !hidden.isDestroyed()) hidden.showInactive();
+    for (const parked of parkedWindows) {
+      if (parked === window || !isReadyWindow(parked)) continue;
+      parkedWindows.delete(parked);
+      if (parked.isMinimized()) parked.restore();
+      else if (!parked.isVisible()) parked.showInactive();
     }
-    const wasHidden = hiddenWindows.has(window);
-    hiddenWindows.clear();
+    if (!isReadyWindow(window)) return;
+    const wasParked = parkedWindows.delete(window);
     if (window.isMinimized()) window.restore();
-    else if (wasHidden) window.show();
+    else if (wasParked && !window.isVisible()) window.show();
     if (window.isVisible()) window.focus();
   }
 
   function hideWindows(): void {
     if (!deps.canCloseToTray()) return;
     for (const window of readyWindows) {
-      if (window.isVisible() && !window.isMinimized()) parkWindow(window);
+      if (isReadyWindow(window) && window.isVisible() && !window.isMinimized()) parkWindow(window);
     }
   }
 
@@ -157,11 +161,14 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
     window.on('maximize', sendWindowState);
     window.on('unmaximize', sendWindowState);
     window.on('minimize', sendWindowState);
-    window.on('restore', sendWindowState);
+    window.on('restore', () => {
+      parkedWindows.delete(window);
+      sendWindowState();
+    });
     window.on('enter-full-screen', sendWindowState);
     window.on('leave-full-screen', sendWindowState);
-    window.webContents.on('did-fail-load', (_event, code, description) => {
-      if (code === -3 || window.isDestroyed()) return;
+    window.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
+      if (!isMainFrame || code === -3 || window.isDestroyed()) return;
       loaded = false;
       readyWindows.delete(window);
       void dialog.showMessageBox(window, {
@@ -201,7 +208,7 @@ export function createAppWindowFactory(deps: AppWindowFactoryDeps): AppWindowFac
     });
     window.on('closed', () => {
       readyWindows.delete(window);
-      hiddenWindows.delete(window);
+      parkedWindows.delete(window);
       removeWindowZoomShortcuts();
       removeWindowFullscreenShortcut();
       // The browser host is shared across every window; the dispatcher's

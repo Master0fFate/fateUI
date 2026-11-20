@@ -40,7 +40,13 @@ Rewind skips a file and reports why when its current content no longer matches t
 
 In the Review Runway, a text diff shows one row per hunk above the Monaco view. **Keep** marks a hunk as reviewed. **Reject** reverse-applies only that hunk with `git apply --reverse`, refreshes the diff, and drafts a feedback message with the rejected hunk for the agent. Untracked files have no hunks; revert the whole file instead. The hunk header is checked before the revert so a stale list never reverts the wrong lines.
 
+### Local diff notes
+
+On the local desktop, open **Work → Changes** and select a changed text file. Choose **Note** on a hunk and pick a Before or After range, or select changed lines in Monaco and press **Ctrl+Alt+N** (**⌘+⌥+N** on macOS). **Save locally** keeps one note per file in this desktop profile. A note does not edit the file, stage changes, post a GitHub comment, or send anything to the agent. When a refresh shows a different commit or different diff contents, the note is marked **Stale** and stays at its original range. **Local notes** is also available when the file is no longer in the changes list.
+
 ## Pull requests
+
+In **Work → Changes**, **Check PR** looks up the current commit on `github.com` through the signed-in GitHub CLI. This only works for a local branch whose commit matches the known `origin` tracking branch and an unambiguous PR in that repository; fork PRs are not supported here. The row summarizes up to 30 checks and labels partial results. It does not poll, fetch Git refs, post, push, or merge. When Fate sees a new HEAD, the previous result is marked **Stale** until you check again.
 
 Full-access root sessions get `git_push`, `pr_create`, and `pr_status`. `git_push` pushes the current feature branch to `origin` with an upstream and refuses `main` and `master`. `pr_create` opens a GitHub pull request through the GitHub CLI and pushes first when the branch has no upstream. `pr_status` reports state, review decision, mergeability, every check, and the failed log tail of up to three failing workflow runs, so a "CI failed, fix it" prompt has the evidence in one call. The GitHub CLI must be installed and signed in; Fate never stores GitHub credentials.
 
@@ -74,6 +80,12 @@ Agent Teams children do not get these tools. Use the embedded browser for pages 
 ## First-class Git and files
 
 Status, history, commits, Monaco diffs, and project-confined file browsing without leaving the app. Worktrees are switchable; the working-tree diff and branch history are both reachable. Isolated session and agent worktrees are plain Git worktrees inside the project at `.fate/worktrees/`; that directory is added to `.git/info/exclude` and hidden from the file tree, so the parent checkout stays clean. The server profile keeps them under its data root instead.
+
+### Word review
+
+In the local desktop app, open a `.docx` in **Work → Files**. **Word review** previews body paragraphs and headings with basic bold, italic, and underline. It does not reproduce page layout or render tables, images, embedded objects, or active links. Word is not launched and the preview does not contact external resources. Preview files are limited to 16 MiB and 512 body paragraphs; oversized or unsupported documents show an explanation.
+
+Use **Add note** beside a paragraph, then **Save note**. **Edit note** lets you revise it; clear the text and save to remove it. Notes live in Fate’s local data folder, not in the document or repository. They reappear when you reopen the same file revision. When the file changes, reload the preview; notes from the earlier revision are not moved to the new text.
 
 ### Branches
 

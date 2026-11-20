@@ -7,6 +7,7 @@ import { bootstrapDesktopFateApi, createDesktopFateApi, readDesktopBridge, selec
 import { desktopClientCapabilities, desktopHostCapabilities, type ClientCapabilities, type Feature, type FeatureSupport, type HostCapabilities } from '../../shared/protocol/capabilities';
 import { capabilityAvailable, negotiateCapabilities } from './capabilityPolicy';
 import type { ManualTerminalApi } from '../../shared/contracts/terminal';
+import type { WordReviewApi } from '../../shared/contracts/wordReview';
 
 export type RendererFateApi = FateApi & { readonly desktop?: DesktopOnlyApi; readonly web?: NetworkWorkspaceApi;
   readonly connections?: DesktopConnectionApi; readonly remote?: RemoteDesktopFateApi; readonly capabilities?: FeatureSupport;
@@ -262,6 +263,13 @@ export function getMonitorWatchesApiOptional(): Pick<DesktopOnlyApi, 'getMonitor
   const desktop = getDesktopApiOptional();
   if (getWebApiOptional() || typeof desktop?.getMonitorWatches !== 'function'
     || typeof desktop.startMonitorWatch !== 'function' || typeof desktop.stopMonitorWatch !== 'function') return undefined;
+  return desktop;
+}
+
+export function getWordReviewApiOptional(): WordReviewApi | undefined {
+  const desktop = getDesktopApiOptional();
+  if (getWebApiOptional() || typeof desktop?.readWordReview !== 'function'
+    || typeof desktop.saveWordReviewNote !== 'function') return undefined;
   return desktop;
 }
 

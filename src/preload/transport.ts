@@ -1,13 +1,15 @@
 import { ipcRenderer } from 'electron';
 import { z } from 'zod';
 import { ipcChannels } from '../shared/contracts/ipc';
+import type { wordReviewChannels } from '../shared/contracts/wordReview';
 
 type Channel = typeof ipcChannels[keyof typeof ipcChannels];
+type InvokeChannel = Channel | typeof wordReviewChannels[keyof typeof wordReviewChannels];
 
 export const ignoreResult = z.unknown().transform(() => undefined);
 export const discardResult = <S extends z.ZodTypeAny>(schema: S) => schema.transform(() => undefined);
 
-export async function invoke<S extends z.ZodTypeAny>(channel: Channel, inputSchema: z.ZodTypeAny, outputSchema: S, ...input: [] | [unknown]): Promise<z.output<S>> {
+export async function invoke<S extends z.ZodTypeAny>(channel: InvokeChannel, inputSchema: z.ZodTypeAny, outputSchema: S, ...input: [] | [unknown]): Promise<z.output<S>> {
   const result: unknown = await ipcRenderer.invoke(channel, inputSchema.parse(input.length ? input[0] : {}));
   return outputSchema.parse(result);
 }

@@ -971,8 +971,10 @@ export class PiSessionRepository {
       }
       return stat;
     };
-    if (assertFile().size > 64 * 1024 * 1024 && !live) throw new Error('Saved chat is too large for a Monitor reply.');
-    const manager = live ?? SessionManager.open(sessionPath, directory, cwd);
+    if (!live) throw new Error('Open the original chat before saving a Monitor reply.');
+    assertCurrent();
+    assertFile();
+    const manager = live;
     const header = manager.getHeader();
     if (!manager.isPersisted() || manager.getSessionId() !== sessionId || !sessionProjectMatches(header?.cwd, cwd)
       || !manager.getSessionFile() || resolve(manager.getSessionFile()!) !== sessionPath

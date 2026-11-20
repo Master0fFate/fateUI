@@ -165,6 +165,7 @@ export class MultiProjectPiRuntime {
   private readonly checkoutOwners = new Map<string, OwnerLock>();
   private readonly focusListeners = new Set<() => void>();
   private readonly monitorTargetInvalidations = new Set<(projectPath: string, sessionId?: string) => void>();
+  private monitorPins: ((projectPath: string) => boolean) | undefined;
   private readonly servicePaths = new WeakMap<PiRuntimeService, string>();
   private readonly checkoutOwnership: CheckoutOwnership | null;
   private stopping = false;
@@ -239,7 +240,7 @@ export class MultiProjectPiRuntime {
         isBusy: (service) => {
           if (service.hasEvictionBlockingWork()) return true;
           const projectPath = service.getState(false).project?.path;
-          return projectPath ? this.admissionGuards.get(projectPath)?.() === true : false;
+          return projectPath ? this.admissionGuards.get(projectPath)?.() === true || this.monitorPins?.(projectPath) === true : false;
         },
         onFocused: (service, projectPath) => {
           this.deps.browserIntegration?.setFocusedProjectPath?.(projectPath);
@@ -390,6 +391,10 @@ export class MultiProjectPiRuntime {
     this.manager.focusPreview(project);
     const sessions = await this.bootService.listSessionsForPath(project.path).catch(() => []);
     return this.bootService.setProjectPreview(project, sessions);
+  }
+
+  setMonitorWorkspacePins(pins: (projectPath: string) => boolean): void {
+    this.monitorPins = pins;
   }
 
   subscribeMonitorTargetInvalidation(listener: (projectPath: string, sessionId?: string) => void): () => void {

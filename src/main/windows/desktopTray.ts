@@ -8,8 +8,8 @@ interface DesktopTrayActions {
 }
 
 export function canParkOnDesktopTray(tray: Tray | null): boolean {
-  if (!tray || tray.isDestroyed()) return false;
   if (process.platform === 'linux') return true;
+  if (!tray || tray.isDestroyed()) return false;
   const { width, height } = tray.getBounds();
   return width > 0 && height > 0;
 }

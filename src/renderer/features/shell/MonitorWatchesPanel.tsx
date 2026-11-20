@@ -36,6 +36,7 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
       const next = await api.getMonitorWatches({ workspaceRoot, sessionId });
       if (id !== request.current || !current()) return;
       setSnapshot(next);
+      if (!next.wakeAvailable) setWake(false);
       setReadError(false);
     } catch {
       if (id !== request.current || !current()) return;
@@ -65,6 +66,8 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
       if (current()) { setBusy(false); void read(); }
     }
   };
+  const wakeAvailable = snapshot?.wakeAvailable === true;
+  const automaticReply = wakeAvailable && wake;
   const start = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!snapshot || readError) return;
@@ -81,8 +84,8 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
     }
     const scope = { workspaceRoot, sessionId, source: parsed.data };
     const followUp = field('followUp');
-    if (wake && !followUp) { setActionError('Enter an instruction for the automatic reply.'); return; }
-    void mutate(() => api.startMonitorWatch(wake ? { ...scope, wake: true, followUp } : { ...scope, wake: false }), 'start');
+    if (automaticReply && !followUp) { setActionError('Enter an instruction for the automatic reply.'); return; }
+    void mutate(() => api.startMonitorWatch(automaticReply ? { ...scope, wake: true, followUp } : { ...scope, wake: false }), 'start');
   };
 
   return <section className="monitor-watches" aria-label="Completion watches">
@@ -104,8 +107,9 @@ export function MonitorWatchesPanel({ api, workspaceRoot, sessionId, refresh }: 
           <label>Event ID<input name="eventId" autoComplete="off" required maxLength={80} /></label>
           <label>Revision<input name="revision" autoComplete="off" required maxLength={80} /></label>
         </>}
-        <label className="monitor-watch-opt-in"><input type="checkbox" checked={wake} onChange={(event) => setWake(event.target.checked)} /> Automatically reply in this chat when the watch completes</label>
-        {wake ? <>
+        <label className="monitor-watch-opt-in"><input type="checkbox" checked={automaticReply} disabled={!wakeAvailable} onChange={(event) => setWake(event.target.checked)} /> Automatically reply in this chat when the watch completes</label>
+        {snapshot && !wakeAvailable ? <p className="monitor-watches-note">Select a model in this chat to enable automatic replies.</p> : null}
+        {automaticReply ? <>
           <label>Follow-up instruction<input name="followUp" placeholder="Summarize the result and suggest a next step" required maxLength={MONITOR_FOLLOW_UP_MAX} /></label>
           <p className="monitor-watches-note">When this chat is idle, its model receives the completion facts and your instruction. The reply is saved here without switching chats or running tools.</p>
         </> : <p className="monitor-watches-note">Without an automatic reply, results stay in Monitor.</p>}

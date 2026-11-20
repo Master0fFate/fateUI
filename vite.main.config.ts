@@ -17,7 +17,7 @@ export default defineConfig({
       // Do not duplicate it (or Durable's storage/context bindings) in the host bundle.
       external: (id) => id === '@earendil-works/pi-durable' || id.startsWith('@earendil-works/pi-durable/')
         || id === '@earendil-works/chord' || id.startsWith('@earendil-works/chord/')
-        || id === 'electron' || id.startsWith('node:') || id === 'node-pty' || id === 'transcribe-cpp' || id === 'uiohook-napi' || id === '@earendil-works/pi-coding-agent' || id.startsWith('@modelcontextprotocol/sdk/'),
+        || id === 'electron' || id.startsWith('node:') || id === 'yauzl' || id === 'node-pty' || id === 'transcribe-cpp' || id === 'uiohook-napi' || id === '@earendil-works/pi-coding-agent' || id.startsWith('@modelcontextprotocol/sdk/'),
     },
   },
 });

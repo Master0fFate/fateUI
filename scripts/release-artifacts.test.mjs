@@ -105,7 +105,8 @@ describe('release artifact verification', () => {
     await expect(policy('--published-tag', 'v2.2.5')).resolves.toBe('--latest');
     await expect(policy('--published-tag', 'v2.2.6')).resolves.toBe('--latest');
     await expect(policy('--published-tag', `v${version}`)).resolves.toBe('--latest=false');
-    await expect(policy('--published-tag', 'v2.4.0-beta1')).resolves.toBe('--latest=false');
+    const [major, minor] = version.split('.').map(Number);
+    await expect(policy('--published-tag', `v${major}.${minor + 1}.0-beta1`)).resolves.toBe('--latest=false');
     await expect(policy('--published-tag', 'V1.0.0 - Old Title')).rejects.toMatchObject({
       stderr: expect.stringContaining('Published release tag is invalid'),
     });

@@ -58,7 +58,7 @@ Browse inside the workspace, select page elements, and attach browser annotation
 
 ### Review the work, not just the answer
 
-Inspect file changes with Monaco diffs, browse Git history, and use the activity timeline to investigate tool actions. A separate manual terminal stays available for your own commands.
+Inspect changes in Monaco, attach local notes to changed lines, and check GitHub PR status for the current commit. Preview Word documents and leave notes without modifying the source. Use Git history and the activity timeline to investigate changes.
 
 [Files, Git, and activity →](docs/features.md)
 

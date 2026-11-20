@@ -16,6 +16,12 @@ export type { MonitorWatchResult, MonitorWatchSource } from '../../shared/contra
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_SOURCE_BYTES = 64 * 1024;
 const MCP_WAIT_TIMEOUT_MS = 60 * 60_000;
+const STDIO_EXIT_GRACE_MS = 250;
+const STDIO_KILL_WAIT_MS = 1_000;
+const GITHUB_CLI_ENV = [
+  'GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR', 'XDG_CONFIG_HOME', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+];
 const githubRun = z.object({
   id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   repository: z.object({ full_name: z.string() }),
@@ -35,13 +41,15 @@ export async function pollGitHub(
   }
   const { repo, runId, sha } = parsed.data;
   const stdout = await new Promise<string>((resolve, reject) => {
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ![
-      'GH_HOST', 'GH_REPO', 'GH_PROMPT_DISABLED', 'GH_NO_UPDATE_NOTIFIER', 'GH_DEBUG', 'GH_FORCE_TTY',
-    ].includes(key.toUpperCase())));
+    const env = getDefaultEnvironment();
+    for (const key of GITHUB_CLI_ENV) {
+      const value = process.env[key];
+      if (value !== undefined && !value.startsWith('()')) env[key] = value;
+    }
     execFile('gh', ['api', '--hostname', 'github.com', '--method', 'GET', `repos/${repo}/actions/runs/${runId}`], {
-      signal, timeout: REQUEST_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: MAX_SOURCE_BYTES, windowsHide: true,
+      signal, timeout: REQUEST_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: MAX_SOURCE_BYTES, shell: false, windowsHide: true,
       cwd: dirname(process.execPath),
-      env: { ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' },
+      env: { ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_NO_EXTENSION_UPDATE_NOTIFIER: '1' },
     }, (error, output) => {
       if (error) reject(signal.aborted ? signal.reason : new Error('GitHub Actions lookup failed.'));
       else resolve(output);
@@ -65,6 +73,10 @@ export async function pollGitHub(
   return conclusion === 'success' || conclusion === 'failure' || conclusion === 'cancelled' ? conclusion : 'other';
 }
 
+export class MonitorConnectorExitError extends Error {
+  constructor() { super('Could not confirm MCP watch connector exit after forced termination.'); }
+}
+
 class WatchStdioTransport implements Transport {
   onclose?: () => void;
   onerror?: (error: Error) => void;
@@ -84,7 +96,7 @@ class WatchStdioTransport implements Transport {
     const fail = (error: Error) => {
       if (!this.closing) this.onerror?.(error);
     };
-    child.once('close', () => this.onclose?.());
+    child.once('close', () => setImmediate(() => this.onclose?.()));
     child.on('error', fail);
     child.stdin.on('error', fail);
     child.stdout.on('error', fail);
@@ -128,15 +140,24 @@ class WatchStdioTransport implements Transport {
     this.reader.clear();
     const child = this.child;
     if (!child) return;
-    child.stdout.destroy();
-    child.stdin.end();
-    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
-      const closed = new Promise<void>((resolve) => child.once('close', resolve));
-      await Promise.race([closed, delay(250, undefined, { ref: false })]);
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    const running = () => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
+    let onExit!: () => void;
+    const exited = new Promise<true>((resolve) => { onExit = () => resolve(true); });
+    child.once('exit', onExit);
+    try {
+      child.stdout.destroy();
+      child.stdin.end();
+      if (running() && !await Promise.race([exited, delay(STDIO_EXIT_GRACE_MS, false, { ref: false })])) {
+        if (running()) child.kill('SIGKILL');
+        if (running() && !await Promise.race([exited, delay(STDIO_KILL_WAIT_MS, false, { ref: false })]) && running()) {
+          throw new MonitorConnectorExitError();
+        }
+      }
+    } finally {
+      child.removeListener('exit', onExit);
+      child.stdin.destroy();
+      child.unref();
     }
-    child.stdin.destroy();
-    child.unref();
   }
 }
 
@@ -203,9 +224,9 @@ export async function waitForMcp(
   const onSetupAbort = () => failSetup(setup.reason);
   setup.addEventListener('abort', onSetupAbort, { once: true });
   try {
-    await Promise.race([failed, setupFailed, subscribe()]);
-    setup.removeEventListener('abort', onSetupAbort);
-    const outcome = await Promise.race([failed, result]);
+    const subscribed = subscribe().then(() => setup.removeEventListener('abort', onSetupAbort));
+    const completion = Promise.all([subscribed, result]).then(([, outcome]) => outcome);
+    const outcome = await Promise.race([failed, setupFailed, completion]);
     lifetime.throwIfAborted();
     return outcome;
   } finally {

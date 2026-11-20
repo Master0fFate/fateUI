@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { DesktopConnectionApi } from './connections';
+import type { WordReviewApi } from './wordReview';
+import { gitReviewHeadSchema, pullRequestReviewChannels, type PullRequestReviewStatus } from './pullRequestReview';
 import { memoryLearningSettingsSchema, learningTurnSchema, type LearningApi } from './learning';
 import { agentChannels, agentInboxChannels, type AgentsApi } from './agents';
 import type { GoogleClientInput, GoogleConnectInput, GoogleStatus } from './google';
@@ -296,6 +298,7 @@ export const ipcChannels = {
   gitOperation: 'git:operation',
   gitRevertPath: 'git:revert-path',
   gitHunks: 'git:hunks',
+  gitPullRequestReview: pullRequestReviewChannels.status,
   gitRevertHunk: 'git:revert-hunk',
   sessionExport: 'session:export',
 } as const;
@@ -491,6 +494,7 @@ export const gitChangeSchema = z.object({
 });
 export const gitStatusSchema = z.object({
   repository: z.boolean(),
+  head: gitReviewHeadSchema.nullable().optional(),
   branch: z.string(),
   upstream: z.string().max(1_000).nullable(),
   pushTarget: z.string().max(1_000).nullable(),
@@ -503,6 +507,7 @@ export const gitStatusSchema = z.object({
 });
 export const gitDiffSchema = z.object({
   path: z.string().min(1),
+  head: gitReviewHeadSchema.nullable().optional(),
   state: z.enum(['text', 'image', 'binary', 'large', 'unavailable']),
   original: z.string().optional(),
   modified: z.string().optional(),
@@ -1701,7 +1706,8 @@ export type ModelsDevAddInput = z.infer<typeof modelsDevAddInputSchema>;
 export type ModelsDevRemoveInput = z.infer<typeof modelsDevRemoveInputSchema>;
 export type ModelsDevMutationResult = z.infer<typeof modelsDevMutationResultSchema>;
 
-export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionApi {
+export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionApi, WordReviewApi {
+  getPullRequestStatus(projectPath: string, head: string, branch: string): Promise<PullRequestReviewStatus>;
   getAppInfo: () => Promise<AppInfo>;
   controlWindow: (action: WindowControlAction) => Promise<WindowState>;
   getWindowState: () => Promise<WindowState>;
