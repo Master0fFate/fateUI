@@ -137,11 +137,12 @@ describe('Composer voice input', () => {
     fireEvent.change(textarea, { target: { value: 'draft while speaking' } });
 
     await user.click(screen.getByRole('button', { name: 'Start voice recording' }));
+    const recordingButton = await screen.findByRole('button', { name: 'Stop voice recording' });
     const improveWhileRecording = screen.getByRole('button', { name: 'Improve prompt' });
     expect(improveWhileRecording).toBeDisabled();
     await user.click(improveWhileRecording).catch(() => undefined);
 
-    await user.click(screen.getByRole('button', { name: 'Stop voice recording' }));
+    await user.click(recordingButton);
     await waitFor(() => expect(transcribeSpeech).toHaveBeenCalledOnce());
     const improveWhileTranscribing = screen.getByRole('button', { name: 'Improve prompt' });
     expect(improveWhileTranscribing).toBeDisabled();
