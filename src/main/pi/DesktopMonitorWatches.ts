@@ -9,6 +9,7 @@ const POLL_MS = 20_000;
 const MAX_WATCHES = 8;
 const MAX_HISTORY = 24;
 const MAX_COMPLETIONS = 256;
+const FIRST_SAVE_GRACE_MS = 30_000;
 
 type Connector = Extract<McpServerDefinition, { transport: 'stdio' }>;
 export interface MonitorWakeInput {
@@ -45,6 +46,7 @@ interface Watch {
   answer?: string;
   connector?: Connector;
   nextCheck: number;
+  saveDeadline?: number;
   failures: number;
 }
 
@@ -88,7 +90,7 @@ export class DesktopMonitorWatches {
     return [...this.watches.values()].some(({ request }) => request.workspaceRoot === workspaceRoot);
   }
 
-  async start(input: unknown, scopeIsCurrent?: () => boolean): Promise<void> {
+  async start(input: unknown, scopeIsCurrent?: () => boolean, waitForFirstSave = false): Promise<void> {
     const request = monitorWatchRequestSchema.parse(input);
     if (!this.deps.isLocal() || this.disposed) throw new Error('Monitor watches require the local desktop.');
     if (this.watches.size + this.starting.size >= MAX_WATCHES || this.working.size + this.starting.size >= MAX_WATCHES) throw new Error('Stop a watch before adding another.');
@@ -100,20 +102,24 @@ export class DesktopMonitorWatches {
     this.starting.add(admission);
     try {
       const { source } = request;
-      if (source.kind === 'github-actions') { source.repo = source.repo.toLowerCase(); source.sha = source.sha.toLowerCase(); }
+      if (source.kind !== 'mcp') { source.repo = source.repo.toLowerCase(); source.sha = source.sha.toLowerCase(); }
       const connector = source.kind === 'mcp' ? (await this.connectors()).find(({ name }) => name === source.connector) : undefined;
       if (source.kind === 'mcp' && !connector) throw new Error('Enable the local stdio connector in Settings > MCP before starting a watch.');
       const roots = await this.deps.trustedRoots();
-      if (!roots.includes(request.workspaceRoot) || !await target.isSaved()) throw new Error('The original trusted saved chat is unavailable.');
+      if (!roots.includes(request.workspaceRoot)) throw new Error('The original trusted chat is unavailable.');
+      const saved = await target.isSaved();
+      if (!saved && !waitForFirstSave) throw new Error('The original trusted saved chat is unavailable.');
       if (admission.cancelled || this.disposed || !this.deps.isLocal() || scopeIsCurrent?.() === false) {
         throw new Error('Monitor scope changed before the watch could start.');
       }
       const key = JSON.stringify([request.workspaceRoot, request.sessionId, source.kind === 'mcp'
-        ? [source.kind, source.connector, source.eventId, source.revision] : [source.kind, source.repo, source.runId, source.sha]]);
+        ? [source.kind, source.connector, source.eventId, source.revision]
+        : [source.kind, source.repo, source.kind === 'github-pr' ? source.prNumber : source.runId, source.sha]]);
       if (this.consumed.has(key) || [...this.watches.values()].some((watch) => watch.key === key)) throw new Error('This completion is already watched or was already recorded for this chat.');
       const id = randomUUID();
       const watch: Watch = { request, key, target, controller: new AbortController(), ...(connector ? { connector } : {}),
-        status: { id, source, state: 'waiting', wake: request.wake, expiresAt: Date.now() + TTL_MS }, nextCheck: 0, failures: 0 };
+        status: { id, source, state: 'waiting', wake: request.wake, expiresAt: Date.now() + TTL_MS },
+        nextCheck: 0, ...(!saved ? { saveDeadline: Date.now() + FIRST_SAVE_GRACE_MS } : {}), failures: 0 };
       this.watches.set(id, watch);
       this.schedule(0);
     } finally { this.starting.delete(admission); }
@@ -187,7 +193,13 @@ export class DesktopMonitorWatches {
       if (pinned && !configs.some((item) => sameConnector(pinned, item))) { this.finish(watch, 'stopped'); continue; }
       const saved = await watch.target.isSaved();
       if (!this.live(watch)) continue;
-      if (!saved) { this.clear(watch.request.workspaceRoot, watch.request.sessionId); continue; }
+      if (!saved) {
+        if (watch.saveDeadline !== undefined) {
+          if (Date.now() >= watch.saveDeadline) this.finish(watch, 'failed');
+        } else this.clear(watch.request.workspaceRoot, watch.request.sessionId);
+        continue;
+      }
+      delete watch.saveDeadline;
       if (this.working.size >= MAX_WATCHES || this.working.has(watch) || Date.now() < watch.nextCheck) continue;
       this.working.add(watch);
       const operation = (watch.status.result === undefined ? this.step(watch) : this.wake(watch)).catch(() => {
@@ -204,7 +216,7 @@ export class DesktopMonitorWatches {
     let result: MonitorWatchResult | undefined;
     await this.revalidate(watch);
     try {
-      if (source.kind === 'github-actions') result = await pollGitHub(source, signal);
+      if (source.kind !== 'mcp') result = await pollGitHub(source, signal, watch.request.workspaceRoot);
       else {
         const launch = (servers: readonly McpServerDefinition[]) => {
           const approved = servers.find((server): server is Connector => server.transport === 'stdio' && server.enabled && sameConnector(server, watch.connector!));

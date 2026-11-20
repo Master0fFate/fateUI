@@ -35,6 +35,7 @@ import { ComputerUseService } from './computer/ComputerUseService';
 import { isElevated, relaunchElevated } from './computer/elevation';
 import type { PiRuntimeService } from './pi/PiRuntimeService';
 import { DesktopMonitorWatches } from './pi/DesktopMonitorWatches';
+import { resolveGitHubWatch } from './pi/monitorSources';
 import { McpConfigService } from './pi/McpConfigService';
 import { ConnectionProfileStore } from './connections/ConnectionProfileStore';
 import { ConnectionProfileEditor } from './connections/ConnectionProfileEditor';
@@ -521,6 +522,16 @@ app.whenReady().then(async () => {
     },
   });
   monitorWatches = desktopWatches;
+  desktopRuntime.setChatWatchStarter(async (scope, { url, channel, followUp }, current, signal) => {
+    const stillCurrent = () => !hostStopping && connections?.isLocal === true && !signal?.aborted && current();
+    if (!stillCurrent()) throw new Error('This watch must be started in its original local chat.');
+    const source = channel ? { kind: 'mcp' as const, ...channel }
+      : await resolveGitHubWatch(scope.workspaceRoot, url ? { url } : {}, signal ?? new AbortController().signal);
+    if (!stillCurrent()) throw new Error('The chat changed before the watch could start.');
+    await desktopWatches.start({ ...scope, source, wake: true, followUp: followUp ?? 'Tell me how the watched work finished.' }, stillCurrent, true);
+    if (source.kind === 'mcp') return `${source.eventId} on ${source.connector}`;
+    return source.kind === 'github-pr' ? `${source.repo} PR #${source.prNumber}` : `${source.repo} run ${source.runId}`;
+  });
   desktopRuntime.setMonitorWorkspacePins((root) => desktopWatches.hasActiveWork(root));
   desktopRuntime.subscribeMonitorTargetInvalidation((root, sessionId) => desktopWatches.clear(root, sessionId));
   const mainCommands = registerIpc({ runtime, ...(useCoreIpcAdapter ? { core } : { monitorCore: core }), connections, ...(connectionEditor ? { connectionEditor } : {}), projects, files, git, settings, learning: core.learning, ...(core.savedAgents ? { agents: core.savedAgents } : {}), google, terminal, logs, music, computerUse, speech, hotkey, updates, recovery, browser: browserHost, attestations: core.attestations, checkpoints: new CheckpointRestoreService(core.attestations, core.checkpoints), newWindow: () => windows.createWindow(), rendererPolicy, monitorWatches: desktopWatches });

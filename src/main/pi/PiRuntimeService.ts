@@ -141,6 +141,7 @@ import { TaskService } from './tasks/TaskService';
 import { createTaskTools, TASK_TOOL_NAMES } from './tasks/TaskTools';
 import { buildMonitorDashboard, type MonitorRunsSource } from './monitor/MonitorDashboard';
 import { createMonitorDashboardTool, MONITOR_DASHBOARD_TOOL_NAME } from './monitor/MonitorDashboardTool';
+import { createChatWatchTool, parseChatWatchRequest, type ChatWatchInput, type ChatWatchStarter } from './monitor/ChatWatchTool';
 import type { MonitorDashboard, MonitorReadInput } from '../../shared/contracts/monitorDashboard';
 import { agentSessionPermission, bindAgentSessionPreset, filterAgentSessionTools, getAgentSessionPreset, presetPermission, readAgentSessionPreset, validateAgentSkills } from '../agents/AgentSessionPreset';
 import { AGENT_HOME_TOOL_NAMES, createRunInProjectTool, type AgentMessage, type AgentRunHandle, type AgentRunOutcome, type AgentRunStarter, type AgentRunTarget } from '../agents/AgentRunTool';
@@ -1386,6 +1387,18 @@ export class PiRuntimeService {
   private readonly recoveredExecution: RecoveredExecutionPolicy;
   private readonly tasks: TaskService;
   private monitorRunsSource: ((projectPath: string) => Promise<MonitorRunsSource>) | null = null;
+  private chatWatchStarter: ChatWatchStarter | null = null;
+  private readonly chatWatchTurns = new Map<RuntimeSlot, {
+    runId: string;
+    promptText: string;
+    input: ChatWatchInput;
+    workspaceRoot: string;
+    controller: AbortController;
+    signal: AbortSignal;
+    current: () => boolean;
+    bound: boolean;
+    used: boolean;
+  }>();
   private computerUse: ComputerUsePort | null = null;
   private agentRunStarter: AgentRunStarter | null = null;
   private agentSessionGate: ((agentId: string) => Promise<void>) | null = null;
@@ -1432,6 +1445,33 @@ export class PiRuntimeService {
 
   setLearningService(service: LearningService): void { this.learningService = service; }
   setMonitorRunsSource(source: ((projectPath: string) => Promise<MonitorRunsSource>) | null): void { this.monitorRunsSource = source; }
+  setChatWatchStarter(starter: ChatWatchStarter | null): void {
+    if (this.chatWatchStarter === starter) return;
+    this.chatWatchStarter = starter;
+    for (const slot of this.chatWatchTurns.keys()) this.clearChatWatchTurn(slot);
+  }
+
+  private clearChatWatchTurn(slot: RuntimeSlot, runId?: string): void {
+    const turn = this.chatWatchTurns.get(slot);
+    if (!turn || runId !== undefined && turn.runId !== runId) return;
+    this.chatWatchTurns.delete(slot);
+    turn.controller.abort();
+  }
+
+  private async startChatWatch(sessionId: string, signal?: AbortSignal): Promise<string> {
+    const slot = this.findLiveSlot(sessionId);
+    const turn = slot && this.chatWatchTurns.get(slot);
+    const starter = this.chatWatchStarter;
+    if (!starter || !turn?.bound || turn.used || !turn.current() || signal?.aborted) {
+      throw new Error('Send a direct request in this chat, such as “Watch CI on my PR and tell me when it finishes”, when the chat is idle.');
+    }
+    turn.used = true;
+    const combined = signal ? AbortSignal.any([signal, turn.signal]) : turn.signal;
+    const current = () => !combined.aborted && turn.current();
+    const label = await starter({ workspaceRoot: turn.workspaceRoot, sessionId }, turn.input, current, combined);
+    if (!current()) throw new Error('The watch request is no longer current.');
+    return label;
+  }
   setComputerUse(port: ComputerUsePort | null): void { this.computerUse = port; }
 
   /** Host-owned admission only. The renderer cannot install or reset this guard. */
@@ -2388,8 +2428,14 @@ export class PiRuntimeService {
     if (this.status === 'auth-required') throw new PiDesktopError(this.stateError ?? authRequiredError());
     const sessionId = this.selectedSessionId;
     const hyp3rc0d3 = sessionId && !replayedMessage && HYP3RC0D3_KEYWORD.test(input.text) ? prepareHyp3rc0d3Session(sessionId) : null;
+    const chatWatch = this.chatWatchStarter && this.permissionHost.mode !== 'network' && this.paths?.profileKind !== 'server'
+      && !skipCommandExpansion && !preparedPrompt && !replayedMessage && !assertAdmission && input.behavior === 'prompt'
+      ? parseChatWatchRequest(input.text) : null;
+    const selectionGeneration = this.coldSelectionGeneration;
+    const initialization = this.initialization;
     await this.materializeColdSession();
-    if (hyp3rc0d3 && this.selectedSessionId !== sessionId) throw this.replacementSuperseded();
+    if ((hyp3rc0d3 || chatWatch) && this.selectedSessionId !== sessionId) throw this.replacementSuperseded();
+    if (chatWatch && (selectionGeneration !== this.coldSelectionGeneration || initialization !== this.initialization)) throw this.replacementSuperseded();
     this.requireSession();
     this.cancelPromptOptimization();
     if (!skipCommandExpansion && !preparedPrompt && !replayedMessage) {
@@ -2403,7 +2449,11 @@ export class PiRuntimeService {
         return this.startCompactCommand(compact.instructions);
       }
     }
-    return this.promptSlot(this.selectedSlot!, input, skipCommandExpansion, preparedPrompt, replayedMessage, { ...(assertAdmission ? { assertAdmission } : {}), hyp3rc0d3 });
+    return this.promptSlot(this.selectedSlot!, input, skipCommandExpansion, preparedPrompt, replayedMessage, {
+      ...(assertAdmission ? { assertAdmission } : {}), hyp3rc0d3,
+      ...(chatWatch && !this.sessionHasActiveWork(this.selectedSlot!.runtime.session) && this.selectedSlot!.activeRunId === null
+        ? { chatWatch, selectionGeneration } : {}),
+    });
   }
 
   private async reloadSession(slot: RuntimeSlot | null, assertAdmission?: () => void, commandRunId?: string): Promise<void> {
@@ -2456,7 +2506,8 @@ export class PiRuntimeService {
   }
 
   private async promptSlot(slot: RuntimeSlot, input: PromptInput, skipCommandExpansion: boolean, preparedPrompt: boolean, replayedMessage: QueuedMessageRecord | undefined,
-    options: { assertAdmission?: () => void; pinned?: boolean; hyp3rc0d3?: ReturnType<typeof prepareHyp3rc0d3Session> | null }): Promise<PromptAcceptance> {
+    options: { assertAdmission?: () => void; pinned?: boolean; hyp3rc0d3?: ReturnType<typeof prepareHyp3rc0d3Session> | null;
+      chatWatch?: ChatWatchInput; selectionGeneration?: number }): Promise<PromptAcceptance> {
     if (this.hostStopping) throw new Error('The core is shutting down; prompts are closed.');
     const session = slot.runtime.session;
     const hyp3rc0d3Match = HYP3RC0D3_KEYWORD.exec(input.text);
@@ -2756,6 +2807,9 @@ export class PiRuntimeService {
       if (this.selectedSlot === slot) this.emitState();
     } });
     pendingHyp3rc0d3?.prepare();
+    const watchProject = this.project;
+    const watchStarter = this.chatWatchStarter;
+    const watchGeneration = slot.sessionGeneration;
     let settled = false;
     return new Promise<PromptAcceptance>((resolve) => {
       const releaseQueuedReservation = (restoreModel: boolean): void => {
@@ -2785,6 +2839,7 @@ export class PiRuntimeService {
           resolve({ accepted: false, runId });
           return;
         }
+        if (disposition === 'started') this.clearChatWatchTurn(slot);
         if (accepted) {
           if (disposition !== 'handled' && (!replayedMessage || slot.freshIntentQueueIds.has(replayedMessage.id)) && !options.assertAdmission && !promptStartsWithCommand) {
             try { this.recordFreshExecutionIntent(session.sessionId); }
@@ -2815,6 +2870,19 @@ export class PiRuntimeService {
           } else if (disposition === 'started') {
             slot.activeRunId = runId;
             slot.objective = input.text.trim().slice(0, 500);
+            if (options.chatWatch && watchProject?.trusted && watchStarter && !queuedRecord && !promptStartsWithCommand
+              && slot.sessionTurnPhase === 'idle' && startsRun && !streamingWhenRequested) {
+              const controller = new AbortController();
+              const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]);
+              const current = (): boolean => {
+                if (signal.aborted || this.chatWatchTurns.get(slot)?.runId !== runId || this.chatWatchStarter !== watchStarter
+                  || !ownsSlot() || this.project !== watchProject || this.selectedSlot !== slot || this.replacementActive
+                  || this.coldSelectionGeneration !== options.selectionGeneration || slot.sessionGeneration !== watchGeneration
+                  || slot.activeRunId !== runId) return false;
+                try { this.assertPermissionAdmission(slot); return true; } catch { return false; }
+              };
+              this.chatWatchTurns.set(slot, { runId, promptText, input: options.chatWatch, workspaceRoot: watchProject.path, controller, signal, current, bound: false, used: false });
+            }
             if (queuedRecord && !slot.acknowledgedQueueIds.has(queuedRecord.id)) {
               // The old stream ended in an SDK hook. Keep the reservation and
               // bind it by identity to the next user message, even if a hook
@@ -2862,6 +2930,7 @@ export class PiRuntimeService {
           accept(disposition);
         },
       }).catch((error: unknown) => {
+        this.clearChatWatchTurn(slot, runId);
         if (!ownsSlot()) {
           accept(false);
           return;
@@ -2872,6 +2941,7 @@ export class PiRuntimeService {
         slot.runFailed = true;
         if (this.selectedSlot === slot) this.emitError(normalized);
       }).finally(() => {
+        this.clearChatWatchTurn(slot, runId);
         if (extensionCommandRunIds.get(session) === runId) extensionCommandRunIds.delete(session);
         pendingHyp3rc0d3?.cancel();
         if (slot.activeRunId === runId) slot.activeRunId = null;
@@ -2999,6 +3069,7 @@ export class PiRuntimeService {
     const slot = this.selectedSlot;
     const session = slot?.runtime.session;
     if (!session || !slot) return { aborted: false };
+    this.clearChatWatchTurn(slot);
     slot.promptEpoch += 1;
     const hadQueuedMessages = slot.queuedMessages.length + slot.heldCompactionMessages.length > 0;
     const hadQuestion = this.questionnaires.cancel(session.sessionId);
@@ -4640,6 +4711,7 @@ export class PiRuntimeService {
     this.recoveredExecution.clear();
     this.cancelProviderLogin();
     for (const slot of this.liveSlots) {
+      this.clearChatWatchTurn(slot);
       this.revokeSlotToolAccess(slot);
       try { this.agentTeams.lowerRootPermission(slot.runtime.session.sessionId, 'read-only'); } catch { /* Cancellation still follows. */ }
     }
@@ -4797,6 +4869,7 @@ export class PiRuntimeService {
     slot.boundSession = null;
     slot.bindingSession = null;
     slot.sessionInvalidated = true;
+    this.clearChatWatchTurn(slot);
     slot.activeRunId = null;
     slot.objective = '';
     slot.queuedMessages = [];
@@ -5213,6 +5286,18 @@ export class PiRuntimeService {
 
   private handleSessionEvent(slot: RuntimeSlot, session: AgentSession, generation: number, event: AgentSessionEvent): void {
     if (this.initialization !== slot.projectGeneration || slot.disposed || generation !== slot.sessionGeneration || slot.runtime.session !== session) return;
+    const watch = this.chatWatchTurns.get(slot);
+    if (watch) {
+      if (!watch.current() || event.type === 'agent_end' || event.type === 'agent_settled'
+        || watch.bound && (event.type === 'agent_start' || event.type === 'turn_start')) {
+        this.clearChatWatchTurn(slot, watch.runId);
+      } else if (event.type === 'message_start' && event.message.role === 'user') {
+        const content = event.message.content;
+        const text = typeof content === 'string' ? content : content[0]?.type === 'text' ? content[0].text : undefined;
+        if (!watch.bound && text === watch.promptText) watch.bound = true;
+        else this.clearChatWatchTurn(slot, watch.runId);
+      }
+    }
     if (event.type === 'message_start' && event.message.role === 'custom') {
       const admitted = this.pendingDirectIntent(slot, event.message);
       if (admitted) { slot.pendingDirectIntentIds.delete(admitted); this.recordFreshExecutionIntent(session.sessionId); }
@@ -6369,6 +6454,9 @@ export class PiRuntimeService {
       },
     }) : [])];
     tools.push(this.createRememberTool(), createCapabilitiesTool((sessionId) => this.agentCapabilities(sessionId)));
+    if (this.permissionHost.mode !== 'network' && this.paths?.profileKind !== 'server') {
+      tools.push(createChatWatchTool((sessionId, signal) => this.startChatWatch(sessionId, signal)));
+    }
     for (const tool of tools) installToolExecutionAdmission(tool, () => {
       if (this.hostStopping) throw new Error('The core is shutting down; a live root session cannot admit retained tools.');
       this.executionAdmissionGuard();

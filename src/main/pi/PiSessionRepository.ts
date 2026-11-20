@@ -1,7 +1,8 @@
-import { existsSync, lstatSync, realpathSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, writeFileSync } from 'node:fs';
 import { lstat, open, opendir, readdir, realpath, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
+  CURRENT_SESSION_VERSION,
   getAgentDir,
   SessionManager,
   type AgentSession,
@@ -971,17 +972,33 @@ export class PiSessionRepository {
       }
       return stat;
     };
-    if (!live) throw new Error('Open the original chat before saving a Monitor reply.');
     assertCurrent();
-    assertFile();
-    const manager = live;
+    const before = assertFile();
+    if (!live) {
+      if (before.size > 16 * 1024 * 1024) throw new Error('The saved chat is too large to update in the background.');
+      const fd = openSync(sessionPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+      try {
+        const stat = fstatSync(fd);
+        if (!stat.isFile() || stat.dev !== file.dev || stat.ino !== file.ino || stat.size !== before.size) throw new Error('Monitor chat file changed.');
+        const bytes = Buffer.alloc(Math.min(stat.size, 64 * 1024));
+        const end = bytes.subarray(0, readSync(fd, bytes, 0, bytes.length, 0)).indexOf(10);
+        const header: unknown = end < 0 ? null : JSON.parse(bytes.subarray(0, end).toString('utf8'));
+        const last = Buffer.alloc(1);
+        if (!isRecord(header) || header.type !== 'session' || header.id !== sessionId || header.version !== CURRENT_SESSION_VERSION
+          || !sessionProjectMatches(header.cwd, cwd) || readSync(fd, last, 0, 1, stat.size - 1) !== 1 || last[0] !== 10) {
+          throw new Error('Open the original chat before saving a Monitor reply.');
+        }
+      } finally { closeSync(fd); }
+    }
+    const manager = live ?? SessionManager.open(sessionPath, directory, cwd);
     const header = manager.getHeader();
     if (!manager.isPersisted() || manager.getSessionId() !== sessionId || !sessionProjectMatches(header?.cwd, cwd)
       || !manager.getSessionFile() || resolve(manager.getSessionFile()!) !== sessionPath
       || !manager.getEntries().some((entry) => entry.type === 'message' && (entry.message.role === 'user' || entry.message.role === 'assistant'))) {
       throw new Error('Monitor chat is not a saved conversation.');
     }
-    assertFile();
+    const after = assertFile();
+    if (!live && (after.size !== before.size || after.mtimeMs !== before.mtimeMs)) throw new Error('Monitor chat file changed.');
     assertCurrent();
     if (!manager.getEntries().some((entry) => entry.type === 'custom' && entry.customType === MONITOR_REPLY_TYPE
       && isRecord(entry.data) && entry.data.id === reply.id)) manager.appendCustomEntry(MONITOR_REPLY_TYPE, reply);
