@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { LEARNING_LIMITS, learningSnapshotSchema, type LearningScope, type LearningSnapshot } from '../../shared/contracts/learning';
+import { retryWindowsFileOperation } from '../files/retryWindowsFileOperation';
 import { fateDataRoot } from '../pi/FateProviderStorage';
 import { PiDesktopError } from '../pi/errors';
 
@@ -172,10 +173,12 @@ export class LearningRepository {
     try {
       const handle = await fs.open(temp, 'wx', 0o600);
       try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
-      const stat = await fs.lstat(target).catch((error: unknown) => { if (isMissing(error)) return null; throw error; });
-      if (stat && (!stat.isFile() || stat.isSymbolicLink())) learningError('Unsafe snapshot target.');
-      if (path.normalize(await fs.realpath(directory)) !== path.normalize(directory)) learningError('Store directory changed before writing.');
-      await fs.rename(temp, target);
+      await retryWindowsFileOperation(async () => {
+        const stat = await fs.lstat(target).catch((error: unknown) => { if (isMissing(error)) return null; throw error; });
+        if (stat && (!stat.isFile() || stat.isSymbolicLink())) learningError('Unsafe snapshot target.');
+        if (path.normalize(await fs.realpath(directory)) !== path.normalize(directory)) learningError('Store directory changed before writing.');
+        await fs.rename(temp, target);
+      });
       if (process.platform !== 'win32') {
         const parent = await fs.open(directory, 'r');
         try { await parent.sync(); } finally { await parent.close(); }
