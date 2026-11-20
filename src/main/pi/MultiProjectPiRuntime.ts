@@ -6,6 +6,7 @@ import type { PiEvent, ProjectState, RuntimeState, SessionSummary } from '../../
 import type { AgentWorkspacePolicy } from '../../shared/contracts/multiAgent';
 import type { TaskEvent } from '../../shared/contracts/tasks';
 import type { MonitorRunsSource } from './monitor/MonitorDashboard';
+import type { ChatWatchStarter } from './monitor/ChatWatchTool';
 import type { AgentRunStarter } from '../agents/AgentRunTool';
 import type { GoogleAccount } from '../google/GoogleAccount';
 import type { PiBrowserRuntimeIntegration } from './BrowserRuntimeBridge';
@@ -166,6 +167,7 @@ export class MultiProjectPiRuntime {
   private readonly focusListeners = new Set<() => void>();
   private readonly monitorTargetInvalidations = new Set<(projectPath: string, sessionId?: string) => void>();
   private monitorPins: ((projectPath: string) => boolean) | undefined;
+  private chatWatchStarter: ChatWatchStarter | null = null;
   private readonly servicePaths = new WeakMap<PiRuntimeService, string>();
   private readonly checkoutOwnership: CheckoutOwnership | null;
   private stopping = false;
@@ -393,6 +395,12 @@ export class MultiProjectPiRuntime {
     return this.bootService.setProjectPreview(project, sessions);
   }
 
+  setChatWatchStarter(starter: ChatWatchStarter | null): void {
+    this.chatWatchStarter = starter;
+    this.bootService.setChatWatchStarter(starter);
+    this.manager.forEach((_path, service) => service.setChatWatchStarter(starter));
+  }
+
   setMonitorWorkspacePins(pins: (projectPath: string) => boolean): void {
     this.monitorPins = pins;
   }
@@ -602,6 +610,7 @@ export class MultiProjectPiRuntime {
     });
     if (this.deps.learning) service.setLearningService(this.deps.learning);
     if (this.deps.monitorRuns) service.setMonitorRunsSource(this.deps.monitorRuns);
+    service.setChatWatchStarter(this.chatWatchStarter);
     if (this.deps.computerUse) service.setComputerUse(this.deps.computerUse);
     if (this.deps.agentRunStarter) service.setAgentRunStarter(this.deps.agentRunStarter);
     if (this.deps.agentSessionGate) service.setAgentSessionGate(this.deps.agentSessionGate);
@@ -668,6 +677,7 @@ export class MultiProjectPiRuntime {
           case 'setEventSink': return (sink: (events: PiEvent[]) => void) => self.setEventSink(sink);
           case 'setGoalEventSink': return (sink: (event: GoalMaxEvent) => void) => self.setGoalEventSink(sink);
           case 'setTaskEventSink': return (sink: (event: TaskEvent) => void) => self.setTaskEventSink(sink);
+          case 'setChatWatchStarter': return (starter: ChatWatchStarter | null) => self.setChatWatchStarter(starter);
           case 'dispose': return () => self.dispose();
           default: break;
         }

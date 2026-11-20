@@ -2,9 +2,12 @@ import { z } from 'zod';
 
 const connectorName = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/u);
-const repo = z.string().max(140).regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/u);
+export const monitorGitHubRepoSchema = z.string().max(140).regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/u);
+export const monitorGitHubIdSchema = z.string().regex(/^[1-9][0-9]{0,15}$/u).refine((id) => Number.isSafeInteger(Number(id)), 'Invalid GitHub ID.');
+export const monitorGitHubShaSchema = z.string().regex(/^[a-fA-F0-9]{40}$/u);
 export const monitorWatchSourceSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('github-actions'), repo, runId: z.string().regex(/^[1-9][0-9]{0,19}$/u), sha: z.string().regex(/^[a-fA-F0-9]{40}$/u) }).strict(),
+  z.object({ kind: z.literal('github-actions'), repo: monitorGitHubRepoSchema, runId: monitorGitHubIdSchema, sha: monitorGitHubShaSchema }).strict(),
+  z.object({ kind: z.literal('github-pr'), repo: monitorGitHubRepoSchema, prNumber: monitorGitHubIdSchema, sha: monitorGitHubShaSchema }).strict(),
   z.object({ kind: z.literal('mcp'), connector: connectorName, eventId: identifier, revision: identifier }).strict(),
 ]);
 export type MonitorWatchSource = z.infer<typeof monitorWatchSourceSchema>;
