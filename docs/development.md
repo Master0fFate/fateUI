@@ -54,13 +54,14 @@ To build an installer from source, install the platform prerequisites above, che
 The cross-platform GitHub Actions package matrix runs for pull requests, pushes to `main`, version tags, and non-promotion manual dispatches.
 
 - Native hosted runners build, install or mount, and smoke-test Windows x64, macOS Apple Silicon and Intel, and Linux x64 packages: Windows NSIS, macOS DMG and PKG, Linux AppImage and DEB.
-- Package/OS version and `PRODVER` use the numeric release version, currently **2.3.2 in the source tree**. The optional `package.json.releaseName` is `Mon Capitaine`, so its title is **V2.3.2 - Mon Capitaine**. A source version is not proof that an installer has been published.
-- A release tag must be `v<package.json version>` (for example `v2.2.7`) and point to history contained in `main`. The human release title is derived separately by `node scripts/release-artifacts.mjs metadata --field display-version`.
-- After every native job passes, a version tag publishes seven installers and `SHA256SUMS` to its GitHub Release.
-- A manual dispatch with empty promotion inputs stages the same seven installers and `SHA256SUMS` as `verified-release-installers`, retained for 14 days. It does not create a tag or publish a release.
+- The version in `package.json` and `PRODVER` must match. The release tag is `v<version>`, and `node scripts/release-artifacts.mjs metadata --field display-version` combines that version with the optional `package.json.releaseName` for the display title.
+
+1. Merge the version bump and `.github/release-notes/v<version>.md` into `main`.
+2. Manually run **Cross-platform installers** on `main` with the promotion inputs empty. Confirm the run used the intended commit, all four native jobs passed, and `verified-release-installers` contains seven installers and `SHA256SUMS`. This artifact is retained for 14 days. This run does not publish anything.
+3. Push the version tag pointing to that verified commit. Let the tag workflow build, verify, and publish the release with its notes. Do not create a GitHub draft or publish it separately: the tag workflow owns publication and refuses to overwrite an existing release for the tag.
 
 The Renderer performance profiles workflow compares normal, Performance, and Holy sh*t modes on all four native targets. It freezes the candidate's profiling harness for both revisions; manual runs accept `baseline_ref`, defaulting to the nearest version tag. CPU work is timed separately from post-GC retained-heap measurements and final-output checks.
 
-Cross-platform or native dependency changes must pass the GitHub Actions matrix. Do not claim another operating system was verified solely from a cross-compiled artifact. Before tagging 2.3.2, verify the source is committed to `main`, the [2.3.2 release notes](../.github/release-notes/v2.3.2.md) match the shipped behavior, the Windows/macOS/Linux native package and installed-smoke jobs pass, and staged installers have all seven expected assets plus `SHA256SUMS`. A local test pass is not a release sign-off; do not create the tag or publish artifacts until these gates pass.
+Cross-platform or native dependency changes must pass the GitHub Actions matrix. A local test pass or a cross-compiled installer is not a substitute for a passing installed smoke test on the target platform.
 
 [Pi SDK compatibility](sdk-compatibility.md) records the current upstream release check, retained integration responsibilities, and patch policy. Performance reports are produced by the Renderer performance profiles workflow rather than maintained as release-specific implementation diaries. Main-process and SDK-backed logic tests run in Node; renderer DOM tests run in jsdom. When validating from inside an installed Fate UI, unset `TRANSCRIBE_LIBRARY` only in the validation subprocess so it loads the checkout's native speech library.
