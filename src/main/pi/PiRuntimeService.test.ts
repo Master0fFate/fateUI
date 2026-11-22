@@ -3939,7 +3939,7 @@ describe('PiRuntimeService', () => {
     const mainUser = { type: 'message', id: 'main-user', parentId: null, timestamp: '2025-01-01T00:00:01.000Z', message: { role: 'user', content: 'Saved prompt', timestamp: 1 } };
     const mainAssistant = {
       type: 'message', id: 'main-assistant', parentId: 'main-user', timestamp: '2025-01-01T00:00:02.000Z',
-      message: { role: 'assistant', content: 'Saved answer', timestamp: 2, usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 0, totalTokens: 10, cost: { total: 0.125 } } },
+      message: { role: 'assistant', content: 'Saved answer', timestamp: 2, stopReason: 'stop', durationMs: 250, usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 0, totalTokens: 10, cost: { total: 0.125 } } },
     };
     const toolResult = {
       type: 'message', id: 'tool-result', parentId: 'main-assistant', timestamp: '2025-01-01T00:00:03.000Z',
@@ -3972,7 +3972,7 @@ describe('PiRuntimeService', () => {
       input: 20, output: 11, cacheRead: 16, cacheWrite: 2, totalTokens: 49, cost: 3.875, turns: 2,
     });
     expect(state.tokenTelemetry?.history).toEqual([
-      { input: 2, output: 3, cacheRead: 5, cacheWrite: 0, totalTokens: 10, cost: 0.125, timestamp: 2, durationMs: expect.any(Number) },
+      { input: 2, output: 3, cacheRead: 5, cacheWrite: 0, totalTokens: 10, cost: 0.125, timestamp: 2, responseDurationMs: 250 },
     ]);
     await service.dispose();
   });
@@ -4510,7 +4510,7 @@ describe('PiRuntimeService', () => {
       {
         type: 'message', timestamp: '2025-01-01T00:00:04.000Z',
         message: {
-          role: 'assistant', timestamp: 4_000,
+          role: 'assistant', timestamp: 4_000, stopReason: 'stop', durationMs: 600,
           usage: { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: { total: 0.011 } },
           content: 'Second answer',
         },
@@ -4531,10 +4531,10 @@ describe('PiRuntimeService', () => {
     expect(fake.session.getSessionStats).toHaveBeenCalled();
     expect(state.tokenTelemetry).toEqual({
       session: { input: 177, output: 55, cacheRead: 684, cacheWrite: 26, totalTokens: 942, cost: 0.037, turns: 4 },
-      latest: { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000, durationMs: expect.any(Number) },
+      latest: { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000, responseDurationMs: 600 },
       history: [
-        { input: 100, output: 30, cacheRead: 500, cacheWrite: 20, reasoning: 12, totalTokens: 650, cost: 0.02, timestamp: 2_000, durationMs: expect.any(Number) },
-        { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000, durationMs: expect.any(Number) },
+        { input: 100, output: 30, cacheRead: 500, cacheWrite: 20, reasoning: 12, totalTokens: 650, cost: 0.02, timestamp: 2_000 },
+        { input: 50, output: 12, cacheRead: 100, cacheWrite: 0, totalTokens: 162, cost: 0.011, timestamp: 4_000, responseDurationMs: 600 },
       ],
     });
     await service.dispose();

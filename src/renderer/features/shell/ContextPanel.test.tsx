@@ -27,6 +27,7 @@ const sample = {
   totalTokens: 1_100,
   cost: 0.0123,
   timestamp: Date.UTC(2026, 0, 1, 12, 30),
+  responseDurationMs: 2_000,
 };
 
 describe('ContextPanel', () => {
@@ -62,6 +63,7 @@ describe('ContextPanel', () => {
     expect(within(summary).getByText('4.5k billed · 2 responses')).toBeVisible();
     expect(within(summary).getByText('75.0%')).toBeVisible();
     expect(within(summary).getByText('$0.08')).toBeVisible();
+    expect(within(summary).getByText('50.0')).toBeVisible();
     expect(screen.getByRole('img', { name: 'Stacked token traffic for the 2 most recent responses on the active branch' })).toBeVisible();
     expect(screen.getByText('included in output')).toBeVisible();
     expect(screen.getByText('Build exact token telemetry')).toBeVisible();

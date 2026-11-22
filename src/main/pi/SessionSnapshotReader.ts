@@ -360,6 +360,7 @@ function compactEntry(entry: SnapshotRecord, extensionBudget: { remaining: numbe
       ...(typeof message.isError === 'boolean' ? { isError: message.isError } : {}),
       ...(boundedString(message.stopReason, 50) ? { stopReason: boundedString(message.stopReason, 50) } : {}),
       ...(record(message.usage) ? { usage: message.usage } : {}),
+      ...(message.role === 'assistant' && typeof message.durationMs === 'number' ? { durationMs: message.durationMs } : {}),
       ...(boundedString(message.provider, 200) ? { provider: boundedString(message.provider, 200) } : {}),
       ...(boundedString(message.model, 200) ? { model: boundedString(message.model, 200) } : {}),
     };
