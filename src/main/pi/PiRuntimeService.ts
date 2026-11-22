@@ -1446,9 +1446,10 @@ export class PiRuntimeService {
     const slot = this.findLiveSlot(sessionId);
     const turn = slot && this.chatWatchTurns.get(slot);
     const starter = this.chatWatchStarter;
-    if (!starter || !turn?.bound || turn.used || !turn.current() || signal?.aborted) {
-      throw new Error('Send a direct request in this chat, such as “Watch CI on my PR and tell me when it finishes”, when the chat is idle.');
-    }
+    if (!starter) throw new Error('CI watching is unavailable in this session.');
+    if (!turn?.bound) throw new Error('No direct watch request was recognized for this turn. In an idle chat in a trusted desktop project, send “Watch CI on my PR”.');
+    if (!turn.current() || signal?.aborted) throw new Error('The watch request is no longer current.');
+    if (turn.used) throw new Error('This turn has already attempted to start a watch.');
     turn.used = true;
     const combined = signal ? AbortSignal.any([signal, turn.signal]) : turn.signal;
     const current = () => !combined.aborted && turn.current();

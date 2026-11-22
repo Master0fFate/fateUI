@@ -527,13 +527,13 @@ app.whenReady().then(async () => {
     },
   });
   monitorWatches = desktopWatches;
-  desktopRuntime.setChatWatchStarter(async (scope, { url, channel, followUp }, current, signal) => {
+  desktopRuntime.setChatWatchStarter(async (scope, { url, channel }, current, signal) => {
     const stillCurrent = () => !hostStopping && connections?.isLocal === true && !signal?.aborted && current();
     if (!stillCurrent()) throw new Error('This watch must be started in its original local chat.');
     const source = channel ? { kind: 'mcp' as const, ...channel }
       : await resolveGitHubWatch(scope.workspaceRoot, url ? { url } : {}, signal ?? new AbortController().signal);
     if (!stillCurrent()) throw new Error('The chat changed before the watch could start.');
-    await desktopWatches.start({ ...scope, source, wake: true, followUp: followUp ?? 'Tell me how the watched work finished.' }, stillCurrent, true);
+    await desktopWatches.start({ ...scope, source, wake: true, followUp: 'Tell me how the watched work finished.' }, stillCurrent, true);
     if (source.kind === 'mcp') return `${source.eventId} on ${source.connector}`;
     return source.kind === 'github-pr' ? `${source.repo} PR #${source.prNumber}` : `${source.repo} run ${source.runId}`;
   });
