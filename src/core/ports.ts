@@ -73,6 +73,7 @@ export interface BrowserIntegrationPort {
   revokeSession?(root: ActiveBrowserRoot): void;
   currentRoot(): ActiveBrowserRoot | null;
   setActiveRoot(root: ActiveBrowserRoot | null): void;
+  setColdRoot?(root: ActiveBrowserRoot): void;
   clearActiveRoot?(projectPath: string): void;
   setFocusedProjectPath?(projectPath: string | null): void;
 }

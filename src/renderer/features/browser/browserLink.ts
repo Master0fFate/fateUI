@@ -1,4 +1,6 @@
-import { getFateApiOptional, getDesktopApi, getDesktopApiOptional } from '../../platform/api';
+import { getDesktopApiOptional, hasCapability } from '../../platform/api';
+import { unavailableExplanation } from '../../platform/capabilityPolicy';
+import { browserActionMessage } from '../../../shared/browserActionError';
 import { normalizeBrowserWebUrl } from '../../../shared/contracts/browser';
 import { useBrowserStore } from '../../stores/browserStore';
 import { useRuntimeStore } from '../../stores/runtimeStore';
@@ -10,27 +12,37 @@ export async function openBrowserLink(value: string): Promise<void> {
 
   const ui = useUiStore.getState();
   const browser = useBrowserStore.getState();
-  const project = useRuntimeStore.getState().runtime.project;
+  const { project, sessionId } = useRuntimeStore.getState().runtime;
+  if (!hasCapability('nativeBrowser')) {
+    ui.showToast({ kind: 'warning', title: 'Browser unavailable', message: unavailableExplanation.nativeBrowser });
+    return;
+  }
   if (!project?.trusted) {
     ui.showToast({ kind: 'warning', title: 'Browser unavailable', message: 'Open and trust a project before opening links in the Browser workspace.' });
     return;
   }
-  if (!getFateApiOptional() || typeof getDesktopApiOptional()?.navigateBrowser !== 'function') {
-    ui.showToast({ kind: 'error', title: 'Browser unavailable', message: 'The desktop browser bridge is unavailable.' });
+  const desktop = getDesktopApiOptional();
+  if (typeof desktop?.navigateBrowser !== 'function') {
+    ui.showToast({ kind: 'error', title: 'Browser unavailable', message: 'Restart the desktop app to reconnect the browser.' });
     return;
   }
   if (browser.pending) return;
 
+  const stillSelected = () => {
+    const current = useRuntimeStore.getState().runtime;
+    return current.project?.trusted && current.project.path === project.path && current.sessionId === sessionId;
+  };
   ui.setBrowserOpen(true);
   browser.setPending('navigation');
-  browser.setError(null);
   try {
-    browser.hydrate(await getDesktopApi().navigateBrowser(url));
+    const state = await desktop.navigateBrowser(url);
+    if (stillSelected()) browser.hydrate(state);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'The link could not be opened in the Browser workspace.';
-    browser.setError(message);
-    ui.showToast({ kind: 'error', title: 'Could not open link', message });
+    if (!stillSelected()) return;
+    const message = browserActionMessage(error, 'Could not open the link. Check the address and try again.');
+    if (useUiStore.getState().browserOpen) browser.setError(message);
+    else ui.showToast({ kind: 'error', title: 'Could not open link', message });
   } finally {
-    useBrowserStore.getState().setPending(null);
+    if (stillSelected()) browser.setPending(null);
   }
 }

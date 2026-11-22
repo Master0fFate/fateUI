@@ -175,6 +175,7 @@ export class MultiProjectPiRuntime {
 
   constructor(private readonly deps: MultiProjectPiRuntimeDeps) {
     this.checkoutOwnership = deps.checkoutOwnership ?? (deps.paths ? hostCheckoutOwnership() : null);
+    this.deps.browserIntegration?.setFocusedProjectPath?.(null);
     this.bootService = this.createService();
     this.manager = new MultiProjectRuntimeManager<PiRuntimeService>(
       {
@@ -247,11 +248,9 @@ export class MultiProjectPiRuntime {
         onFocused: (service, projectPath) => {
           this.deps.browserIntegration?.setFocusedProjectPath?.(projectPath);
           if (service && projectPath) {
-            const sessionId = service.getState(false).sessionId;
-            if (sessionId) {
-              this.attentionByProject.get(projectPath)?.delete(sessionId);
-              this.deps.browserIntegration?.setActiveRoot({ projectPath, sessionId });
-            }
+            const sessionId = service.selectedSessionId;
+            if (sessionId) this.attentionByProject.get(projectPath)?.delete(sessionId);
+            service.syncBrowserRoot(projectPath);
           } else {
             this.deps.browserIntegration?.setActiveRoot(null);
           }

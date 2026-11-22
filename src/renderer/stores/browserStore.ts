@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { browserActionMessage } from '../../shared/browserActionError';
 import type {
   BrowserAnnotation,
   BrowserConfirmation,
@@ -61,7 +62,6 @@ export const useBrowserStore = create<BrowserStore>((set) => ({
   hydrate: (state, projectPath) => set({
     state,
     ...(projectPath === undefined ? {} : { initializedProjectPath: projectPath }),
-    error: null,
   }),
   applyEvents: (events) => set((current) => {
     let state = current.state;
@@ -73,11 +73,11 @@ export const useBrowserStore = create<BrowserStore>((set) => ({
       if (event.type === 'state') state = event.state;
       else if (event.type === 'confirmation-requested') confirmation = event.confirmation;
       else if (event.type === 'confirmation-cleared' && confirmation?.id === event.id) confirmation = null;
-      else if (event.type === 'navigation-blocked') error = event.reason;
+      else if (event.type === 'navigation-blocked') error = browserActionMessage(event.reason);
       else if (event.type === 'annotation-created') annotations = [event.annotation, ...annotations.filter((item) => item.id !== event.annotation.id)];
       else if (event.type === 'annotation-removed') annotations = annotations.filter((item) => item.id !== event.id);
-      else if (event.type === 'annotation-error') error = event.message;
-      else if (event.type === 'cdp-availability' && !event.available) error = event.reason ?? 'Semantic browser control disconnected.';
+      else if (event.type === 'annotation-error') error = browserActionMessage(event.message);
+      else if (event.type === 'cdp-availability' && !event.available) error = browserActionMessage(event.reason, 'Semantic browser control disconnected.');
       else if (event.type === 'work-log') {
         workLog = [...workLog, {
           id: ++nextWorkLogId,
@@ -89,8 +89,8 @@ export const useBrowserStore = create<BrowserStore>((set) => ({
     }
     return { state, annotations, confirmation, error, workLog };
   }),
-  setPending: (pending) => set({ pending }),
-  setError: (error) => set({ error }),
+  setPending: (pending) => set(pending ? { pending, error: null } : { pending }),
+  setError: (error) => set({ error: error === null ? null : browserActionMessage(error) }),
   setAnnotations: (annotations) => set({ annotations }),
   addAnnotation: (annotation) => set((current) => ({
     annotations: [annotation, ...current.annotations.filter((item) => item.id !== annotation.id)],

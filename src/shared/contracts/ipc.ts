@@ -1261,7 +1261,7 @@ export const subagentControlInputSchema = z.discriminatedUnion('action', [
 export const setModelInputSchema = z.object({ provider: z.string().min(1), id: z.string().min(1) }).strict();
 export const setThinkingInputSchema = z.object({ level: thinkingLevelSchema }).strict();
 export const setHyp3rc0d3InputSchema = z.object({ enabled: z.boolean() }).strict();
-export const recoveryReviewSchema = z.object({ reasons: z.array(z.string().min(1).max(500)).max(64) }).strict();
+export const recoveryReviewSchema = z.object({ reasons: z.array(z.string().min(1).max(500)).max(64), noticeId: z.string().regex(/^[a-f0-9]{64}$/u).nullable() }).strict();
 export type RecoveryReview = z.infer<typeof recoveryReviewSchema>;
 export const setPermissionInputSchema = z.object({ level: permissionLevelSchema }).strict();
 export const queueMutationInputSchema = z.object({
@@ -1298,6 +1298,8 @@ export const projectOpenInputSchema = projectPathInputSchema.extend({ target: pr
 export const projectSessionListInputSchema = z.object({ projectPath: z.string().min(1).max(32_768), query: z.string().max(500).default('') }).strict();
 export const projectDeleteSessionsResultSchema = z.object({ deleted: z.number().int().nonnegative().max(100_000), skipped: z.number().int().nonnegative().max(100_000) }).strict();
 export const sessionIdInputSchema = z.object({ sessionId: z.string().min(1).max(500) }).strict();
+export const recoveryScopeSchema = projectPathInputSchema.merge(sessionIdInputSchema);
+export type RecoveryScope = z.infer<typeof recoveryScopeSchema>;
 export const monitorWatchesSnapshotSchema = z.object({
   connectors: z.array(z.string()),
   watches: z.array(z.object({
@@ -1767,8 +1769,8 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   setModel: (provider: string, id: string) => Promise<RuntimeState>;
   setThinkingLevel: (level: ThinkingLevel) => Promise<RuntimeState>;
   setHyp3rc0d3: (enabled: boolean) => Promise<RuntimeState>;
-  getRecoveryReview: () => Promise<RecoveryReview>;
-  acknowledgeRecovery: () => Promise<RecoveryReview>;
+  getRecoveryReview: (scope: RecoveryScope) => Promise<RecoveryReview>;
+  acknowledgeRecovery: (scope: RecoveryScope) => Promise<RecoveryReview>;
   setPermissionLevel: (level: PermissionLevel) => Promise<RuntimeState>;
   initializeProviderLogin: () => Promise<RuntimeState>;
   startProviderLogin: (input: ProviderLoginStartInput) => Promise<RuntimeState>;

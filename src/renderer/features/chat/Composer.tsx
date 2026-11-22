@@ -6,7 +6,7 @@ import { unavailableExplanation } from '../../platform/capabilityPolicy';
 import * as Dialog from '@radix-ui/react-dialog';
 import { LearningDraftsRail } from '../learning/LearningDraftsRail';
 import { LearningIndicator } from '../learning/LearningIndicator';
-import { RecoveryReviewNotice } from './RecoveryReviewNotice';
+import { RecoveryReview } from './RecoveryReviewNotice';
 import { learningDraftKey, useLearningStore } from '../learning/learningStore';
 import * as Popover from '@radix-ui/react-popover';
 import { ArrowRight, ArrowUp, AtSign, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, FileText, FolderOpen, GitFork, Globe2, Hash, History, ImagePlus, LoaderCircle, MessageSquarePlus, Mic, Paperclip, Pencil, Plug, Shield, ShieldCheck, Sparkles, Square, Target, Trash2, TriangleAlert, X, Zap } from 'lucide-react';
@@ -3219,7 +3219,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         </div>
         </>}
       </ComposerPresentation>
-      <RecoveryReviewNotice projectPath={runtime.project?.path ?? null} sessionId={runtime.sessionId} />
+      <RecoveryReview />
       {composerError && <p className="composer-error" role="alert">{composerError}</p>}
       <ProviderConnectDialog open={providerLoginOpen} onOpenChange={setProviderLoginOpen} />
       <Dialog.Root open={Boolean(previewImage)} onOpenChange={(open) => { if (!open) setPreviewImage(null); }}>

@@ -18,7 +18,8 @@ export type { ActiveBrowserRoot, BrowserIntegrationPort as PiBrowserRuntimeInteg
 
 export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrowserToolHost, BrowserAnnotationContextSource {
   private activeRoot: ActiveBrowserRoot | null = null;
-  private focusedProjectPath: string | null = null;
+  private coldRoot = false;
+  private focusedProjectPath: string | null | undefined;
   private readonly registeredSessions = new Map<string, { projectPath: string; permissionLevel: PermissionLevel }>();
 
   constructor(
@@ -86,7 +87,7 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
     service?.setControlLevel('off');
     service?.revokeSessionControl();
     service?.lease.release(root.sessionId);
-    if (this.activeRoot?.sessionId === root.sessionId && this.activeRoot.projectPath === root.projectPath) this.setActiveRoot(null);
+    if (!this.coldRoot && this.activeRoot?.sessionId === root.sessionId && this.activeRoot.projectPath === root.projectPath) this.setActiveRoot(null);
   }
 
   currentRoot(): ActiveBrowserRoot | null {
@@ -106,13 +107,22 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
   }
 
   setActiveRoot(root: ActiveBrowserRoot | null): void {
+    this.setRoot(root, false);
+  }
+
+  setColdRoot(root: ActiveBrowserRoot): void {
+    if (this.resolveSessionService) this.setRoot(root, true);
+    else this.clearActiveRoot(root.projectPath);
+  }
+
+  private setRoot(root: ActiveBrowserRoot | null, cold: boolean): void {
     const previous = this.activeRoot;
     // A background Pi service is allowed to initialize/dispose, but it may not
     // mutate the shared browser root. Null is similarly scoped to the current
     // focused project so background disposal cannot clear the foreground root.
-    if (root && this.focusedProjectPath && root.projectPath !== this.focusedProjectPath) return;
+    if (root && this.focusedProjectPath !== undefined && root.projectPath !== this.focusedProjectPath) return;
     if (!root && previous && this.focusedProjectPath && previous.projectPath !== this.focusedProjectPath) return;
-    if (previous?.projectPath === root?.projectPath && previous?.sessionId === root?.sessionId) return;
+    if (previous?.projectPath === root?.projectPath && previous?.sessionId === root?.sessionId && this.coldRoot === cold) return;
     const service = previous && this.resolveSessionService ? this.resolveSessionService(previous) : this.resolveService();
     if (service && previous) {
       service.cancelAnnotationSelection();
@@ -122,11 +132,13 @@ export class BrowserRuntimeBridge implements PiBrowserRuntimeIntegration, PiBrow
       }
     }
     this.activeRoot = root ? { ...root } : null;
+    this.coldRoot = cold;
     this.onActiveRootChanged?.();
     this.syncService();
   }
 
   syncService(): void {
+    if (this.coldRoot) return;
     const root = this.activeRoot;
     const service = root && this.resolveSessionService ? this.resolveSessionService(root) : this.resolveService();
     if (!root || !service) return;

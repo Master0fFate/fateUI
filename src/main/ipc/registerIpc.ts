@@ -108,6 +108,8 @@ import {
   speechTranscriptionSchema,
   setPermissionInputSchema,
   recoveryReviewSchema,
+  recoveryScopeSchema,
+  type RecoveryScope,
   providerLoginStartInputSchema,
   providerLoginRespondInputSchema,
   questionnaireAnswerInputSchema,
@@ -141,6 +143,8 @@ import {
   type TaskEvent,
 } from '../../shared/contracts/tasks';
 import { normalizeError, PiDesktopError } from '../pi/errors';
+import { BrowserError } from '../browser/BrowserErrors';
+import { browserActionMessage } from '../../shared/browserActionError';
 import { enabledModelIdentity } from '../../shared/modelVisibility';
 import { encodedImageSize, MAX_PROMPT_IMAGE_BYTES, MAX_PROMPT_IMAGE_DIMENSION, MAX_PROMPT_IMAGE_TOTAL_PIXELS } from '../pi/PiPromptImages';
 import type { FilesystemService } from '../files/FilesystemService';
@@ -512,6 +516,14 @@ function register(channel: string, rendererPolicy: TrustedRendererPolicy, handle
       try { return await handler(event, input); }
       finally { invocationGuards.delete(event); }
     } catch (error) {
+      if (channel.startsWith('browser:')) {
+        const detail = error instanceof BrowserError ? error : error instanceof PiDesktopError ? error.normalized : null;
+        throw new Error(JSON.stringify({
+          code: detail?.code ?? 'UNKNOWN',
+          message: browserActionMessage(detail?.message, channel === ipcChannels.browserNavigate ? 'Could not open the page. Check the address and your connection, then try again.' : undefined),
+          retryable: detail?.retryable ?? true,
+        }));
+      }
       const normalized = error instanceof PiDesktopError ? error.normalized : normalizeError(error);
       throw new Error(JSON.stringify(normalized));
     }
@@ -1101,19 +1113,26 @@ export function registerIpc({ runtime, core, monitorCore, connections, connectio
     () => runtimeHandlers.setThinking(input), ({ handle: workspace, authorize, command }) => createScopedRuntimeHandlers(workspace, authorize).setThinking(command, input))));
   handle(ipcChannels.runtimeSetHyp3rc0d3, (event, input) => runRuntimeMutation('changing the Hyp3rc0d3 mode', () => scoped(event,
     () => runtimeHandlers.setHyp3rc0d3(input), ({ handle: workspace, authorize, command }) => createScopedRuntimeHandlers(workspace, authorize).setHyp3rc0d3(command, input))));
+  const recoveryFor = (scope: RecoveryScope, root: string, sessionId: string | null) => {
+    if (!core || root !== scope.projectPath || sessionId !== scope.sessionId) {
+      throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Reopen recovery for the current session.', retryable: true });
+    }
+    return core.recovery;
+  };
   handle(ipcChannels.runtimeRecoveryReview, (event, input) => {
-    emptyInputSchema.parse(input);
-    return scoped(event, () => recoveryReviewSchema.parse({ reasons: [] }), ({ handle: workspace, command }) => recoveryReviewSchema.parse({
-      reasons: command.expectedSessionId && core ? core.recovery.blockersFor(workspace.root, command.expectedSessionId) : [],
-    }));
+    const scope = recoveryScopeSchema.parse(input);
+    return scoped(event, () => recoveryReviewSchema.parse({ reasons: [], noticeId: null }), ({ handle: workspace, command }) => {
+      const recovery = recoveryFor(scope, workspace.root, command.expectedSessionId);
+      return recoveryReviewSchema.parse(recovery.reviewFor(workspace.root, scope.sessionId));
+    });
   });
   handle(ipcChannels.runtimeRecoveryAcknowledge, (event, input) => {
-    emptyInputSchema.parse(input);
-    return runRuntimeMutation('continuing after recovery review', () => scoped(event, () => recoveryReviewSchema.parse({ reasons: [] }),
+    const scope = recoveryScopeSchema.parse(input);
+    return runRuntimeMutation('continuing after recovery review', () => coreAdapter(event).scoped(
       async ({ identity, handle: workspace, command, authorize }) => {
-        if (!command.expectedSessionId || !core) throw new PiDesktopError({ code: 'RUNTIME_NOT_READY', message: 'Open a session first.', retryable: true });
-        await core.recovery.acknowledgeSession(identity, workspace.id, workspace.generation, command.expectedSessionId, { command, authorize });
-        return recoveryReviewSchema.parse({ reasons: core.recovery.blockersFor(workspace.root, command.expectedSessionId) });
+        const recovery = recoveryFor(scope, workspace.root, command.expectedSessionId);
+        await recovery.acknowledgeSession(identity, workspace.id, workspace.generation, scope.sessionId, { command, authorize });
+        return recoveryReviewSchema.parse(recovery.reviewFor(workspace.root, scope.sessionId));
       }));
   });
   handle(ipcChannels.runtimeSetPermission, async (_event, input) => {

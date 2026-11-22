@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { isAdapterCreatedContext, type RequestContext } from '../dispatch/RequestContext';
 import { checkoutFactsSchema, readGoalReviewCheckout, type CheckoutFacts } from './GoalReviewFacts';
@@ -69,8 +70,14 @@ export class RecoveryCoordinator {
     if (this.unhealthy) this.heal();
     if (!this.admissionsAllowed) throw new Error(`STORAGE_UNAVAILABLE: ${this.unhealthy ?? 'A required lifecycle checkpoint is pending.'}`);
   }
-  blockersFor(projectPath: string, sessionId: string): string[] {
-    return [...new Set((this.blockers.get(JSON.stringify([projectPath, sessionId])) ?? []).map((blocker) => blocker.reason))];
+  reviewFor(projectPath: string, sessionId: string) {
+    const blockers = this.blockers.get(JSON.stringify([projectPath, sessionId]));
+    if (!blockers?.length) return { reasons: [], noticeId: null };
+    const ids = blockers.map(({ id }) => id).sort();
+    return {
+      reasons: [...new Set(blockers.map(({ reason }) => reason))],
+      noticeId: createHash('sha256').update(JSON.stringify([projectPath, sessionId, ids])).digest('hex'),
+    };
   }
   async acknowledgeSession(identity: RequestContext, workspaceId: string, generation: number, sessionId: string,
     control: RecoveryReviewControl): Promise<void> {
@@ -349,7 +356,8 @@ export class RecoveryCoordinator {
       let team: AgentTeam | null = null;
       if (ref.teamId || ref.worktree) {
         const teams = await sources.readTeams(ref.projectPath, ref.sessionId);
-        if (teams.state !== 'ok') return unknown(`Selected Pi Team branch is ${teams.reason}.`);
+        if (teams.state !== 'ok') return unknown(teams.reason === 'oversized'
+          ? 'Team history was too large to verify during startup.' : `Selected Pi Team branch is ${teams.reason}.`);
         team = ref.teamId ? teams.teams.get(ref.teamId) ?? null : null;
         if (!team) return unknown('Team is missing, deleted, or on a different selected branch.');
         const childKey = JSON.stringify([ref.projectPath, ref.sessionId, team.id]);

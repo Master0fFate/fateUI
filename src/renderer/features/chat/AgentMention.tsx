@@ -3,6 +3,7 @@ import { unavailableExplanation } from '../../platform/capabilityPolicy';
 import { Fragment, type AnchorHTMLAttributes, type ClassAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { isLocalMarkdownLink } from '../../../shared/markdownLinks';
 import { normalizeBrowserWebUrl } from '../../../shared/contracts/browser';
+import { browserActionMessage } from '../../../shared/browserActionError';
 import { subagentDisplayName, subagentHandle } from '../../../shared/subagentIdentity';
 import { openBrowserLink } from '../browser/browserLink';
 import { useRuntimeStore } from '../../stores/runtimeStore';
@@ -130,10 +131,12 @@ export function AgentMentionLink({ href, children, node: _node, onClick, onConte
   const openMenu = (event: ReactMouseEvent<HTMLAnchorElement>) => {
     onContextMenu?.(event);
     if (event.defaultPrevented) return;
+    const desktop = getDesktopApiOptional();
+    if (!hasCapability('nativeBrowser') || typeof desktop?.showBrowserLinkContextMenu !== 'function') return;
     event.preventDefault();
-    if (Boolean(getFateApiOptional()) && typeof getDesktopApiOptional()?.showBrowserLinkContextMenu === 'function') {
-      void getDesktopApi().showBrowserLinkContextMenu(browserUrl);
-    }
+    void desktop.showBrowserLinkContextMenu(browserUrl).catch((error: unknown) => {
+      useUiStore.getState().showToast({ kind: 'error', title: 'Link menu unavailable', message: browserActionMessage(error) });
+    });
   };
   const openFromMiddleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
     onAuxClick?.(event);

@@ -87,12 +87,18 @@ function BrowserInitializer() {
     // Closing the browser must not detach notes already attached to this
     // conversation. A different project/session still clears the old notes.
     const scope = projectPath && projectTrusted && browserSessionId ? `${projectPath}\0${browserSessionId}` : null;
-    const retained = scope && scope === previousBrowserScope.current ? useBrowserStore.getState().annotations : [];
+    const sameScope = scope !== null && scope === previousBrowserScope.current;
     previousBrowserScope.current = scope;
-    reset();
-    if (retained.length) setAnnotations(retained);
+    if (!sameScope || !browserOpen) {
+      const retained = sameScope ? useBrowserStore.getState().annotations : [];
+      reset();
+      if (retained.length) setAnnotations(retained);
+    }
     if (!projectPath || !projectTrusted || !browserSessionId || !browserOpen || !hasCapability('nativeBrowser') || typeof desktop?.initializeBrowser !== 'function') {
       if (!projectPath || !projectTrusted) setBrowserOpen(false);
+      else if (browserOpen && hasCapability('nativeBrowser') && typeof desktop?.initializeBrowser !== 'function') {
+        useBrowserStore.getState().setError('Restart the desktop app to reconnect the browser.');
+      }
       return undefined;
     }
     let active = true;

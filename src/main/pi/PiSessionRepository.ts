@@ -125,6 +125,11 @@ const MAX_SESSION_METADATA_PREFIX_BYTES = 256 * 1024;
 const MAX_SESSION_METADATA_TAIL_BYTES = 128 * 1024;
 const MAX_SESSION_METADATA_RECORD_BYTES = 4 * 1024 * 1024;
 const SESSION_METADATA_READ_CHUNK_BYTES = 64 * 1024;
+const MAX_COLD_TEAM_SCAN_BYTES = 1024 * 1024 * 1024;
+const MAX_COLD_TEAM_RECORD_BYTES = 8 * 1024 * 1024;
+const MAX_COLD_TEAM_RECORDS = 200_000;
+const MAX_COLD_TEAM_INDEX_BYTES = 16 * 1024 * 1024;
+const MAX_COLD_TEAM_RESULT_BYTES = 16 * 1024 * 1024;
 // Legacy export until HomeOwnership no longer conflates preview with resume.
 // This is NOT a preview limit: destructive rewrites have a separate, lower cap.
 export const MAX_SESSION_SNAPSHOT_BYTES = 128 * 1024 * 1024;
@@ -223,8 +228,12 @@ function parseMetadataLines(source: string, metadata: ScannedSessionMetadata, in
 
 async function readFileRange(handle: FileHandle, position: number, length: number): Promise<string> {
   const buffer = Buffer.allocUnsafe(length);
-  const { bytesRead } = await handle.read(buffer, 0, length, position);
-  return buffer.subarray(0, bytesRead).toString('utf8');
+  for (let received = 0; received < length;) {
+    const { bytesRead } = await handle.read(buffer, received, length - received, position + received);
+    if (!bytesRead) throw new Error('The saved session changed during the read.');
+    received += bytesRead;
+  }
+  return buffer.toString('utf8');
 }
 
 interface RecoveredSessionMetadata {
@@ -232,17 +241,15 @@ interface RecoveredSessionMetadata {
   complete: boolean;
 }
 
-async function recoverSessionMetadata(handle: FileHandle, size: number, expectedHeader: JsonRecord, cwd: string): Promise<RecoveredSessionMetadata | null> {
-  const metadata: ScannedSessionMetadata = { header: {}, firstMessage: '', messageCount: 0, searchText: '' };
-  let headerSeen = false;
-  let complete = true;
+async function* scanSessionRecords(handle: FileHandle, size: number, parseLimit: number) {
+  let offset = 0;
   let parts: Buffer[] = [];
   let length = 0;
   let oversized: OversizedRecordFields | null = null;
   const append = (bytes: Buffer) => {
     length += bytes.length;
     if (oversized) oversized.write(bytes);
-    else if (length <= MAX_SESSION_METADATA_RECORD_BYTES) parts.push(Buffer.from(bytes));
+    else if (length <= parseLimit) parts.push(Buffer.from(bytes));
     else {
       oversized = new OversizedRecordFields();
       for (const part of parts) oversized.write(part);
@@ -250,52 +257,149 @@ async function recoverSessionMetadata(handle: FileHandle, size: number, expected
       parts = [];
     }
   };
-  const accept = (): boolean => {
-    const entry = oversized ? oversized.finish() : parseJsonRecord(Buffer.concat(parts, length).toString('utf8'));
+  const finish = (terminated: boolean) => {
+    const text = oversized ? '' : Buffer.concat(parts, length).toString('utf8');
+    const entry = oversized ? oversized.finish() : parseJsonRecord(text);
+    const line = { entry, offset, length, projected: oversized !== null, blank: !entry && !oversized && !text.trim(), terminated };
+    offset += length + 1;
+    parts = [];
+    length = 0;
+    oversized = null;
+    return line;
+  };
+  const buffer = Buffer.allocUnsafe(SESSION_METADATA_READ_CHUNK_BYTES);
+  for (let position = 0; position < size;) {
+    const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, size - position), position);
+    if (!bytesRead) throw new Error('The saved session changed during the scan.');
+    const chunk = buffer.subarray(0, bytesRead);
+    let start = 0;
+    for (let end = chunk.indexOf(10); end >= 0; end = chunk.indexOf(10, start)) {
+      if (end > start) append(chunk.subarray(start, end));
+      yield finish(true);
+      start = end + 1;
+    }
+    if (start < bytesRead) append(chunk.subarray(start));
+    position += bytesRead;
+  }
+  if (length) yield finish(false);
+}
+
+async function recoverSessionMetadata(handle: FileHandle, size: number, expectedHeader: JsonRecord, cwd: string): Promise<RecoveredSessionMetadata | null> {
+  const metadata: ScannedSessionMetadata = { header: {}, firstMessage: '', messageCount: 0, searchText: '' };
+  let headerSeen = false;
+  let complete = true;
+  for await (const { entry, length, projected } of scanSessionRecords(handle, size, MAX_SESSION_METADATA_RECORD_BYTES)) {
     if (!entry) {
       if (length > 0) complete = false;
-      return true;
+      continue;
     }
     if (!headerSeen) {
-      if (oversized || entry.type !== 'session' || entry.id !== expectedHeader.id || !sessionProjectMatches(entry.cwd, cwd)) return false;
+      if (projected || entry.type !== 'session' || entry.id !== expectedHeader.id || !sessionProjectMatches(entry.cwd, cwd)) return null;
       metadata.header = {
         type: 'session', id: entry.id, cwd: resolve(cwd),
         ...(typeof entry.timestamp === 'string' ? { timestamp: entry.timestamp } : {}),
         ...(typeof entry.parentSession === 'string' ? { parentSession: entry.parentSession } : {}),
       };
       headerSeen = true;
-      return true;
+      continue;
     }
     if (typeof entry.id !== 'string' || !entry.id || (entry.parentId !== null && typeof entry.parentId !== 'string')
-      || typeof entry.type !== 'string' || !sessionEntryTypes.has(entry.type)) return true;
-    if (oversized && entry.type === 'message' && (entry.messageRole === 'user' || entry.messageRole === 'assistant')) {
+      || typeof entry.type !== 'string' || !sessionEntryTypes.has(entry.type)) continue;
+    if (projected && entry.type === 'message' && (entry.messageRole === 'user' || entry.messageRole === 'assistant')) {
       metadata.messageCount += 1;
       const timestamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
       if (Number.isFinite(timestamp) && Math.abs(timestamp) <= 8.64e15) {
         metadata.lastActivityTime = Math.max(metadata.lastActivityTime ?? Number.NEGATIVE_INFINITY, timestamp);
       }
     } else absorbSessionEntry(metadata, entry, true);
-    return true;
-  };
-  const buffer = Buffer.allocUnsafe(SESSION_METADATA_READ_CHUNK_BYTES);
-  for (let position = 0; position < size;) {
-    const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, size - position), position);
-    if (!bytesRead) return null;
-    let start = 0;
-    for (let index = 0; index < bytesRead; index += 1) {
-      if (buffer[index] !== 10) continue;
-      if (index > start) append(buffer.subarray(start, index));
-      if (!accept()) return null;
-      parts = [];
-      length = 0;
-      oversized = null;
-      start = index + 1;
-    }
-    if (start < bytesRead) append(buffer.subarray(start, bytesRead));
-    position += bytesRead;
   }
-  if (length > 0 && !accept()) return null;
   return headerSeen ? { metadata, complete } : null;
+}
+
+function coldTeamEvent(entry: JsonRecord, sessionId: string) {
+  const event = entry.data;
+  if (entry.type !== 'custom' || entry.customType !== 'fate-agent-team-event' || !isRecord(event)
+    || event.kind !== 'fate-agent-team-event' || event.version !== 1 || typeof event.teamId !== 'string'
+    || !Number.isSafeInteger(event.sequence) || !isRecord(event.payload)) return null;
+  let team: AgentTeam | null = null;
+  if (event.type !== 'team.deleted') {
+    const parsed = agentTeamSchema.safeParse(event.payload.team);
+    if (!parsed.success || parsed.data.id !== event.teamId || parsed.data.rootSessionId !== sessionId) return null;
+    team = parsed.data;
+  }
+  return { teamId: event.teamId, sequence: event.sequence as number, team };
+}
+
+interface ColdTeamIndexEntry {
+  parentId: string | null;
+  event?: { teamId: string; sequence: number; snapshot: { offset: number; length: number } | null };
+}
+
+function copyIndexId(id: string): string {
+  return Buffer.from(id, 'utf16le').toString('utf16le');
+}
+
+async function scanColdTeams(handle: FileHandle, size: number, cwd: string, sessionId: string): Promise<ColdTeamRead> {
+  const entries = new Map<string, ColdTeamIndexEntry>();
+  let leaf: string | null = null;
+  let indexBytes = 0;
+  let records = 0;
+  let trailingBlank = false;
+  for await (const { entry, offset, length, projected, blank, terminated } of scanSessionRecords(handle, size, MAX_COLD_TEAM_RECORD_BYTES)) {
+    if (!terminated) return { state: 'unknown', reason: length >= MAX_COLD_TEAM_RECORD_BYTES ? 'oversized' : 'partial-tail' };
+    if (offset === 0) {
+      if (projected) return { state: 'unknown', reason: 'oversized' };
+      if (entry?.type !== 'session' || entry.id !== sessionId || !sessionProjectMatches(entry.cwd, cwd)) return { state: 'unknown', reason: 'corrupt' };
+      continue;
+    }
+    if (++records > MAX_COLD_TEAM_RECORDS) return { state: 'unknown', reason: 'oversized' };
+    if (blank) { trailingBlank = true; continue; }
+    if (trailingBlank || !entry || typeof entry.id !== 'string' || !entry.id || entries.has(entry.id)
+      || (entry.parentId !== null && typeof entry.parentId !== 'string')) return { state: 'unknown', reason: 'corrupt' };
+    indexBytes += 2 * (entry.id.length + (entry.parentId?.length ?? 0));
+    if (indexBytes > MAX_COLD_TEAM_INDEX_BYTES) return { state: 'unknown', reason: 'oversized' };
+    const node: ColdTeamIndexEntry = { parentId: entry.parentId === null ? null : copyIndexId(entry.parentId) };
+    if (entry.type === 'custom' && entry.customType === 'fate-agent-team-event') {
+      if (projected) return { state: 'unknown', reason: 'oversized' };
+      const event = coldTeamEvent(entry, sessionId);
+      if (!event) return { state: 'unknown', reason: 'corrupt' };
+      indexBytes += 2 * event.teamId.length;
+      if (indexBytes > MAX_COLD_TEAM_INDEX_BYTES) return { state: 'unknown', reason: 'oversized' };
+      node.event = { teamId: copyIndexId(event.teamId), sequence: event.sequence, snapshot: event.team ? { offset, length } : null };
+    }
+    leaf = copyIndexId(entry.id);
+    entries.set(leaf, node);
+  }
+  const teams = new Map<string, AgentTeam | null>();
+  const sequences = new Map<string, number>();
+  let resultBytes = 0;
+  while (leaf !== null) {
+    const node = entries.get(leaf);
+    if (!node) return { state: 'unknown', reason: 'corrupt' };
+    entries.delete(leaf);
+    const event = node.event;
+    if (event?.teamId) {
+      const last = sequences.get(event.teamId);
+      if (last !== undefined && event.sequence > last) return { state: 'unknown', reason: 'corrupt' };
+      sequences.set(event.teamId, event.sequence);
+      if (last === undefined) {
+        let team: AgentTeam | null = null;
+        if (event.snapshot) {
+          const { offset, length } = event.snapshot;
+          resultBytes += length;
+          if (resultBytes > MAX_COLD_TEAM_RESULT_BYTES) return { state: 'unknown', reason: 'oversized' };
+          const entry = parseJsonRecord(await readFileRange(handle, offset, length));
+          const saved = entry && coldTeamEvent(entry, sessionId);
+          if (entry?.id !== leaf || entry.parentId !== node.parentId || !saved?.team
+            || saved.teamId !== event.teamId || saved.sequence !== event.sequence) return { state: 'unknown', reason: 'unavailable' };
+          team = saved.team;
+        }
+        teams.set(event.teamId, team);
+      }
+    }
+    leaf = node.parentId;
+  }
+  return { state: 'ok', teams };
 }
 
 class SessionMetadataRecoveryCache {
@@ -691,69 +795,18 @@ export class PiSessionRepository {
       ]);
       if (!file.isFile() || canonicalDir !== join(canonicalRoot, basename(dirname(summary.path)))
         || canonicalFile !== join(canonicalDir, basename(summary.path))) return { state: 'unknown', reason: 'unavailable' };
-      const limit = 8 * 1024 * 1024;
-      if (file.size < 1 || file.size > limit) return { state: 'unknown', reason: 'oversized' };
+      if (file.size < 1 || file.size > MAX_COLD_TEAM_SCAN_BYTES) return { state: 'unknown', reason: 'oversized' };
+      const sameFile = (other: typeof file) => other.isFile() && other.dev === file.dev && other.ino === file.ino
+        && other.size === file.size && other.mtimeMs === file.mtimeMs && other.ctimeMs === file.ctimeMs;
       const handle = await open(summary.path, 'r');
-      let text: string;
       try {
-        const live = await handle.stat();
-        if (!live.isFile() || live.size !== file.size || live.mtimeMs !== file.mtimeMs || live.size > limit) return { state: 'unknown', reason: 'unavailable' };
-        const bytes = Buffer.alloc(live.size + 1);
-        const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
-        const after = await handle.stat();
-        if (bytesRead !== live.size || after.size !== file.size || after.mtimeMs !== live.mtimeMs) return { state: 'unknown', reason: 'unavailable' };
-        text = bytes.toString('utf8', 0, bytesRead);
+        if (!sameFile(await handle.stat())) return { state: 'unknown', reason: 'unavailable' };
+        const result = await scanColdTeams(handle, file.size, cwd, sessionId);
+        if (!sameFile(await handle.stat()) || !sameFile(await lstat(summary.path)) || await realpath(summary.path) !== canonicalFile) {
+          return { state: 'unknown', reason: 'unavailable' };
+        }
+        return result;
       } finally { await handle.close(); }
-      if (!text.endsWith('\n')) return { state: 'unknown', reason: 'partial-tail' };
-      const lines = text.trimEnd().split('\n');
-      let header: unknown;
-      try { header = JSON.parse(lines.shift() ?? ''); }
-      catch { return { state: 'unknown', reason: 'corrupt' }; }
-      if (!isRecord(header) || header.type !== 'session' || header.id !== sessionId || !sessionProjectMatches(header.cwd, cwd)) return { state: 'unknown', reason: 'corrupt' };
-      const entries = new Map<string, { parentId: string | null; team: AgentTeam | null | undefined; teamId?: string; sequence?: number }>();
-      let leaf: string | null = null;
-      for (const line of lines) {
-        let entry: unknown;
-        try { entry = JSON.parse(line); }
-        catch { return { state: 'unknown', reason: 'corrupt' }; }
-        if (!isRecord(entry) || typeof entry.id !== 'string' || !entry.id || entries.has(entry.id)
-          || (entry.parentId !== null && typeof entry.parentId !== 'string')) return { state: 'unknown', reason: 'corrupt' };
-        let team: AgentTeam | null | undefined;
-        let teamId: string | undefined;
-        let sequence: number | undefined;
-        if (entry.type === 'custom' && entry.customType === 'fate-agent-team-event') {
-          const event = entry.data;
-          if (!isRecord(event) || event.kind !== 'fate-agent-team-event' || event.version !== 1
-            || typeof event.teamId !== 'string' || !Number.isSafeInteger(event.sequence) || !isRecord(event.payload)) return { state: 'unknown', reason: 'corrupt' };
-          teamId = event.teamId;
-          sequence = event.sequence as number;
-          if (event.type === 'team.deleted') team = null;
-          else {
-            const parsed = agentTeamSchema.safeParse(event.payload.team);
-            if (!parsed.success || parsed.data.id !== teamId || parsed.data.rootSessionId !== sessionId) return { state: 'unknown', reason: 'corrupt' };
-            team = parsed.data;
-          }
-        }
-        entries.set(entry.id, { parentId: entry.parentId, team, ...(teamId ? { teamId } : {}), ...(sequence !== undefined ? { sequence } : {}) });
-        leaf = entry.id;
-      }
-      const branch = new Set<string>();
-      const teams = new Map<string, AgentTeam | null>();
-      const sequences = new Map<string, number>();
-      while (leaf !== null) {
-        if (branch.has(leaf)) return { state: 'unknown', reason: 'corrupt' };
-        branch.add(leaf);
-        const entry = entries.get(leaf);
-        if (!entry) return { state: 'unknown', reason: 'corrupt' };
-        if (entry.teamId) {
-          const last = sequences.get(entry.teamId);
-          if (last !== undefined && entry.sequence! > last) return { state: 'unknown', reason: 'corrupt' };
-          sequences.set(entry.teamId, entry.sequence!);
-          if (!teams.has(entry.teamId)) teams.set(entry.teamId, entry.team ?? null);
-        }
-        leaf = entry.parentId;
-      }
-      return { state: 'ok', teams };
     } catch { return { state: 'unknown', reason: 'unavailable' }; }
   }
 

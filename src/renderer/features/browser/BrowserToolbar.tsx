@@ -62,7 +62,6 @@ export function BrowserToolbar() {
   const run = async (label: string, operation: () => Promise<unknown>) => {
     if (!getFateApiOptional() || !browserReady || pending) return;
     useBrowserStore.getState().setPending(label);
-    useBrowserStore.getState().setError(null);
     try {
       const next = await operation();
       if (next && typeof next === 'object' && 'tabs' in next) useBrowserStore.getState().hydrate(next as typeof state);

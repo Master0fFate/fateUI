@@ -2053,6 +2053,10 @@ export class PiRuntimeService {
   /** Set a lightweight focused-project snapshot without starting Pi. */
   setProjectPreview(project: ProjectState | null, sessions: SessionSummary[] = [], announce = false): RuntimeState {
     if (this.liveSlots.size > 0) throw new PiDesktopError({ code: 'RUN_ACTIVE', message: 'Cannot replace a live Pi project with a preview.', retryable: true });
+    this.coldSelectionGeneration += 1;
+    if (this.project && this.coldSession && this.browserIntegration?.currentRoot()?.sessionId === this.coldSession.snapshot.summary.id) {
+      this.clearBrowserRoot(this.project.path);
+    }
     this.clearColdSession();
     this.project = project;
     this.status = 'disconnected';
@@ -2071,8 +2075,7 @@ export class PiRuntimeService {
   }
 
   async closeProject(): Promise<RuntimeState> {
-    const ownedProjectPath = this.project?.path;
-    this.browserIntegration?.clearActiveRoot?.(ownedProjectPath ?? '');
+    this.clearBrowserRoot();
     const generation = ++this.initialization;
     this.replacementGeneration += 1;
     this.coldSelectionGeneration += 1;
@@ -2098,8 +2101,7 @@ export class PiRuntimeService {
   }
 
   async openProject(project: ProjectState, defaults?: SessionDefaults): Promise<RuntimeState> {
-    const ownedProjectPath = this.project?.path;
-    this.browserIntegration?.clearActiveRoot?.(ownedProjectPath ?? '');
+    this.clearBrowserRoot();
     const generation = ++this.initialization;
     this.replacementGeneration += 1;
     this.coldSelectionGeneration += 1;
@@ -4721,8 +4723,7 @@ export class PiRuntimeService {
     this.beginHostShutdown();
     await this.providerLoginRuntimeInitialization;
     await this.providerLoginSettlement;
-    const ownedProjectPath = this.project?.path;
-    this.browserIntegration?.clearActiveRoot?.(ownedProjectPath ?? '');
+    this.clearBrowserRoot();
     ++this.initialization;
     this.replacementGeneration += 1;
     this.coldSelectionGeneration += 1;
@@ -4851,7 +4852,7 @@ export class PiRuntimeService {
     const invalidatedSession = slot.boundSession ?? slot.runtime.session;
     if (this.coldSession?.snapshot.summary.id !== invalidatedSession.sessionId) forgetHyp3rc0d3Session(invalidatedSession.sessionId);
     this.recoveredExecution.forget(invalidatedSession.sessionId);
-    if (this.project) this.browserIntegration?.revokeSession?.({ projectPath: this.project.path, sessionId: invalidatedSession.sessionId });
+    this.browserIntegration?.revokeSession?.({ projectPath: slot.projectPath, sessionId: invalidatedSession.sessionId });
     this.revokeSlotToolAccess(slot);
     slot.learningContext?.dispose();
     slot.learningContext = null;
@@ -6494,12 +6495,28 @@ export class PiRuntimeService {
     })];
   }
 
-  private syncBrowserRoot(): void {
-    const session = this.selectedSlot && !this.selectedSlot.disposed ? this.selectedSlot.runtime.session : null;
-    this.browserIntegration?.setActiveRoot(this.project && session ? {
-      projectPath: this.project.path,
-      sessionId: session.sessionId,
-    } : null);
+  syncBrowserRoot(projectPath = this.project?.path): void {
+    const browser = this.browserIntegration;
+    if (!projectPath || !browser) return;
+    if (!this.hostStopping && this.project?.trusted && this.project.path === projectPath) {
+      const slot = this.selectedSlot;
+      if (slot && !slot.disposed && slot.projectGeneration === this.initialization && slot.boundSession === slot.runtime.session && !slot.sessionInvalidated) {
+        browser.setActiveRoot({ projectPath, sessionId: slot.boundSession.sessionId });
+        return;
+      }
+      if (!slot && this.coldSession && browser.setColdRoot) {
+        browser.setColdRoot({ projectPath, sessionId: this.coldSession.snapshot.summary.id });
+        return;
+      }
+    }
+    this.clearBrowserRoot(projectPath);
+  }
+
+  private clearBrowserRoot(projectPath = this.project?.path): void {
+    const browser = this.browserIntegration;
+    if (!projectPath || !browser) return;
+    if (browser.clearActiveRoot) browser.clearActiveRoot(projectPath);
+    else if (browser.currentRoot()?.projectPath === projectPath) browser.setActiveRoot(null);
   }
 
   private findLiveSlot(sessionId: string): RuntimeSlot | undefined {

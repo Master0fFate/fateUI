@@ -41,6 +41,7 @@ import {
   setThinkingInputSchema,
   setHyp3rc0d3InputSchema,
   recoveryReviewSchema,
+  recoveryScopeSchema,
   type PiDesktopApi,
 } from '../shared/contracts/ipc';
 import {
@@ -84,8 +85,8 @@ export const runtimeApi = {
   setModel: (provider, id) => invoke(ipcChannels.runtimeSetModel, setModelInputSchema, runtimeStateSchema, { provider, id }),
   setThinkingLevel: (level) => invoke(ipcChannels.runtimeSetThinking, setThinkingInputSchema, runtimeStateSchema, { level }),
   setHyp3rc0d3: (enabled) => invoke(ipcChannels.runtimeSetHyp3rc0d3, setHyp3rc0d3InputSchema, runtimeStateSchema, { enabled }),
-  getRecoveryReview: () => invoke(ipcChannels.runtimeRecoveryReview, emptyInputSchema, recoveryReviewSchema),
-  acknowledgeRecovery: () => invoke(ipcChannels.runtimeRecoveryAcknowledge, emptyInputSchema, recoveryReviewSchema),
+  getRecoveryReview: (scope) => invoke(ipcChannels.runtimeRecoveryReview, recoveryScopeSchema, recoveryReviewSchema, scope),
+  acknowledgeRecovery: (scope) => invoke(ipcChannels.runtimeRecoveryAcknowledge, recoveryScopeSchema, recoveryReviewSchema, scope),
   setPermissionLevel: (level) => invoke(ipcChannels.runtimeSetPermission, setPermissionInputSchema, runtimeStateSchema, { level }),
   initializeProviderLogin: () => invoke(ipcChannels.runtimeProviderLoginInitialize, emptyInputSchema, runtimeStateSchema),
   startProviderLogin: (input) => invoke(ipcChannels.runtimeProviderLoginStart, providerLoginStartInputSchema, runtimeStateSchema, input),

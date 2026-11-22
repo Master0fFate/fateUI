@@ -1,4 +1,4 @@
-import { getFateApiOptional, getDesktopApi } from '../../platform/api';
+import { getDesktopApi, getDesktopApiOptional } from '../../platform/api';
 import { AlertTriangle, Check, FileCode2, Globe2, LoaderCircle, Plus, X } from 'lucide-react';
 import { useState } from 'react';
 import { useBrowserStore } from '../../stores/browserStore';
@@ -11,9 +11,10 @@ export function BrowserWorkspace({ visible = true }: { visible?: boolean }) {
   const { ActionContent, TabContent } = useSkinComponents();
   const state = useBrowserStore((store) => store.state);
   const pending = useBrowserStore((store) => store.pending);
+  const hasError = useBrowserStore((store) => Boolean(store.error));
 
   const run = async (label: string, operation: () => Promise<typeof state>) => {
-    if (!getFateApiOptional() || pending) return;
+    if (pending) return;
     useBrowserStore.getState().setPending(label);
     try {
       useBrowserStore.getState().hydrate(await operation());
@@ -79,8 +80,8 @@ export function BrowserWorkspace({ visible = true }: { visible?: boolean }) {
             <BrowserViewport visible={visible} />
           </div>
         </div>
-      ) : (
-        <div className="browser-blank-state"><strong>Opening Chromium…</strong></div>
+      ) : !hasError && (
+        <div className="browser-blank-state" role="status"><strong>Opening Chromium…</strong></div>
       )}
       <BrowserConfirmationBanner />
     </section>
@@ -93,10 +94,15 @@ function BrowserConfirmationBanner() {
   if (!confirmation) return null;
   const target = confirmation.action.targetName || confirmation.action.targetRole || confirmation.action.kind;
   const respond = async (approved: boolean) => {
-    if (busy || !getFateApiOptional()) return;
+    if (busy) return;
+    const desktop = getDesktopApiOptional();
+    if (typeof desktop?.respondToBrowserConfirmation !== 'function') {
+      useBrowserStore.getState().setError('Restart the desktop app to reconnect the browser.');
+      return;
+    }
     setBusy(true);
     try {
-      await getDesktopApi().respondToBrowserConfirmation(confirmation.id, approved);
+      await desktop.respondToBrowserConfirmation(confirmation.id, approved);
     } catch (error) {
       useBrowserStore.getState().setError(error instanceof Error ? error.message : 'The browser confirmation expired.');
     } finally {
