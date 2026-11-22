@@ -4049,8 +4049,7 @@ export class PiRuntimeService {
         return original.path === file.path && original.ino === file.ino && original.dev === file.dev;
       },
     };
-    if (!project?.trusted || !selected || !modelRuntime || !model || !permission || !modelAvailable()
-      || (coldChoice && (model.provider !== coldChoice.provider || model.id !== coldChoice.id))) return target;
+    if (!project?.trusted || !selected || !permission) return target;
     const scope = () => {
       const live = this.findLiveSlot(sessionId);
       const cold = this.coldSession?.snapshot.summary.id === sessionId ? this.coldSession : null;
@@ -4077,7 +4076,7 @@ export class PiRuntimeService {
       admit(fence);
       return idle();
     };
-    target.answer = async ({ source, result, followUp }, fence, onStart) => {
+    if (modelRuntime && model && modelAvailable() && (!coldChoice || (model.provider === coldChoice.provider && model.id === coldChoice.id))) target.answer = async ({ source, result, followUp }, fence, onStart) => {
       if (!await ready(fence)) return null;
       admit(fence);
       if (!idle()) return null;
@@ -4131,7 +4130,7 @@ export class PiRuntimeService {
 
   private monitorSessionIdle(sessionId: string): boolean {
     if (!this.project || this.sessionWriterUnavailable(this.sessionClaimKey(this.project.path, sessionId))
-      || this.replacementActive || this.monitorBusyPrompts.has(sessionId) || this.hasOwnedAgentWork(sessionId)
+      || this.replacementActive || this.monitorBusyPrompts.has(sessionId) || this.hasActiveAgentWork(sessionId)
       || this.goalMax.hasRunnableGoal(sessionId) || (this.selectedSessionId === sessionId && this.promptOptimizationActive)) return false;
     const slots = [...this.liveSlots].filter((slot) => !slot.disposed && slot.runtime.session.sessionId === sessionId);
     if (slots.length === 0) return true;
