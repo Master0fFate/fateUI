@@ -19,17 +19,11 @@ test('real application restarts with the Resources inspector saved before discov
   try {
     application = await launch();
     const page = await application.firstWindow();
-    await expect(page.locator('.app-shell')).toBeVisible();
-    await page.evaluate(() => {
-      localStorage.setItem('pi-desktop-ui-v1', JSON.stringify({
-        version: 1,
-        state: {
-          inspectorCollapsed: false,
-          inspectorTab: 'resources',
-          inspectorLastViews: { work: 'files', run: 'sessions', system: 'resources' },
-        },
-      }));
-    });
+    await expect(page.locator('[data-bridge-status="ready"]')).toBeVisible();
+    const inspector = page.getByRole('complementary', { name: 'Project inspector' });
+    await inspector.getByRole('button', { name: 'System', exact: true }).click();
+    await inspector.getByRole('tab', { name: 'Resources', exact: true }).click();
+    await expect(inspector.getByText('No Pi resources loaded')).toBeVisible();
     await application.close();
     application = await launch();
     const restored = await application.firstWindow();
