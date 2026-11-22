@@ -252,14 +252,13 @@ async function pollPull(executable: string, source: Extract<GitHubWatchSource, {
     expected = contexts.totalCount;
     for (const check of contexts.nodes) {
       if (checks.has(check.id)) return undefined;
-      const result = checkResult(check);
-      if (result === undefined) return undefined;
-      checks.set(check.id, result);
+      checks.set(check.id, checkResult(check));
     }
     if (!contexts.pageInfo.hasNextPage) {
       if (checks.size !== expected) return undefined;
       const results = [...checks.values()];
       if (results.includes('failure')) return 'failure';
+      if (results.includes(undefined)) return undefined;
       if (results.includes('cancelled')) return 'cancelled';
       if (results.includes('other')) return 'other';
       return results.includes('success') ? 'success' : 'other';
