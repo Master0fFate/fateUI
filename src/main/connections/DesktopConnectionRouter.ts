@@ -1,5 +1,6 @@
 import { desktopConnectionStateSchema, connectionGenerationSchema, connectionSelectSchema,
   type ConnectionSelection, type DesktopConnectionState, type RemoteMutation, type RemoteScope } from '../../shared/contracts/connections';
+import { PiDesktopError } from '../pi/errors';
 import { ConnectionProfileStore, isSshConnectionProfile } from './ConnectionProfileStore';
 import type { MutationMethodName } from '../../shared/protocol/methods';
 import { RemoteCoreClient, type PendingRemoteOutcome, type RemoteClientOptions } from './RemoteCoreClient';
@@ -11,7 +12,9 @@ export function isClientNativeChannel(channel: string): boolean {
     || channel === 'settings:get' || channel === 'settings:set'
     || /^(?:window|updates|speech|music|skins):/u.test(channel);
 }
-const unavailable = () => new Error('Select the local desktop explicitly before using a local workspace operation.');
+const unavailable = () => new PiDesktopError({
+  code: 'INVALID_REQUEST', message: 'Select the local desktop explicitly before using a local workspace operation.', retryable: false,
+});
 
 /** Process-wide sole selected command target. A failed remote connection stays REMOTE. */
 export class DesktopConnectionRouter {
