@@ -148,33 +148,33 @@ export class SpeechGate {
   }
 
   private pushFrame(frame: Float32Array): Float32Array | null {
-    this.frameBuffer.push(Float32Array.from(frame));
-    const maxBuffered = this.config.prefillFrames + 1;
-    while (this.frameBuffer.length > maxBuffered) this.frameBuffer.shift();
-
     const isVoice = frameHasSpeech(frame, this.config);
-    if (!this.inSpeech && isVoice) {
-      this.onsetCounter += 1;
-      if (this.onsetCounter < this.config.onsetFrames) return null;
-      this.inSpeech = true;
-      this.hangoverCounter = this.config.hangoverFrames;
-      this.onsetCounter = 0;
-      return concatPcm(this.frameBuffer);
-    }
-    if (this.inSpeech && isVoice) {
-      this.hangoverCounter = this.config.hangoverFrames;
-      return Float32Array.from(frame);
-    }
-    if (this.inSpeech && !isVoice) {
-      this.onsetCounter = 0;
+    if (this.inSpeech) {
+      if (isVoice) {
+        this.hangoverCounter = this.config.hangoverFrames;
+        return Float32Array.from(frame);
+      }
       if (this.hangoverCounter > 0) {
         this.hangoverCounter -= 1;
         return Float32Array.from(frame);
       }
       this.inSpeech = false;
+    }
+
+    this.frameBuffer.push(Float32Array.from(frame));
+    const maxBuffered = this.config.prefillFrames + 1;
+    while (this.frameBuffer.length > maxBuffered) this.frameBuffer.shift();
+    if (!isVoice) {
+      this.onsetCounter = 0;
       return null;
     }
+    this.onsetCounter += 1;
+    if (this.onsetCounter < this.config.onsetFrames) return null;
+    this.inSpeech = true;
+    this.hangoverCounter = this.config.hangoverFrames;
     this.onsetCounter = 0;
-    return null;
+    const onset = concatPcm(this.frameBuffer);
+    this.frameBuffer.length = 0;
+    return onset;
   }
 }

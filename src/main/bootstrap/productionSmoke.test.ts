@@ -10,13 +10,14 @@ function makeDeps(overrides: Partial<ProductionSmokeDeps> = {}): { deps: Product
   const exit = vi.fn();
   const deps: ProductionSmokeDeps = {
     speech: {
-      getStatus: async () => ({ backend: 'cpu' }),
+      verifyRuntime: async () => undefined,
+      setStreamSink: () => undefined,
       download: async () => undefined,
       streamStart: async () => undefined,
       streamFeed: async () => undefined,
       streamStop: async () => undefined,
       streamCancel: async () => undefined,
-      transcribe: async () => undefined,
+      transcribe: async () => ({ text: '' }),
     },
     music: { getStatus: async () => ({ available: true, version: '2024.01.01', message: undefined }) },
     settings: { loadThemes: async () => [{ name: 'Pi · dark', tone: 'dark' }, { name: 'Pi · light', tone: 'light' }] },
@@ -42,7 +43,7 @@ describe('runProductionSmoke', () => {
 
     expect(log).toHaveBeenCalledWith('PI_DESKTOP_SMOKE_OK');
     expect(log).toHaveBeenCalledWith('PI_DESKTOP_RENDERER_OK');
-    expect(log).toHaveBeenCalledWith('PI_DESKTOP_SPEECH_OK cpu');
+    expect(log).toHaveBeenCalledWith('PI_DESKTOP_SPEECH_OK native binding');
     expect(log).toHaveBeenCalledWith('PI_DESKTOP_YT_DLP_OK 2024.01.01');
     expect(log).toHaveBeenCalledWith('PI_DESKTOP_THEMES_OK');
     expect(log).toHaveBeenCalledWith('PI_DESKTOP_TERMINAL_OK bash');

@@ -80,10 +80,10 @@ describe('Composer voice input', () => {
       video: false,
     });
     expect(window.piDesktop.ensureSpeechModel).toHaveBeenCalledWith('canary-flash');
-    expect(window.piDesktop.transcribeSpeech).toHaveBeenCalledWith('canary-flash', expect.any(ArrayBuffer), undefined);
+    expect(window.piDesktop.transcribeSpeech).toHaveBeenCalledWith('canary-flash', expect.any(ArrayBuffer), undefined, expect.any(String));
   });
 
-  it('inserts at the initiation selection and restores its scroll viewport after asynchronous transcription', async () => {
+  it('inserts at the initiation selection and preserves the latest viewport and caret after asynchronous transcription', async () => {
     let resolveTranscript: ((value: { text: string; language: string; backend: string; accelerated: boolean }) => void) | undefined;
     const transcribeSpeech = vi.fn(() => new Promise<{ text: string; language: string; backend: string; accelerated: boolean }>((resolve) => { resolveTranscript = resolve; }));
     Object.defineProperty(window, 'piDesktop', { configurable: true, value: {
@@ -116,8 +116,8 @@ describe('Composer voice input', () => {
 
     const expected = latest.replace('TARGET', 'spoken replacement');
     await waitFor(() => expect(textarea).toHaveValue(expected));
-    await waitFor(() => expect(textarea.scrollTop).toBe(120));
-    expect(textarea.selectionStart).toBe(start + 'spoken replacement'.length);
+    await waitFor(() => expect(textarea.scrollTop).toBe(640));
+    expect(textarea.selectionStart).toBe(expected.length);
     expect(transcribeSpeech).toHaveBeenCalledOnce();
   });
 

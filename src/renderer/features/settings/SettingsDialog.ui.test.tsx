@@ -522,7 +522,7 @@ describe('SettingsDialog feedback', () => {
     render(<SettingsDialog />);
 
     await user.click(await screen.findByRole('tab', { name: /Voice/ }));
-    expect(await screen.findByText('GPU acceleration active')).toBeInTheDocument();
+    expect(await screen.findByText('GPU acceleration available')).toBeInTheDocument();
     expect(screen.getByLabelText('Voice transcription models').querySelectorAll('.voice-model-row')).toHaveLength(3);
     await user.click(screen.getByRole('button', { name: 'Download English Live voice model' }));
     expect(window.piDesktop.downloadSpeechModel).toHaveBeenCalledWith('parakeet-unified');

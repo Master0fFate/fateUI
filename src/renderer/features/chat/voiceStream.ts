@@ -22,6 +22,8 @@ export interface VoiceStreamController {
 
 const PROCESSOR_NAME = 'fate-voice-downsample';
 const TARGET_RATE = SPEECH_SAMPLE_RATE;
+const FLUSH_TIMEOUT_MS = 1_000;
+const BACKLOG_WARNING_SECONDS = 5;
 /** Match the main-process IPC limit: combine delayed 300 ms captures, but never
  *  make an unbounded native feed. */
 export const MAX_VOICE_STREAM_BATCH_SAMPLES = MAX_SPEECH_STREAM_FEED_SAMPLES;
@@ -41,11 +43,13 @@ export class VoiceStreamFeedQueue {
   private closed = false;
   private cancelled = false;
   private failure: unknown | null = null;
+  private backlogWarning = false;
 
   constructor(
     private readonly send: (audio: ArrayBuffer) => Promise<void>,
     private readonly onError: (error: unknown) => void,
     private readonly gate: SpeechGate = new SpeechGate(),
+    private readonly onBacklogSeconds?: (seconds: number) => void,
   ) {}
 
   push(pcm: Float32Array): boolean {
@@ -80,8 +84,17 @@ export class VoiceStreamFeedQueue {
     }
     this.pending.push(pcm);
     this.pendingSamples += pcm.length;
+    this.reportBacklog();
     this.startDrain();
     return true;
+  }
+
+  private reportBacklog(): void {
+    const seconds = (this.pendingSamples + this.inFlightSamples) / TARGET_RATE;
+    const warning = seconds >= BACKLOG_WARNING_SECONDS;
+    if (warning === this.backlogWarning) return;
+    this.backlogWarning = warning;
+    this.onBacklogSeconds?.(seconds);
   }
 
   private startDrain(): void {
@@ -104,6 +117,7 @@ export class VoiceStreamFeedQueue {
         return;
       } finally {
         this.inFlightSamples = 0;
+        if (!this.cancelled && !this.failure) this.reportBacklog();
       }
     }
   }
@@ -134,13 +148,16 @@ class DownsampleProcessor extends AudioWorkletProcessor {
     super();
     this.chunkSamples = (options.processorOptions && options.processorOptions.chunkSamples) || 4800;
     this.out = [];
-    this.leftover = [];
-    this.fraction = 0;
-    this.ratio = ${TARGET_RATE} / sampleRate;
+    this.previous = 0;
+    this.phase = 0;
     this.stopped = false;
     this.port.onmessage = (event) => {
       if (event.data && event.data.type === 'flush' && !this.stopped) {
         this.stopped = true;
+        while (this.phase < 0) {
+          this.out.push(this.previous);
+          this.phase += sampleRate;
+        }
         if (this.out.length > 0) {
           const buffer = new Float32Array(this.out);
           this.out = [];
@@ -157,18 +174,17 @@ class DownsampleProcessor extends AudioWorkletProcessor {
     if (sampleRate === ${TARGET_RATE}) {
       for (let i = 0; i < channel.length; i++) this.out.push(channel[i]);
     } else {
-      const combined = this.leftover;
-      for (let i = 0; i < channel.length; i++) combined.push(channel[i]);
-      let pos = this.fraction;
-      while (pos + 1 < combined.length) {
-        const i0 = pos | 0;
-        const frac = pos - i0;
-        this.out.push(combined[i0] + (combined[i0 + 1] - combined[i0]) * frac);
-        pos += 1 / this.ratio;
+      const last = channel.length - 1;
+      while (this.phase <= last * ${TARGET_RATE}) {
+        const position = this.phase / ${TARGET_RATE};
+        const index = Math.floor(position);
+        const left = index < 0 ? this.previous : channel[index];
+        const right = channel[Math.ceil(position)];
+        this.out.push(left + (right - left) * (position - index));
+        this.phase += sampleRate;
       }
-      const consumed = pos | 0;
-      this.leftover = combined.slice(consumed);
-      this.fraction = pos - consumed;
+      this.phase -= channel.length * ${TARGET_RATE};
+      this.previous = channel[last];
     }
     while (this.out.length >= this.chunkSamples) {
       const chunk = this.out.splice(0, this.chunkSamples);
@@ -206,20 +222,38 @@ export async function startVoiceStream(
   }
 
   let context: AudioContext;
-  try {
-    // Let Chromium perform its native, band-limited conversion when the device
-    // supports a 16 kHz graph. The worklet keeps its resampler as a fallback.
-    context = new AudioContext({ sampleRate: TARGET_RATE });
-  } catch {
-    context = new AudioContext();
-  }
   let source: MediaStreamAudioSourceNode;
   let node: AudioWorkletNode;
   let mute: GainNode;
-  let resolveFlush: (() => void) | null = null;
-  let processorFailed = false;
+  let finishFlush: ((error?: Error) => void) | null = null;
+  let captureError: Error | null = null;
+  const release = async () => {
+    try {
+      stream.getTracks().forEach((track) => track.stop());
+      if (node) {
+        node.port.onmessage = null;
+        node.onprocessorerror = null;
+        node.port.close();
+      }
+      source?.disconnect();
+      node?.disconnect();
+      mute?.disconnect();
+    } finally {
+      await context?.close().catch(() => undefined);
+    }
+  };
   try {
-    await context.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' })));
+    try {
+      context = new AudioContext({ sampleRate: TARGET_RATE });
+    } catch {
+      context = new AudioContext();
+    }
+    const moduleUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
+    try {
+      await context.audioWorklet.addModule(moduleUrl);
+    } finally {
+      URL.revokeObjectURL(moduleUrl);
+    }
     source = context.createMediaStreamSource(stream);
     node = new AudioWorkletNode(context, PROCESSOR_NAME, {
       numberOfInputs: 1,
@@ -229,15 +263,14 @@ export async function startVoiceStream(
     });
     node.port.onmessage = (event: MessageEvent) => {
       if ((event.data as { type?: string } | null)?.type === 'flushed') {
-        resolveFlush?.();
-        resolveFlush = null;
+        finishFlush?.();
         return;
       }
       if (event.data instanceof Float32Array) onChunk(event.data);
     };
     node.onprocessorerror = () => {
-      processorFailed = true;
-      resolveFlush?.();
+      captureError = new Error('Microphone capture failed. The recording may be incomplete.');
+      finishFlush?.(captureError);
     };
     mute = context.createGain();
     mute.gain.value = 0;
@@ -245,8 +278,7 @@ export async function startVoiceStream(
     node.connect(mute);
     mute.connect(context.destination);
   } catch (error) {
-    stream.getTracks().forEach((track) => track.stop());
-    await context.close().catch(() => undefined);
+    await release();
     throw error;
   }
 
@@ -254,17 +286,19 @@ export async function startVoiceStream(
   return {
     stop: () => {
       stopping ??= (async () => {
-        if (!processorFailed) {
-          await new Promise<void>((resolve) => {
-            resolveFlush = resolve;
-            try { node.port.postMessage({ type: 'flush' }); } catch { resolve(); }
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        try {
+          if (captureError) throw captureError;
+          await new Promise<void>((resolve, reject) => {
+            finishFlush = (error) => error ? reject(error) : resolve();
+            deadline = setTimeout(() => reject(new Error('Microphone capture did not finish in time. The recording may be incomplete.')), FLUSH_TIMEOUT_MS);
+            node.port.postMessage({ type: 'flush' });
           });
+        } finally {
+          clearTimeout(deadline);
+          finishFlush = null;
+          await release();
         }
-        node.port.onmessage = null;
-        node.onprocessorerror = null;
-        try { source.disconnect(); node.disconnect(); mute.disconnect(); } catch { /* graph already torn down */ }
-        stream.getTracks().forEach((track) => track.stop());
-        await context.close().catch(() => undefined);
       })();
       return stopping;
     },

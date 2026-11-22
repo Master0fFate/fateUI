@@ -381,10 +381,11 @@ describe('IPC contracts', () => {
     expect(() => appSettingsSchema.parse({ ...defaults, disabledModels: ['x'.repeat(701)] })).toThrow();
     expect(speechModelInputSchema.parse({ modelId: 'cohere-transcribe' })).toEqual({ modelId: 'cohere-transcribe' });
     expect(() => speechModelInputSchema.parse({ modelId: 'huge' })).toThrow();
-    expect(speechTranscribeInputSchema.parse({ modelId: 'canary-flash', audio: new ArrayBuffer(16) }).audio.byteLength).toBe(16);
-    expect(() => speechTranscribeInputSchema.parse({ modelId: 'canary-flash', audio: new ArrayBuffer(3) })).toThrow();
-    expect(speechStreamFeedInputSchema.parse({ audio: new ArrayBuffer(16_000 * 4 * 2) }).audio.byteLength).toBe(16_000 * 4 * 2);
-    expect(() => speechStreamFeedInputSchema.parse({ audio: new ArrayBuffer(16_000 * 4 * 2 + 4) })).toThrow();
+    const attemptId = '4c3d3418-a1a9-44ed-8bd1-8c9490add6f9';
+    expect(speechTranscribeInputSchema.parse({ attemptId, modelId: 'canary-flash', audio: new ArrayBuffer(16) }).audio.byteLength).toBe(16);
+    expect(() => speechTranscribeInputSchema.parse({ attemptId, modelId: 'canary-flash', audio: new ArrayBuffer(3) })).toThrow();
+    expect(speechStreamFeedInputSchema.parse({ attemptId, audio: new ArrayBuffer(16_000 * 4 * 2) }).audio.byteLength).toBe(16_000 * 4 * 2);
+    expect(() => speechStreamFeedInputSchema.parse({ attemptId, audio: new ArrayBuffer(16_000 * 4 * 2 + 4) })).toThrow();
     expect(() => appSettingsSchema.parse({ ...defaults, interfaceFont: 'comic-sans' })).toThrow();
   });
 });

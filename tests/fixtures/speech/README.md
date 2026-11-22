@@ -1,0 +1,3 @@
+`review-changes.s16le` is the project-authored sentence “Please review the current changes before sending the message.” It was synthesized offline with Windows System.Speech into 16 kHz mono signed 16-bit little-endian PCM. No microphone recording, voice model or speech corpus is included. The fixture stays in the checkout, not in the installer.
+
+From the repository root, `node scripts/verify-speech-models.mjs` checks the fixture against all six production models. Pass one or more catalog IDs to check a subset. The verifier downloads missing pinned GGUFs to `node_modules/.cache/speech-spike` and verifies their size and SHA-256 before use.

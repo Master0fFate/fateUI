@@ -58,7 +58,7 @@ export function parseAccelerator(accelerator: string, key: UiohookModule['Uiohoo
       if (modifier) combo[modifier] = true;
     } else {
       const keycode = tokenToKeycode(token, key);
-      if (keycode === undefined) return null;
+      if (hasKey || keycode === undefined) return null;
       combo.keycode = keycode;
       hasKey = true;
     }
@@ -78,27 +78,28 @@ export function parseAccelerator(accelerator: string, key: UiohookModule['Uiohoo
  */
 export class GlobalHotkeyService {
   private readonly logs: AppLogService;
-  private readonly onStart: () => void;
+  private readonly onPress: (action: 'start' | 'toggle') => void;
   private readonly onStop: () => void;
   private uiohookPromise: Promise<KeyboardHook | null> | null = null;
   private pushToTalkAvailable = true;
   private unavailableReason: string | undefined;
   private current: { cleanup: () => void } | null = null;
   private combo: KeyCombo | null = null;
-  private active = false;
+  private held = false;
+  private registrationReason: string | undefined;
+  private generation = 0;
+  private requested: { accelerator: string; mode: VoiceHotkeyMode; result: Promise<SpeechHotkeyStatus> } | null = null;
   private disposed = false;
 
-  constructor(logs: AppLogService, onStart: () => void, onStop: () => void,
+  constructor(logs: AppLogService, onPress: (action: 'start' | 'toggle') => void, onStop: () => void,
     private readonly startHook: (listener: (event: 'down' | 'up') => void) => Promise<KeyboardHook | null> = startKeyboardHookProcess) {
     this.logs = logs;
-    this.onStart = onStart;
+    this.onPress = onPress;
     this.onStop = onStop;
   }
 
   getStatus(): SpeechHotkeyStatus {
-    return this.pushToTalkAvailable
-      ? { pushToTalkAvailable: true }
-      : { pushToTalkAvailable: false, reason: this.unavailableReason };
+    return { pushToTalkAvailable: this.pushToTalkAvailable, ...(this.registrationReason ? { reason: this.registrationReason } : {}) };
   }
 
   /** Register a hotkey. Toggle uses globalShortcut; push-to-talk uses the native
@@ -108,20 +109,28 @@ export class GlobalHotkeyService {
     // A settings save or a late startup step can arrive during quit. Nothing registers then.
     if (this.disposed) return this.getStatus();
     if (mode === 'toggle') {
-      const registered = globalShortcut.register(accelerator, () => this.toggle());
+      let registered = false;
+      try { registered = globalShortcut.register(accelerator, () => this.onPress('toggle')); } catch { registered = false; }
       if (!registered) {
-        return { pushToTalkAvailable: this.pushToTalkAvailable, reason: `The hotkey "${accelerator}" could not be registered. It may be in use by another application.` };
+        this.registrationReason = `The hotkey "${accelerator}" could not be registered. Choose another shortcut.`;
+        return this.getStatus();
       }
       this.current = { cleanup: () => globalShortcut.unregister(accelerator) };
       this.logs.write('info', 'speech', `Voice toggle hotkey registered: ${accelerator}`);
       return this.getStatus();
     }
 
+    const generation = this.generation;
     const hook = await this.loadHook();
-    if (!hook || this.disposed) return this.getStatus();
+    if (this.disposed || generation !== this.generation) return this.getStatus();
+    if (!hook) {
+      this.registrationReason = this.unavailableReason;
+      return this.getStatus();
+    }
     const combo = parseAccelerator(accelerator, hook.keys as unknown as UiohookModule['UiohookKey']);
     if (!combo) {
-      return { pushToTalkAvailable: this.pushToTalkAvailable, reason: `The hotkey "${accelerator}" is not a recognizable key combination for push-to-talk.` };
+      this.registrationReason = `The hotkey "${accelerator}" is not a recognizable key combination for push-to-talk.`;
+      return this.getStatus();
     }
     this.combo = combo;
     hook.setCombo(combo);
@@ -138,21 +147,22 @@ export class GlobalHotkeyService {
       this.unregister();
       return this.getStatus();
     }
-    return this.register(speech.voiceHotkey, speech.voiceHotkeyMode);
+    const { voiceHotkey: accelerator, voiceHotkeyMode: mode } = speech;
+    if (this.requested?.accelerator === accelerator && this.requested.mode === mode) return this.requested.result;
+    const result = this.register(accelerator, mode);
+    this.requested = { accelerator, mode, result };
+    return result;
   }
 
   /** Drop the active hotkey registration (keeps push-to-talk availability). */
   unregister(): void {
+    this.generation++;
+    this.requested = null;
+    this.registrationReason = undefined;
     this.current?.cleanup();
     this.current = null;
     this.combo = null;
-    this.active = false;
-  }
-
-  /** Push-to-talk toggle-state debounce, and keeps toggle in sync when recording
-   *  stops for any reason (hotkey or on-screen button). */
-  resetActive(): void {
-    this.active = false;
+    if (this.held) { this.held = false; this.onStop(); }
   }
 
   /** Release every registration and stop the native hook if it was started. */
@@ -167,17 +177,12 @@ export class GlobalHotkeyService {
     void started.then((hook) => { hook?.stop(); });
   }
 
-  private toggle(): void {
-    if (this.active) { this.active = false; this.onStop(); }
-    else { this.active = true; this.onStart(); }
-  }
-
   /** The helper reports only that the registered combination went down or up. */
   private onHookEvent(event: 'down' | 'up'): void {
     if (!this.combo) return;
     if (event === 'down') {
-      if (!this.active) { this.active = true; this.onStart(); }
-    } else if (this.active) { this.active = false; this.onStop(); }
+      if (!this.held) { this.held = true; this.onPress('start'); }
+    } else if (this.held) { this.held = false; this.onStop(); }
   }
 
   private loadHook(): Promise<KeyboardHook | null> {

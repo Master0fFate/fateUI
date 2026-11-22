@@ -129,7 +129,7 @@ Attach saved sessions as read-only context, or message a saved session without s
 
 ## Native media (optional)
 
-- **Voice transcription** — local, settings-controlled models with bounded and verified downloads.
+- **Voice transcription** — audio is decoded locally and the result stays in the draft. Send and queue actions are unavailable from microphone preparation until the transcript is ready; stopping dictation never sends a message. Push-to-talk is bound to one window until release. A recording stops after three minutes.
 - **Ambient audio** — disabled by default; resolved through a bundled, pinned `yt-dlp` runtime and streamed without saving media into the project.
 - **Generated images** — select an image model independently of the active chat model. Fate UI supports authenticated OpenAI, Google, OpenRouter, and ChatGPT OAuth routes, plus compatible custom Pi providers. Custom endpoints require HTTPS except on loopback addresses. Generated raster output is validated, rendered inline, and stored under `~/.pi/agent/generated-images/<session-id>/`.
 

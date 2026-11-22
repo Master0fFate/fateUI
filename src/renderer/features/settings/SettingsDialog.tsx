@@ -329,9 +329,10 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
   useEffect(() => {
     if (!open || activeSection !== 'voice' || !voiceHotkeysSupported || typeof getDesktopApiOptional()?.getSpeechHotkeyStatus !== 'function') return;
     let active = true;
+    setHotkeyStatus(null);
     getDesktopApi().getSpeechHotkeyStatus().then((status) => { if (active) setHotkeyStatus(status); }).catch(() => undefined);
     return () => { active = false; };
-  }, [activeSection, open, voiceHotkeysSupported]);
+  }, [activeSection, open, persistedSettings, voiceHotkeysSupported]);
 
   useEffect(() => {
     if (!capturingHotkey || !voiceHotkeysSupported) return;
@@ -649,8 +650,10 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
     max: 'Highest accuracy',
   };
   const speechBackendLabel = !speechStatus
-    ? 'Detecting acceleration…'
-    : speechStatus.accelerated ? 'GPU acceleration active' : 'CPU fallback ready';
+    ? (speechStatusError ? 'Hardware status unavailable' : 'Checking local hardware…')
+    : speechStatus.accelerated ? 'GPU acceleration available' : 'No hardware acceleration reported';
+  const hotkeyIssue = hotkeyStatus?.reason ?? (hotkeyStatus && !hotkeyStatus.pushToTalkAvailable && settings.speech.voiceHotkeyMode === 'push-to-talk'
+    ? 'Push-to-talk is unavailable on this platform.' : null);
   const selectedInputUnavailable = Boolean(
     settings.speech.inputDeviceId
     && !inputDevices.some((device) => device.deviceId === settings.speech.inputDeviceId),
@@ -921,7 +924,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   </div>
                   <div className="voice-backend-status" data-accelerated={speechStatus?.accelerated ?? false}>
                     <Gauge size={13} aria-hidden="true" />
-                    <div><strong>{speechBackendLabel}</strong><span>{speechStatus?.backend ?? 'Selecting the best available local backend…'}</span></div>
+                    <div><strong>{speechBackendLabel}</strong>{speechStatus && <span>Hardware backend: {speechStatus.backend}</span>}</div>
                   </div>
                   <div className="settings-title settings-title--spaced"><div><h3>Model power</h3><p>Pick a model per accuracy tier. Mini downloads automatically on first use. “Live” models show words while you speak.</p></div></div>
                   <div className="voice-model-list" aria-label="Voice transcription models">
@@ -961,7 +964,7 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                   </div>
                   <div className="settings-group">
                     <div className="settings-theme-row voice-hotkey-row">
-                      <div><strong>Voice hotkey</strong><small>{settings.speech.voiceHotkey ? `Press ${settings.speech.voiceHotkey} ${settings.speech.voiceHotkeyMode === 'push-to-talk' ? 'and hold to talk' : 'to toggle recording'}.` : 'Off — use the microphone button in the composer instead.'}</small></div>
+                      <div><strong>Voice hotkey</strong><small>{settings.speech.voiceHotkey ? `Configured to ${settings.speech.voiceHotkeyMode === 'push-to-talk' ? 'hold for recording' : 'toggle recording'} with ${settings.speech.voiceHotkey}.` : 'Off — use the microphone button in the composer instead.'}</small></div>
                       <div className="voice-hotkey-controls">
                         <button type="button" className="voice-hotkey-capture" data-active={capturingHotkey || undefined} aria-pressed={capturingHotkey} onClick={() => setCapturingHotkey((value) => !value)}>{capturingHotkey ? 'Press keys…' : (settings.speech.voiceHotkey ?? 'Record')}</button>
                         {settings.speech.voiceHotkey && <button type="button" className="voice-hotkey-clear" aria-label="Clear voice hotkey" onClick={() => setSettings({ ...settings, speech: { ...settings.speech, voiceHotkey: null } })}><X size={14} /></button>}
@@ -969,8 +972,8 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
                       </div>
                     </div>
                   </div>
-                  {hotkeyStatus && !hotkeyStatus.pushToTalkAvailable && settings.speech.voiceHotkeyMode === 'push-to-talk' && (
-                    <div className="voice-model-error" role="alert"><CircleAlert size={15} /><span className="icon-label">{hotkeyStatus.reason ?? 'Push-to-talk is unavailable on this platform. Toggle mode still works.'}</span></div>
+                  {hotkeyIssue && (
+                    <div className="voice-model-error" role="alert"><CircleAlert size={15} /><span className="icon-label">{hotkeyIssue}</span></div>
                   )}
                 </div>
               ) : <div className="settings-panel" role="tabpanel" id="settings-panel-voice" aria-labelledby="settings-tab-voice"><p className="settings-empty">{unavailableExplanation.microphone}</p></div>)}

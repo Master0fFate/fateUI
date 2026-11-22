@@ -45,7 +45,7 @@ import { TargetProjectService } from './connections/TargetProjectService';
 import { RemoteOutcomeStore } from './connections/RemoteOutcomeStore';
 import type { PendingRemoteOutcome } from './connections/RemoteCoreClient';
 import type { ConnectionSelection } from '../shared/contracts/connections';
-import { createTrustedRendererPolicy, isTrustedAudioPermissionRequest } from './security/trustedRenderer';
+import { createTrustedRendererPolicy, isTrustedAudioPermissionRequest, isTrustedRendererUrl } from './security/trustedRenderer';
 import { createDesktopSettingsService } from './settings/DesktopSettingsService';
 
 import { SpeechService } from './speech/SpeechService';
@@ -186,12 +186,24 @@ const music = new MusicService();
 const computerUse = new ComputerUseService(logs);
 const rendererNetworkProxy = new PublicHttpsProxy();
 const speech = new SpeechService(logs);
-const emitVoiceHotkey = (action: 'start' | 'stop') => {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) window.webContents.send(ipcChannels.voiceHotkey, { action, source: 'hotkey' });
-  }
-};
-const hotkey = new GlobalHotkeyService(logs, () => emitVoiceHotkey('start'), () => emitVoiceHotkey('stop'));
+let voiceTarget: () => Electron.WebContents | null = () => null;
+let heldTarget: Electron.WebContents | null = null;
+const eligibleVoiceTarget = (contents: Electron.WebContents | null | undefined): contents is Electron.WebContents =>
+  !!contents && !contents.isDestroyed() && !contents.isCrashed() && !contents.isLoadingMainFrame()
+  && BrowserWindow.fromWebContents(contents)?.webContents === contents && isTrustedRendererUrl(contents.getURL(), rendererPolicy);
+const hotkey = new GlobalHotkeyService(logs, (action) => {
+  const owner = voiceTarget();
+  if (action === 'start' && owner) return;
+  const target = owner ?? [BrowserWindow.getFocusedWindow(), dispatcher.activeHandle(), ...BrowserWindow.getAllWindows()]
+    .find((window) => window && !window.isDestroyed() && eligibleVoiceTarget(window.webContents))?.webContents;
+  if (!eligibleVoiceTarget(target)) return;
+  if (action === 'start') heldTarget = target;
+  target.send(ipcChannels.voiceHotkey, { action, source: 'hotkey' });
+}, () => {
+  const target = heldTarget;
+  heldTarget = null;
+  if (eligibleVoiceTarget(target)) target.send(ipcChannels.voiceHotkey, { action: 'stop', source: 'hotkey' });
+});
 let terminal: TerminalService;
 
 const rendererPath = path.join(currentDirectory, '../renderer/index.html');
@@ -469,14 +481,19 @@ app.whenReady().then(async () => {
   logs.write('info', 'app', `Fate UI ${app.getVersion()} started in instance slot ${instanceProfile.slot}.`);
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined;
-    callback(permission === 'media' && isTrustedAudioPermissionRequest(rendererPolicy, {
-      documentUrl: webContents.getURL(),
-      mediaTypes,
-    }));
+    const allowed = () => permission === 'media' && details.isMainFrame && !webContents.isDestroyed()
+      && (isTrustedRendererUrl(details.requestingUrl, rendererPolicy)
+        || (!rendererPolicy.developmentOrigin && ['file://', 'file:///'].includes(details.requestingUrl)))
+      && BrowserWindow.fromWebContents(webContents)?.webContents === webContents
+      && isTrustedAudioPermissionRequest(rendererPolicy, { documentUrl: webContents.getURL(), mediaTypes });
+    if (allowed() && process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') {
+      void systemPreferences.askForMediaAccess('microphone').then((granted) => callback(granted && allowed()), () => callback(false));
+    } else callback(allowed());
   });
   session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => (
     permission === 'media'
-    && details.mediaType === 'audio'
+    && details.isMainFrame && details.mediaType === 'audio'
+    && !!webContents && BrowserWindow.fromWebContents(webContents)?.webContents === webContents
     && isTrustedAudioPermissionRequest(rendererPolicy, {
       // Packaged pages report the broad `file://` origin; the exact WebContents URL is the security boundary.
       documentUrl: webContents?.getURL(),
@@ -484,18 +501,6 @@ app.whenReady().then(async () => {
       mediaTypes: ['audio'],
     })
   ));
-  if (
-    process.platform === 'darwin'
-    && process.env.PI_DESKTOP_SMOKE !== '1'
-    && systemPreferences.getMediaAccessStatus('microphone') === 'not-determined'
-  ) {
-    try {
-      const granted = await systemPreferences.askForMediaAccess('microphone');
-      if (!granted) logs.write('warn', 'microphone', 'Microphone permission was denied in macOS System Settings.');
-    } catch (error) {
-      logs.write('warn', 'microphone', `macOS microphone permission could not be requested: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
   await recovery.load();
   if (settings.get().computerUseElevated) {
     if (!isElevated()) {
@@ -551,9 +556,10 @@ app.whenReady().then(async () => {
       if (!window.isDestroyed() && state.kind === 'remote') browserHost?.setAppOverlay(window, true);
     }
   });
+  voiceTarget = mainCommands.voiceTarget;
   dispatcher.setOpener(mainCommands.openProjectPath);
   void hotkey.applySpeechSettings((await settings.load()).speech).then((status) => {
-    if (!status.pushToTalkAvailable) logs.write('warn', 'speech', status.reason ?? 'Push-to-talk is unavailable on this platform.');
+    if (status.reason) logs.write('warn', 'speech', status.reason);
   });
   if (hostStopping) return;
   windows.installMenu();
