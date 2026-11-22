@@ -48,4 +48,4 @@ In a trusted desktop project, ask: “Watch this PR’s CI and tell me when it f
 
 You can also say “Hey, set up a watcher as soon as the CI passes.” The watch reports the result, including failures. Asking for a merge or a release in the same message does not schedule either action.
 
-The turn ends normally. **Run → Monitor → Watches** shows the status and lets you stop the watch. When checks finish, Fate posts a text-only update in the original chat, without tools or chat history. Switching projects does not stop the watch. Watches expire after one hour and do not resume after quitting.
+The turn ends normally. **Run → Monitor → Watches** shows the status and lets you stop the watch. Fate reports the first confirmed failure for the pinned commit, even if other checks are still running. A success report waits for the complete set of checks. Chat watches post directly in the original chat without calling a model; if the chat is busy, the update waits until it is idle. Switching projects does not stop the watch. Watches expire after one hour and do not resume after quitting.

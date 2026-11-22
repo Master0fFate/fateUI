@@ -53,7 +53,7 @@ export function createChatWatchTool(start: (sessionId: string, signal?: AbortSig
     executionMode: 'sequential',
     execute: async (_id, _params, signal, _update, ctx) => {
       const label = await start(ctx.sessionManager.getSessionId(), signal);
-      return { content: [{ type: 'text' as const, text: `Watching ${label}. I’ll post the result in this chat when it finishes.` }], details: { label } };
+      return { content: [{ type: 'text' as const, text: `Watching ${label}. I’ll post the result in this chat.` }], details: { label } };
     },
   });
 }
