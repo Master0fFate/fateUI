@@ -10,7 +10,7 @@ export const skinSurfaceSelectors: Record<Exclude<SkinSurfaceName, 'global'>, st
   tasks: '.goalmax-task-strip',
   goal: '.goalmax-flight-deck, .goalmax-rail, .goalmax-editor-dialog, .goalmax-confirm-dialog',
   agents: '.subagent-sessions, .subagent-chat-preview, .agent-workspace-dialog',
-  tools: '.tool-card, .tool-history, .subagent-tool',
+  tools: '.tool-card, .subagent-tool',
   activity: '.activity-panel',
   notifications: '.app-toast, .settings-toast, .runtime-notice, .workspace-error, .project-reveal-error, .browser-error-strip, .subagent-error',
   context: '.context-dashboard',

@@ -408,13 +408,16 @@ const DesktopConversationTimeline = memo(function DesktopConversationTimeline({ 
     if (!flightDeckJump || flightDeckJump.projectPath !== projectPath || flightDeckJump.sessionId !== sessionId) return;
     const targetId = flightDeckJump.target.kind === 'message'
       ? flightDeckJump.target.timelineId ?? `message:${flightDeckJump.target.messageId}`
-      : flightDeckJump.target.kind === 'error' ? flightDeckJump.target.timelineId : null;
+      : flightDeckJump.target.kind === 'tool' ? `tool:${flightDeckJump.target.toolCallId}`
+        : flightDeckJump.target.kind === 'error' ? flightDeckJump.target.timelineId : null;
     if (!targetId) return;
     const index = displayOrder.indexOf(targetId);
     if (index >= 0) {
       virtuosoRef.current?.scrollToIndex({ index, align: 'center', behavior: 'auto' });
+      if (flightDeckJump.target.kind === 'tool') return;
     } else {
-      showToast({ kind: 'info', title: 'Activity not retained', message: 'That conversation activity is no longer kept.' });
+      showToast({ kind: 'info', title: 'Activity not retained', message: flightDeckJump.target.kind === 'tool'
+        ? 'That tool execution is not shown in the conversation.' : 'That conversation activity is no longer kept.' });
     }
     clearFlightDeckJump(flightDeckJump.nonce);
   }, [clearFlightDeckJump, displayOrder, flightDeckJump, projectPath, sessionId, showToast]);

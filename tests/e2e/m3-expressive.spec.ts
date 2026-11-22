@@ -375,8 +375,8 @@ test('M3 Expressive independent preview, save, compact layout and restart', asyn
     await expect(page.getByRole('dialog', { name: 'Model settings' })).toHaveCSS('border-radius', '24px');
     await page.screenshot({ path: await evidenceOutputPath('m3-expressive', 'tasks-model-picker.png'), animations: 'disabled' });
     await page.keyboard.press('Escape');
-    await page.getByRole('tablist', { name: 'Run views' }).getByRole('tab', { name: 'Tools', exact: true }).click();
-    await expect(page.locator('.tool-card').first()).toBeVisible();
+    await page.getByRole('tablist', { name: 'Run views' }).getByRole('tab', { name: 'Activity', exact: true }).click();
+    await expect(page.locator('.activity-list [data-kind="tool"]').first()).toBeVisible();
     await page.screenshot({ path: await evidenceOutputPath('m3-expressive', 'tools.png'), animations: 'disabled' });
     await page.getByRole('button', { name: /^System/u }).click();
     await page.getByRole('tablist', { name: 'System views' }).getByRole('tab', { name: 'Context', exact: true }).click();

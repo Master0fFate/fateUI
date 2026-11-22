@@ -14,9 +14,9 @@ import type { SkinComponents } from './types';
 
 const groups = [
   ['Changes', 'Files'],
-  ['Monitor', 'Goal', 'Agents', 'Tools', 'Activity'],
+  ['Agents', 'Goal', 'Monitor', 'Activity'],
   ['Context', 'Resources'],
-  ['Monitor', 'Goal', 'Agents / Tasks'],
+  ['Agents / Tasks', 'Goal', 'Monitor'],
 ];
 const runLabels = groups[1]!;
 const accessibleName = (label: string) => label === 'Agents' ? 'Subagent sessions, 2 active' : label;
@@ -64,11 +64,11 @@ describe('narrow inspector tab presentation', () => {
     const activity = screen.getByRole('tab', { name: 'Activity' });
     activity.focus();
     fireEvent.keyDown(activity, { key: 'ArrowLeft' });
-    const tools = screen.getByRole('tab', { name: 'Tools' });
-    await screen.findByText('Tools panel');
-    expect(tools).toHaveFocus();
-    expect(tools).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Tools');
+    const monitor = screen.getByRole('tab', { name: 'Monitor' });
+    await screen.findByText('Monitor panel');
+    expect(monitor).toHaveFocus();
+    expect(monitor).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Monitor');
     if (components !== dreamcoreComponents) {
       runLabels.forEach((label) => expect(screen.getByTestId(`icon-${label}`)).toBeInTheDocument());
     }
@@ -91,7 +91,7 @@ function narrowContainer(root: Container): Container {
 }
 
 describe('narrow inspector CSS contract (not browser geometry)', () => {
-  it('lets five compact targets shrink without changing their 38px maximum or wide layout', () => {
+  it('lets compact targets shrink without changing their 38px maximum or wide layout', () => {
     const narrow = narrowContainer(globalCss);
     expect(declarations(narrow, '.inspector-secondary-tooltip').flex).toBe('0 1 38px');
     expect(declarations(narrow, '.inspector-secondary-trigger').width).toBe('100%');

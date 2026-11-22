@@ -98,7 +98,7 @@ Native-feeling UI sans handles controls, navigation, and conversation. The platf
 
 ## Layout
 
-The default desktop is a resizable three-column workbench: sessions/resources at left, a fluid conversation center, and Changes/Files/Tools/Context at right. The left pane collapses to a 64px rail; the inspector collapses fully. The manual terminal occupies a bounded lower panel. Panel sizes persist locally, while viewport-relative caps protect the center at narrower widths.
+The default desktop is a resizable three-column workbench: sessions/resources at left, a fluid conversation center, and a Work/Run/System inspector at right. Run opens on Agents by default, followed by Goal, Monitor, and Activity. Tool events appear in Activity. The left pane collapses to a 64px rail; the inspector collapses fully. The manual terminal occupies a bounded lower panel. Panel sizes persist locally, while viewport-relative caps protect the center at narrower widths.
 
 Virtualized lists own their scroll regions. Streaming content grows inside the timeline and never changes the outer grid.
 

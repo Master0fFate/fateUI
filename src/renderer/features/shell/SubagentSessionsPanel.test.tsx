@@ -9,6 +9,7 @@ import { currentNetworkScope, useRuntimeStore } from '../../stores/runtimeStore'
 import { installFateApi, resetFateApi } from '../../platform/api';
 import { alpha, networkFixture } from '../../app/networkFixture.testSupport';
 import { useUiStore } from '../../stores/uiStore';
+import { ConversationTimeline } from '../chat/ConversationTimeline';
 import { ToolCard } from '../chat/ToolCard';
 import { Inspector } from './Inspector';
 import { SubagentSessionsPanel } from './SubagentSessionsPanel';
@@ -106,7 +107,7 @@ describe('subagent session inspector', () => {
     useRuntimeStore.getState().hydrateRuntime(state);
     useGoalMaxStore.setState({ projectPath: '/project', sessionId: 'parent-1', goal: null, loading: false, selectionGeneration: 1 });
     useUiStore.setState({
-      inspectorTab: 'changes', inspectorLastViews: { work: 'changes', run: 'goal', system: 'context' },
+      inspectorTab: 'changes', inspectorLastViews: { work: 'changes', run: 'sessions', system: 'context' },
       selectedAgent: null, inspectorCollapsed: false, flightDeckJump: null, toast: null,
     });
   });
@@ -173,7 +174,7 @@ describe('subagent session inspector', () => {
 
     expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual(['Changes', 'Files']);
     await user.click(screen.getByRole('button', { name: 'Run' }));
-    expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual(['Monitor', 'Goal', 'Subagent sessions', 'Tools', 'Activity']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual(['Subagent sessions', 'Goal', 'Monitor', 'Activity']);
     expect(screen.queryByRole('tab', { name: 'Changes' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Resources' })).not.toBeInTheDocument();
   });
@@ -425,7 +426,7 @@ describe('subagent session inspector', () => {
     clearFlightDeckJump(useUiStore.getState().flightDeckJump?.nonce);
     view.unmount();
 
-    render(<Inspector onCollapse={vi.fn()} />);
+    render(<ConversationTimeline />);
     act(() => useUiStore.getState().requestFlightDeckJump('/project', 'parent-1', { kind: 'tool', toolCallId: 'not-retained' }));
     await waitFor(() => expect(useUiStore.getState().flightDeckJump).toBeNull());
     expect(useUiStore.getState().toast).toMatchObject({ title: 'Activity not retained' });

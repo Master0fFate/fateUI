@@ -64,7 +64,9 @@ function formatPercent(value: number | null): string {
 }
 
 function outputSpeed(sample: TokenUsageSample | null | undefined): number | null {
-  return sample?.durationMs ? sample.output / (sample.durationMs / 1_000) : null;
+  if (!sample?.responseDurationMs || sample.output <= 0) return null;
+  const rate = sample.output / (sample.responseDurationMs / 1_000);
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
 }
 
 function formatSpeed(value: number | null): string {
@@ -247,6 +249,10 @@ export function ContextPanel({ runtime }: { runtime: ContextPanelRuntime }) {
   const telemetry = runtime.tokenTelemetry;
   const session = telemetry?.session;
   const latest = telemetry?.latest;
+  const speed = outputSpeed(latest);
+  const speedTitle = speed !== null && latest?.responseDurationMs
+    ? `Latest response: ${integerFormatter.format(latest.output)} output tokens in ${integerFormatter.format(latest.responseDurationMs)} ms, including time to first token.`
+    : 'Requires a completed response with reported output tokens and a measured response time.';
   const contextPercent = context?.percent ?? null;
   const pressure = contextPercent === null ? 'unknown' : contextPercent >= 85 ? 'critical' : contextPercent >= 65 ? 'warning' : 'nominal';
   const remaining = context?.tokens === null || context?.tokens === undefined
@@ -299,9 +305,9 @@ export function ContextPanel({ runtime }: { runtime: ContextPanelRuntime }) {
           {session?.cost ? null : <small>pricing unavailable</small>}
         </div>
         <div>
-          <span>Latest t/s</span>
-          <strong title={latest?.durationMs ? `${exactTokens(latest.output)} output in ${(latest.durationMs / 1_000).toFixed(1)}s, including time to first token` : undefined}>{formatSpeed(outputSpeed(latest))}</strong>
-          <small>{latest ? 'output tokens/s' : 'no response yet'}</small>
+          <span>Tokens per second</span>
+          <strong title={speedTitle}>{formatSpeed(speed)}</strong>
+          <small>{speed === null ? 'unavailable' : 'response average'}</small>
         </div>
       </section>
 
@@ -338,7 +344,7 @@ export function ContextPanel({ runtime }: { runtime: ContextPanelRuntime }) {
         <InspectorSectionHeading
           icon={BrainCircuit}
           title="Latest response"
-          detail={latest ? timeFormatter.format(latest.timestamp) : 'No response yet'}
+          detail={latest ? timeFormatter.format(latest.timestamp) : 'No usage available'}
         />
         {latest ? (
           <>
@@ -350,7 +356,7 @@ export function ContextPanel({ runtime }: { runtime: ContextPanelRuntime }) {
             </div>
             <UsageComposition usage={latest} />
           </>
-        ) : <div className="context-inline-empty">The next completed response will populate this breakdown.</div>}
+        ) : <div className="context-inline-empty">No token usage is available for the latest response.</div>}
       </section>
 
       <section className="context-definitions">

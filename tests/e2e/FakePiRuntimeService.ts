@@ -21,6 +21,7 @@ const tokenHistory = Array.from({ length: 24 }, (_value, index) => {
     totalTokens: input + output + cacheRead + cacheWrite,
     cost: 0.006 + index * 0.0017,
     timestamp: Date.UTC(2026, 0, 1, 12, index * 2),
+    responseDurationMs: 10_000,
   };
 });
 const tokenTelemetry: NonNullable<RuntimeState['tokenTelemetry']> = {

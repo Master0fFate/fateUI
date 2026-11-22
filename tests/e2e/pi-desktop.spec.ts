@@ -1651,7 +1651,9 @@ test('first launch, project, prompt, tool, diff, Git graph, worktrees, and sessi
     await page.waitForTimeout(180);
     await openInspectorView(page, 'System', /Context/u);
     await expect(page.getByRole('img', { name: 'Stacked token traffic for the 24 most recent responses on the active branch' })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Session token summary' })).toContainText('24 responses');
+    const tokenSummary = page.getByRole('region', { name: 'Session token summary' });
+    await expect(tokenSummary).toContainText('24 responses');
+    await expect(tokenSummary.getByTitle('Latest response: 709 output tokens in 10,000 ms, including time to first token.')).toHaveText('70.9');
     await expect(page.getByText('included in output')).toBeVisible();
     const contextLayout = await page.locator('.context-dashboard').evaluate((panel) => ({
       scrollWidth: panel.scrollWidth,

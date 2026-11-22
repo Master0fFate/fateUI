@@ -736,7 +736,7 @@ export const tokenMetricsSchema = z.object(tokenMetricsShape).strict().superRefi
 export const tokenUsageSampleSchema = z.object({
   ...tokenMetricsShape,
   timestamp: z.number().int().nonnegative().safe(),
-  durationMs: z.number().int().positive().safe().optional(),
+  responseDurationMs: z.number().int().positive().safe().optional(),
 }).strict().superRefine(requireReasoningSubset);
 export const sessionTokenTotalsSchema = z.object({
   ...tokenMetricsShape,

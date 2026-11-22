@@ -42,7 +42,7 @@ export const BROWSER_PANE_MAX = 2400;
 
 export type SidebarTab = 'sessions' | 'resources' | 'agents';
 export type SettingsSection = 'general' | 'skins' | 'compaction' | 'ai' | 'saved-agents' | 'mcp' | 'hooks' | 'code' | 'usage' | 'hosts' | 'learning' | 'voice' | 'workspace' | 'system';
-export type InspectorTab = 'changes' | 'files' | 'tools' | 'sessions' | 'resources' | 'context' | 'goal' | 'activity' | 'monitor';
+export type InspectorTab = 'changes' | 'files' | 'sessions' | 'resources' | 'context' | 'goal' | 'activity' | 'monitor';
 export type InspectorDestination = 'work' | 'run' | 'system';
 export type InspectorLastViews = Record<InspectorDestination, InspectorTab>;
 export type SelectedAgent =
@@ -51,13 +51,13 @@ export type SelectedAgent =
 
 export const INSPECTOR_DEFAULT_VIEWS: Record<InspectorDestination, InspectorTab> = {
   work: 'changes',
-  run: 'goal',
+  run: 'sessions',
   system: 'context',
 };
 
 export function inspectorDestinationForTab(tab: InspectorTab): InspectorDestination {
   if (tab === 'changes' || tab === 'files') return 'work';
-  if (tab === 'goal' || tab === 'sessions' || tab === 'tools' || tab === 'activity' || tab === 'monitor') return 'run';
+  if (tab === 'goal' || tab === 'sessions' || tab === 'activity' || tab === 'monitor') return 'run';
   return 'system';
 }
 
@@ -130,8 +130,8 @@ interface UiState {
   clearComposerDraftRequest: (id: number) => void;
   requestComposerFollowUp: (source: ComposerFollowUpSource, text: string) => void;
   clearComposerFollowUpRequest: (id: number) => void;
-  setInspectorTab: (tab: InspectorTab) => void;
-  openInspectorTab: (tab: InspectorTab) => void;
+  setInspectorTab: (tab: InspectorTab | 'tools') => void;
+  openInspectorTab: (tab: InspectorTab | 'tools') => void;
   openInspectorDestination: (destination: InspectorDestination) => void;
   openGoalMax: () => void;
   setGoalEditorOpen: (open: boolean) => void;
@@ -146,7 +146,8 @@ interface UiState {
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value));
 
-function selectInspectorTab(state: Pick<UiState, 'inspectorLastViews'>, inspectorTab: InspectorTab) {
+function selectInspectorTab(state: Pick<UiState, 'inspectorLastViews'>, tab: InspectorTab | 'tools') {
+  const inspectorTab = normalizeInspectorTab(tab);
   const destination = inspectorDestinationForTab(inspectorTab);
   return {
     inspectorTab,
@@ -154,11 +155,11 @@ function selectInspectorTab(state: Pick<UiState, 'inspectorLastViews'>, inspecto
   };
 }
 
-const INSPECTOR_TABS: readonly InspectorTab[] = ['changes', 'files', 'tools', 'sessions', 'resources', 'context', 'goal', 'activity', 'monitor'];
+const INSPECTOR_TABS: readonly InspectorTab[] = ['changes', 'files', 'sessions', 'resources', 'context', 'goal', 'activity', 'monitor'];
 
 /** Legacy tabs merged into the single Activity tab (v1 storage had 'recorder' and 'attestations'). */
 function normalizeInspectorTab(tab: unknown): InspectorTab {
-  if (tab === 'recorder' || tab === 'attestations') return 'activity';
+  if (tab === 'tools' || tab === 'recorder' || tab === 'attestations') return 'activity';
   return INSPECTOR_TABS.includes(tab as InspectorTab) ? (tab as InspectorTab) : 'changes';
 }
 
@@ -262,7 +263,7 @@ export const useUiStore = create<UiState>()(
       closeSubagent: () => set({ selectedAgent: null }),
       requestFlightDeckJump: (projectPath, sessionId, target) => set((state) => {
         const inspectorTab: InspectorTab | null = target.kind === 'file' ? 'changes'
-          : target.kind === 'tool' ? 'tools'
+          : target.kind === 'tool' ? 'activity'
             : target.kind === 'agent' || target.kind === 'team-node' || target.kind === 'task' ? 'sessions'
               : null;
         return {
@@ -278,7 +279,7 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: 'pi-desktop-ui-v1',
-      version: 2,
+      version: 3,
       migrate: (persisted) => {
         const state = (persisted ?? {}) as Partial<Pick<UiState, 'sidebarTab' | 'inspectorTab' | 'inspectorLastViews'>>;
         return {

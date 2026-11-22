@@ -1,11 +1,9 @@
 import * as Tabs from '@radix-ui/react-tabs';
-import { Activity, Files, GitCompareArrows, Info, ListChecks, MessagesSquare, LayoutDashboard, Sparkles, Target } from 'lucide-react';
-import { lazy, useEffect, useRef } from 'react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { Activity, Files, GitCompareArrows, Info, MessagesSquare, LayoutDashboard, Sparkles, Target } from 'lucide-react';
+import { lazy, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AppTooltip } from '../../components/AppTooltip';
 import { DeferredPanel } from '../../components/DeferredPanel';
-import { ToolCard } from '../chat/ToolCard';
 import { ChangesPanel } from '../diffs/ChangesPanel';
 import { FilesPanel } from '../files/FilesPanel';
 import { LazyDiffViewer } from '../files/LazyMonaco';
@@ -25,13 +23,13 @@ const SubagentSessionsPanel = lazy(() => import('./SubagentSessionsPanel').then(
 interface InspectorProps { onCollapse?: () => void }
 const destinations = [
   { value: 'work', label: 'Work', tabs: [{ value: 'changes', label: 'Changes', icon: GitCompareArrows }, { value: 'files', label: 'Files', icon: Files }] },
-  { value: 'run', label: 'Run', tabs: [{ value: 'monitor', label: 'Monitor', icon: LayoutDashboard }, { value: 'goal', label: 'Goal', icon: Target },
-    { value: 'sessions', label: 'Agents', icon: MessagesSquare }, { value: 'tools', label: 'Tools', icon: ListChecks }, { value: 'activity', label: 'Activity', icon: Activity }] },
+  { value: 'run', label: 'Run', tabs: [{ value: 'sessions', label: 'Agents', icon: MessagesSquare }, { value: 'goal', label: 'Goal', icon: Target },
+    { value: 'monitor', label: 'Monitor', icon: LayoutDashboard }, { value: 'activity', label: 'Activity', icon: Activity }] },
   { value: 'system', label: 'System', tabs: [{ value: 'context', label: 'Context', icon: Info }, { value: 'resources', label: 'Resources', icon: Sparkles }] },
 ] as const;
 const webDestinations = [
   { value: 'work', label: 'Work', tabs: [{ value: 'files', label: 'Files', icon: Files }, { value: 'changes', label: 'Changes', icon: GitCompareArrows }] },
-  { value: 'run', label: 'Run', tabs: [{ value: 'monitor', label: 'Monitor', icon: LayoutDashboard }, { value: 'goal', label: 'Goal', icon: Target }, { value: 'sessions', label: 'Agents / Tasks', icon: MessagesSquare }] },
+  { value: 'run', label: 'Run', tabs: [{ value: 'sessions', label: 'Agents / Tasks', icon: MessagesSquare }, { value: 'goal', label: 'Goal', icon: Target }, { value: 'monitor', label: 'Monitor', icon: LayoutDashboard }] },
 ] as const;
 function RichRead<T>({ state, children }: { state: ReadView<T>; children: (value: T) => React.ReactNode }) {
   if (state.status !== 'ready') return <p role={state.status === 'error' ? 'alert' : 'status'}>Host read {state.status}. Refresh to retry. Unknown is not empty.</p>;
@@ -77,26 +75,6 @@ function RuntimeContextPanel() {
     streaming: state.runtime.streaming, model: state.runtime.model, thinkingLevel: state.runtime.thinkingLevel, project: state.runtime.project, objective: state.runtime.objective })));
   return <ContextPanel runtime={runtime} />;
 }
-function ToolsPanel() {
-  const order = useRuntimeStore((state) => state.toolOrder);
-  const projectPath = useRuntimeStore((state) => state.runtime.project?.path);
-  const sessionId = useRuntimeStore((state) => state.runtime.sessionId);
-  const jump = useUiStore((state) => state.flightDeckJump);
-  const clearFlightDeckJump = useUiStore((state) => state.clearFlightDeckJump);
-  const showToast = useUiStore((state) => state.showToast);
-  const listRef = useRef<VirtuosoHandle>(null);
-  useEffect(() => {
-    if (!jump || jump.projectPath !== projectPath || jump.sessionId !== sessionId || jump.target.kind !== 'tool') return;
-    const index = order.indexOf(jump.target.toolCallId);
-    if (index < 0 || !useRuntimeStore.getState().toolsById[jump.target.toolCallId]) {
-      showToast({ kind: 'info', title: 'Activity not retained', message: 'That tool execution is no longer kept.' }); clearFlightDeckJump(jump.nonce); return;
-    }
-    listRef.current?.scrollToIndex({ index, align: 'center', behavior: 'auto' });
-  }, [clearFlightDeckJump, jump, order, projectPath, sessionId, showToast]);
-  if (order.length === 0) return <div className="inspector-empty"><ListChecks size={24} /><strong>No tool activity</strong><p>Pi tool executions will be shown chronologically.</p></div>;
-  return <Virtuoso ref={listRef} className="tool-history" data={order} computeItemKey={(_index, id) => id}
-    itemContent={(_index, id) => <div className="tool-history-row"><ToolCard toolCallId={id} compact /></div>} followOutput="auto" />;
-}
 export function Inspector(_props: InspectorProps = {}) {
   const { TabContent } = useSkinComponents();
   const web = getWebApiOptional();
@@ -112,15 +90,15 @@ export function Inspector(_props: InspectorProps = {}) {
   }, 0) + (state.runtime.subagentWorkflows ?? []).filter((workflow) => workflow.status === 'running').length
     + (state.runtime.agentTeams ?? []).reduce((count, team) => count + team.activeTurns, 0));
   const activeChildren = web ? 0 : desktopActiveChildren; // Bounded rows are not lifecycle counts.
-  const activeTab = useUiStore((state) => state.inspectorTab);
+  const selectedTab = useUiStore((state) => state.inspectorTab);
   const setActiveTab = useUiStore((state) => state.setInspectorTab);
   const openDestination = useUiStore((state) => state.openInspectorDestination);
-  const activeDestinationValue = inspectorDestinationForTab(activeTab);
   const availableDestinations = web ? webDestinations : destinations;
-  const activeDestination = availableDestinations.find(({ value }) => value === activeDestinationValue) ?? availableDestinations[0]!;
+  const activeDestination = availableDestinations.find(({ value }) => value === inspectorDestinationForTab(selectedTab)) ?? availableDestinations[0];
+  const activeTab = activeDestination.tabs.find(({ value }) => value === selectedTab)?.value ?? activeDestination.tabs[0].value;
   return <aside className="inspector" aria-label="Project inspector">
     <nav className="inspector-primary-nav" aria-label="Inspector destinations">{availableDestinations.map(({ value, label }) => {
-      const isActive = value === activeDestinationValue;
+      const isActive = value === activeDestination.value;
       const accessibleLabel = value === 'run' && activeChildren > 0 ? `${label}, ${activeChildren} active` : label;
       return <button type="button" key={value} className="inspector-primary-trigger" aria-current={isActive ? 'page' : undefined} aria-label={accessibleLabel}
         onClick={() => { if (!isActive) openDestination(value); }}><TabContent label={label} active={isActive} labelClassName="inspector-primary-label" />
@@ -137,7 +115,7 @@ export function Inspector(_props: InspectorProps = {}) {
         : web && !webScope ? <p className="inspector-empty">Monitor requires a confirmed selected session. Unknown does not mean no active work.</p>
           : <MonitorDashboardPanel key={web ? confirmed?.header.snapshotId : undefined} {...(webScope ? { webScope } : {})} />}</Tabs.Content>
       <Tabs.Content value="goal" className="tab-content"><GoalMaxInspector /></Tabs.Content>
-      {!web && <><Tabs.Content value="tools" className="tab-content"><ToolsPanel /></Tabs.Content><Tabs.Content value="activity" className="tab-content"><ActivityPanel /></Tabs.Content>
+      {!web && <><Tabs.Content value="activity" className="tab-content"><ActivityPanel /></Tabs.Content>
         <Tabs.Content value="resources" className="tab-content"><ResourcesPanel /></Tabs.Content><Tabs.Content value="context" className="tab-content"><RuntimeContextPanel /></Tabs.Content></>}
     </Tabs.Root>
   </aside>;

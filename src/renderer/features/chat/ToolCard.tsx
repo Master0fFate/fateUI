@@ -34,7 +34,7 @@ function presentedWorkflowToolStatus(toolStatus: RuntimeTool['status'], workflow
   return toolStatus;
 }
 
-export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, waitPollCount = 1, expansionCommand }: { toolCallId: string; compact?: boolean; waitPollCount?: number | undefined; expansionCommand?: DetailExpansionCommand }) {
+export const ToolCard = memo(function ToolCard({ toolCallId, waitPollCount = 1, expansionCommand }: { toolCallId: string; waitPollCount?: number | undefined; expansionCommand?: DetailExpansionCommand }) {
   const { Symbol } = useSkinComponents();
   const tool = useRuntimeStore((state) => state.toolsById[toolCallId]);
   const childStatusKey = useRuntimeStore((state) => state.toolsById[toolCallId]?.subagentRunIds
@@ -75,7 +75,7 @@ export const ToolCard = memo(function ToolCard({ toolCallId, compact = false, wa
   const images = showImages && loadedImages?.length ? loadedImages : null;
 
   return (
-    <article ref={cardRef} tabIndex={-1} data-flight-focus={focused || undefined} className={`tool-card tool-card--${presentedStatus}${images ? ' tool-card--with-images' : ''}${compact ? ' tool-card--compact' : ''}`} aria-label={`${tool.name} tool ${ariaStatus}`}>
+    <article ref={cardRef} tabIndex={-1} data-flight-focus={focused || undefined} className={`tool-card tool-card--${presentedStatus}${images ? ' tool-card--with-images' : ''}`} aria-label={`${tool.name} tool ${ariaStatus}`}>
       <button className="tool-card-header" type="button" aria-expanded={expanded} onClick={toggle}>
         <Symbol text={presentedStatus === 'running' ? '[run]' : presentedStatus === 'error' ? '[err]' : presentedStatus === 'stopped' ? '[stop]' : '[ok]'}><Icon size={13} className={`tool-status-icon${presentedStatus === 'running' ? ' tool-spinner' : ''}`} aria-hidden="true" /></Symbol>
         <span className="tool-heading icon-label"><strong>{tool.name}</strong><small>{summary}</small></span>

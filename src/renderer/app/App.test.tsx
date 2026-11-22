@@ -60,7 +60,7 @@ describe('first-launch shell', () => {
     delete document.documentElement.dataset.holyShitMode;
     useUiStore.setState({
       sidebarCollapsed: false, sidebarTab: 'sessions', inspectorCollapsed: false, leftWidth: 264, rightWidth: 332,
-      inspectorTab: 'changes', inspectorLastViews: { work: 'changes', run: 'goal', system: 'context' }, selectedAgent: null,
+      inspectorTab: 'changes', inspectorLastViews: { work: 'changes', run: 'sessions', system: 'context' }, selectedAgent: null,
       terminalOpen: false, browserOpen: false, musicPlayerEnabled: false, musicPlaying: false, sendMessageWithModifier: false,
       paletteOpen: false, settingsOpen: false, toast: null, composerDraftRequest: null, goalEditorOpen: false,
     });

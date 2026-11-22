@@ -75,6 +75,7 @@ import type {
   RuntimeState,
   RuntimeTokenTelemetry,
   RuntimeTool,
+  TokenMetrics,
   SubagentRun,
   SubagentUsage,
   SessionAttention,
@@ -951,9 +952,7 @@ function validTokenCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-type TokenUsageMetrics = Omit<RuntimeTokenTelemetry['history'][number], 'timestamp'>;
-
-function tokenUsageMetrics(usage: unknown, deriveTotal = false): TokenUsageMetrics | null {
+function tokenUsageMetrics(usage: unknown, deriveTotal = false): TokenMetrics | null {
   if (!usage || typeof usage !== 'object') return null;
   const value = usage as {
     input?: unknown;
@@ -992,13 +991,29 @@ function tokenUsageMetrics(usage: unknown, deriveTotal = false): TokenUsageMetri
   };
 }
 
-function tokenUsageSample(usage: unknown, timestamp: unknown, deriveTotal = false, completedAt?: unknown): RuntimeTokenTelemetry['history'][number] | null {
-  if (!validTokenCount(timestamp)) return null;
-  const metrics = tokenUsageMetrics(usage, deriveTotal);
-  if (!metrics) return null;
-  const completed = typeof completedAt === 'string' ? Date.parse(completedAt) : Number.NaN;
-  const durationMs = completed - timestamp;
-  return Number.isSafeInteger(durationMs) && durationMs > 0 ? { ...metrics, timestamp, durationMs } : { ...metrics, timestamp };
+function branchTokenUsage(branch: readonly unknown[], deriveTotal = false): Pick<RuntimeTokenTelemetry, 'history' | 'latest'> {
+  const history: RuntimeTokenTelemetry['history'] = [];
+  let latest: RuntimeTokenTelemetry['latest'] | undefined;
+  for (let index = branch.length - 1; index >= 0 && history.length < MAX_TOKEN_USAGE_HISTORY; index -= 1) {
+    const item = branch[index];
+    if (!item || typeof item !== 'object') continue;
+    const entry = item as { type?: unknown; timestamp?: unknown; message?: unknown };
+    const message = entry.type === 'message' ? entry.message : item;
+    if (!message || typeof message !== 'object') continue;
+    const assistant = message as { role?: unknown; timestamp?: unknown; usage?: unknown; durationMs?: unknown; stopReason?: unknown };
+    if (assistant.role !== 'assistant') continue;
+    const timestamp = validTokenCount(assistant.timestamp) ? assistant.timestamp : typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
+    const metrics = tokenUsageMetrics(assistant.usage, deriveTotal);
+    const completed = assistant.stopReason === 'stop' || assistant.stopReason === 'length' || assistant.stopReason === 'toolUse';
+    const sample = metrics && validTokenCount(timestamp) && timestamp <= 8.64e15 ? {
+      ...metrics,
+      timestamp,
+      ...(completed && metrics.output > 0 && validTokenCount(assistant.durationMs) && assistant.durationMs > 0 ? { responseDurationMs: assistant.durationMs } : {}),
+    } : null;
+    if (latest === undefined) latest = sample;
+    if (sample) history.push(sample);
+  }
+  return { history: history.reverse(), latest: latest ?? null };
 }
 
 function sessionTokenTelemetry(session: AgentSession): RuntimeTokenTelemetry | undefined {
@@ -1034,25 +1049,6 @@ function sessionTokenTelemetry(session: AgentSession): RuntimeTokenTelemetry | u
   } catch {
     branch = session.messages;
   }
-  const history: RuntimeTokenTelemetry['history'] = [];
-  for (let index = branch.length - 1; index >= 0 && history.length < MAX_TOKEN_USAGE_HISTORY; index -= 1) {
-    const item = branch[index];
-    if (!item || typeof item !== 'object') continue;
-    const entry = item as { type?: unknown; timestamp?: unknown; message?: unknown };
-    const message = entry.type === 'message' ? entry.message : item;
-    if (!message || typeof message !== 'object') continue;
-    const assistant = message as { role?: unknown; timestamp?: unknown; usage?: unknown };
-    if (assistant.role !== 'assistant') continue;
-    const persistedTimestamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : undefined;
-    const sample = tokenUsageSample(
-      assistant.usage,
-      validTokenCount(assistant.timestamp) ? assistant.timestamp : persistedTimestamp,
-      false,
-      entry.timestamp,
-    );
-    if (sample) history.push(sample);
-  }
-  history.sort((left, right) => left.timestamp - right.timestamp);
   return {
     session: {
       input: tokens.input,
@@ -1063,8 +1059,7 @@ function sessionTokenTelemetry(session: AgentSession): RuntimeTokenTelemetry | u
       cost: value.cost,
       turns: value.assistantMessages,
     },
-    latest: history.at(-1) ?? null,
-    history,
+    ...branchTokenUsage(branch),
   };
 }
 
@@ -1076,7 +1071,7 @@ function emptyTokenTelemetry(): RuntimeTokenTelemetry {
   };
 }
 
-function persistedEntryUsage(entry: Record<string, unknown>): TokenUsageMetrics | null {
+function persistedEntryUsage(entry: Record<string, unknown>): TokenMetrics | null {
   if (entry.type === 'message' && entry.message && typeof entry.message === 'object') {
     const message = entry.message as { role?: unknown; usage?: unknown };
     if (message.role !== 'assistant' && message.role !== 'toolResult') return null;
@@ -1103,18 +1098,7 @@ function persistedSessionTokenTelemetry(entries: readonly Record<string, unknown
     session.totalTokens += usage.totalTokens;
     session.cost += usage.cost;
   }
-  const history: RuntimeTokenTelemetry['history'] = [];
-  for (const entry of branch) {
-    if (entry.type !== 'message' || !entry.message || typeof entry.message !== 'object') continue;
-    const message = entry.message as { role?: unknown; timestamp?: unknown; usage?: unknown };
-    if (message.role !== 'assistant') continue;
-    const timestamp = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : undefined;
-    const sample = tokenUsageSample(message.usage, validTokenCount(message.timestamp) ? message.timestamp : timestamp, true, entry.timestamp);
-    if (sample) history.push(sample);
-  }
-  history.sort((left, right) => left.timestamp - right.timestamp);
-  const boundedHistory = history.slice(-MAX_TOKEN_USAGE_HISTORY);
-  return { session, latest: boundedHistory.at(-1) ?? null, history: boundedHistory };
+  return { session, ...branchTokenUsage(branch, true) };
 }
 
 function usageTotal(usage: Pick<SubagentUsage, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>): number {

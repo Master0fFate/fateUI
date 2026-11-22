@@ -36,9 +36,6 @@ for (const skin of ['default', 'dreamcore', 'm3-expressive'] as const) {
       await expect(work).toHaveAttribute('aria-current', 'page');
       await expect(inspector.getByRole('tablist', { name: 'Work views', exact: true })).toBeVisible();
 
-      // This ordinary click mounts the default Goal view. With no network
-      // navigation/scope, undefined === undefined must not dereference null
-      // and remove the entire inspector before a secondary tab can be clicked.
       await run.click();
       await expect(run).toHaveAttribute('aria-current', 'page');
       const views = inspector.getByRole('tablist', { name: 'Run views', exact: true });
@@ -46,11 +43,12 @@ for (const skin of ['default', 'dreamcore', 'm3-expressive'] as const) {
       const goal = views.getByRole('tab', { name: 'Goal', exact: true });
       const agents = views.getByRole('tab', { name: /^Subagent sessions(?:,|$)/u });
       const monitor = views.getByRole('tab', { name: 'Monitor', exact: true });
-      await expect(goal).toHaveAttribute('data-state', 'active');
-      expect(errors).toEqual([]);
-      await agents.click();
+      await expect(views.locator('.inspector-secondary-label')).toHaveText(['Agents', 'Goal', 'Monitor', 'Activity']);
       await expect(agents).toHaveAttribute('data-state', 'active');
       await expect(inspector.getByRole('region', { name: 'Agent sessions', exact: true })).toBeVisible();
+      await goal.click();
+      await expect(goal).toHaveAttribute('data-state', 'active');
+      expect(errors).toEqual([]);
       await monitor.click();
       await expect(monitor).toHaveAttribute('data-state', 'active');
       await expect(inspector.getByRole('region', { name: 'Monitoring dashboard', exact: true })).toBeVisible();
