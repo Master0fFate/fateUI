@@ -57,6 +57,7 @@ coverage/
 .parallax/
 .impeccable/
 /plans/
+/advisor-plans/
 # Local handoff archives are inputs, not source or release artifacts.
 /pi-fategui-M5-updated-plans.zip
 /fate-server-*.tar.gz

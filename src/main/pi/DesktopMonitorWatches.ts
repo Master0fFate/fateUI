@@ -37,8 +37,10 @@ interface MonitorDependencies {
   withConnectors?<T>(use: (servers: readonly McpServerDefinition[]) => T): Promise<T>;
   selectedTarget(scope: Pick<MonitorWatchRequest, 'workspaceRoot' | 'sessionId'>): MonitorWatchTarget | null;
 }
+type WatchOrigin = 'monitor' | 'watch_ci';
 interface Watch {
   request: MonitorWatchRequest;
+  origin: WatchOrigin;
   key: string;
   status: MonitorWatchStatus;
   controller: AbortController;
@@ -48,6 +50,14 @@ interface Watch {
   nextCheck: number;
   saveDeadline?: number;
   failures: number;
+}
+
+function statusNotice(source: MonitorWatchRequest['source'], result: MonitorWatchResult): string {
+  if (source.kind === 'mcp') return `MCP connector ${source.connector} reported ${result} for event ${source.eventId} at revision ${source.revision}.`;
+  const [label, path] = source.kind === 'github-pr' ? [`PR #${source.prNumber}`, `commit/${source.sha}/checks`]
+    : [`run ${source.runId}`, `actions/runs/${source.runId}`];
+  const outcome = result === 'failure' ? 'at least one check failed' : `CI result: ${result}`;
+  return `${source.repo} ${label} at ${source.sha.slice(0, 7)}: ${outcome}.\nhttps://github.com/${source.repo}/${path}`;
 }
 
 function sameConnector(left: Connector, right: Connector): boolean {
@@ -90,14 +100,15 @@ export class DesktopMonitorWatches {
     return [...this.watches.values()].some(({ request }) => request.workspaceRoot === workspaceRoot);
   }
 
-  async start(input: unknown, scopeIsCurrent?: () => boolean, waitForFirstSave = false): Promise<void> {
+  async start(input: unknown, scopeIsCurrent?: () => boolean, origin: WatchOrigin = 'monitor'): Promise<void> {
     const request = monitorWatchRequestSchema.parse(input);
     if (!this.deps.isLocal() || this.disposed) throw new Error('Monitor watches require the local desktop.');
     if (this.watches.size + this.starting.size >= MAX_WATCHES || this.working.size + this.starting.size >= MAX_WATCHES) throw new Error('Stop a watch before adding another.');
     if (this.consumed.size + this.watches.size + this.starting.size >= MAX_COMPLETIONS) throw new Error('The desktop watch limit for this process has been reached.');
     const target = this.deps.selectedTarget(request);
     if (!target) throw new Error('Open the original trusted saved chat before starting a watch.');
-    if (request.wake && (!target.answer || !target.report)) throw new Error('A configured chat model is required for an automatic Monitor reply.');
+    if (request.wake && !target.report) throw new Error('The original chat is unavailable for Monitor updates.');
+    if (request.wake && origin === 'monitor' && !target.answer) throw new Error('A configured chat model is required for an automatic Monitor reply.');
     const admission = { workspaceRoot: request.workspaceRoot, sessionId: request.sessionId, cancelled: false };
     this.starting.add(admission);
     try {
@@ -108,7 +119,7 @@ export class DesktopMonitorWatches {
       const roots = await this.deps.trustedRoots();
       if (!roots.includes(request.workspaceRoot)) throw new Error('The original trusted chat is unavailable.');
       const saved = await target.isSaved();
-      if (!saved && !waitForFirstSave) throw new Error('The original trusted saved chat is unavailable.');
+      if (!saved && origin !== 'watch_ci') throw new Error('The original trusted saved chat is unavailable.');
       if (admission.cancelled || this.disposed || !this.deps.isLocal() || scopeIsCurrent?.() === false) {
         throw new Error('Monitor scope changed before the watch could start.');
       }
@@ -117,7 +128,7 @@ export class DesktopMonitorWatches {
         : [source.kind, source.repo, source.kind === 'github-pr' ? source.prNumber : source.runId, source.sha]]);
       if (this.consumed.has(key) || [...this.watches.values()].some((watch) => watch.key === key)) throw new Error('This completion is already watched or was already recorded for this chat.');
       const id = randomUUID();
-      const watch: Watch = { request, key, target, controller: new AbortController(), ...(connector ? { connector } : {}),
+      const watch: Watch = { request, origin, key, target, controller: new AbortController(), ...(connector ? { connector } : {}),
         status: { id, source, state: 'waiting', wake: request.wake, expiresAt: Date.now() + TTL_MS },
         nextCheck: 0, ...(!saved ? { saveDeadline: Date.now() + FIRST_SAVE_GRACE_MS } : {}), failures: 0 };
       this.watches.set(id, watch);
@@ -246,7 +257,7 @@ export class DesktopMonitorWatches {
       return;
     }
     await this.revalidate(watch);
-    this.consumed.add(watch.key);
+    if (watch.origin === 'monitor' || !watch.request.wake) this.consumed.add(watch.key);
     watch.status.result = result;
     watch.status.state = 'completed';
     if (!watch.request.wake) { this.finish(watch, 'completed'); return; }
@@ -271,7 +282,7 @@ export class DesktopMonitorWatches {
   private async wake(watch: Watch): Promise<void> {
     const { request } = watch;
     const { id, result, expiresAt } = watch.status;
-    if (!request.wake || result === undefined || !watch.target.answer || !watch.target.report) throw new Error('Monitor reply unavailable.');
+    if (!request.wake || result === undefined || !watch.target.report) throw new Error('Monitor reply unavailable.');
     const { workspaceRoot, sessionId, source, followUp } = request;
     const key = JSON.stringify([workspaceRoot, sessionId]);
     if (this.answering.has(key)) return;
@@ -282,12 +293,17 @@ export class DesktopMonitorWatches {
       revalidate: () => this.revalidate(watch),
     };
     try {
-      if (watch.answer === undefined) {
+      if (watch.origin === 'watch_ci') {
+        watch.answer ??= statusNotice(source, result);
+      } else if (watch.answer === undefined) {
+        if (!watch.target.answer) throw new Error('Monitor reply unavailable.');
         const text = await watch.target.answer({ id, source, result, followUp }, fence, () => { watch.status.wakeStatus = 'answering'; });
         if (text === null || !fence.current()) return;
         watch.answer = text;
+        watch.status.wakeStatus = 'queued';
       }
       await watch.target.report(id, watch.answer, fence, () => {
+        this.consumed.add(watch.key);
         watch.status.wakeStatus = 'reported';
         this.finish(watch, 'completed');
       });

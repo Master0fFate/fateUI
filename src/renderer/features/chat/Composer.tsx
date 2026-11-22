@@ -36,6 +36,7 @@ import { agentMentionContext, findLiveAgentMentions, parseAgentStopCommand, sess
 import { fileTagContext, fileTagText, findFileTags } from './fileTags';
 import { findSlashCommands, slashCommandContext, slashCommandDescription, slashCommandLabel, type SlashCommand } from './slashCommands';
 import { trimSpeechPcm } from '../../../shared/speechGate';
+import { VoiceDraftRange } from './voiceDraft';
 import { VoiceStreamFeedQueue, startVoiceStream, type VoiceStreamController } from './voiceStream';
 import { ProviderConnectDialog } from '../../components/ProviderConnectDialog';
 import { modelIdentity, visibleModels } from '../../../shared/modelVisibility';
@@ -168,6 +169,7 @@ const MIN_COMPOSER_INPUT_HEIGHT = 53;
 const COMPACT_MIN_COMPOSER_INPUT_HEIGHT = 36;
 const COMPOSER_RESIZE_STEP = 18;
 const MAX_VOICE_DURATION_MS = 180_000;
+const FINAL_UPDATE_GRACE_MS = 2_000;
 /** Live-stream feed chunk size (300 ms of 16 kHz mono = 4 800 samples). The
  *  backend's buffered-stream window (PARAKEET_BUFFERED_WINDOW_MS) is separate
  *  and model-constrained; this only sizes mic captures. */
@@ -177,8 +179,12 @@ const STREAM_CHUNK_SAMPLES = 16_000 * 0.3;
 const VOICE_LAG_WARN_SECONDS = 5;
 const afterNextPaint = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 type VoiceState = 'idle' | 'preparing' | 'downloading' | 'recording' | 'transcribing';
-type VoiceInsertionTarget = { start: number; end: number; scrollTop: number; sessionId: string | null; projectPath: string | null };
-type ActiveRecording = { recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; timeout: number; cancelled: boolean; insertion: VoiceInsertionTarget; attempt: number };
+type VoiceAttempt = {
+  id: string; live: boolean; hotkey: boolean; draftKey: string | null; sessionId: string | null; projectPath: string | null;
+  range: VoiceDraftRange; rendererLag: boolean; backendLag: boolean;
+};
+type ActiveRecording = { recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; timeout: number; cancelled: boolean; attempt: VoiceAttempt };
+const voiceSendReason = 'Wait for voice input to finish, then review your draft and send it.';
 const thinkingLabel = (level: string) => level === 'xhigh' ? 'Extra high' : level.charAt(0).toUpperCase() + level.slice(1);
 export function clampComposerInputHeight(contentHeight: number, maximum: number, minimum = MIN_COMPOSER_INPUT_HEIGHT): number {
   return Math.min(Math.max(minimum, maximum), Math.max(minimum, Math.ceil(contentHeight)));
@@ -687,7 +693,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const historyMutation = useRef(false);
   const promptOptimizationCancelled = useRef(false);
   const promptOptimizationEpoch = useRef(0);
-  const pendingDraftSelection = useRef<{ key: string | null; text: string; start: number; end: number; scrollTop: number; focus?: boolean } | null>(null);
+  const pendingDraftSelection = useRef<{ key: string | null; text: string; start: number; end: number; scrollTop: number; focus?: boolean; direction?: 'forward' | 'backward' | 'none' } | null>(null);
   const forkNoticeRef = useRef(forkNotice);
   const caretPositionRef = useRef(caretPosition);
   const selectionEndRef = useRef(caretPosition);
@@ -700,13 +706,9 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   const thinkingQueue = useRef<{ running: boolean; next: typeof thinkingLevels[number] | null }>({ running: false, next: null });
   const permissionBusyRef = useRef(false);
   const forkingRef = useRef(false);
-  const voiceRestoreFrames = useRef(new Set<number>());
-  const voiceAttempt = useRef(0);
+  const voiceAttempt = useRef<VoiceAttempt | null>(null);
   const voiceStateRef = useRef<VoiceState>('idle');
-  const voiceSelectionKey = useRef<string | null>(null);
-  const liveRecording = useRef<{ controller: VoiceStreamController; feedQueue: VoiceStreamFeedQueue; attempt: number } | null>(null);
-  const liveAnchorRef = useRef<number | null>(null);
-  const liveSpanLenRef = useRef(0);
+  const liveRecording = useRef<{ controller: VoiceStreamController; feedQueue: VoiceStreamFeedQueue; attempt: VoiceAttempt; timeout: number; stopping: boolean; stopDone: boolean; finalSeen: boolean } | null>(null);
   const mounted = useRef(true);
   const runtime = useRuntimeStore(useShallow((state) => ({
     status: state.runtime.status,
@@ -958,38 +960,48 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     useUiStore.getState().setVoiceCapturing(next === 'recording');
     if (mounted.current) setVoiceState(next);
   }, []);
-  const isCurrentVoiceAttempt = useCallback((attempt: number) => mounted.current && voiceAttempt.current === attempt, []);
-
-  /** Replace the live-transcription span (anchored at liveAnchorRef) with the latest
-   *  committed text. The span grows as Parakeet stabilizes words, giving the
-   *  type-as-you-speak effect without rewriting anything the user typed outside it. */
-  const applyLiveText = useCallback((committed: string) => {
-    const anchor = liveAnchorRef.current;
-    if (anchor === null || !mounted.current) return;
-    const text = committed.trim();
-    const current = draftRef.current;
-    const before = current.slice(0, anchor);
-    const after = current.slice(anchor + liveSpanLenRef.current);
-    const leading = before && !/\s$/u.test(before) ? ' ' : '';
-    const insertion = `${leading}${text}`;
-    liveSpanLenRef.current = insertion.length;
-    updateDraft(`${before}${insertion}${after}`);
-    const caret = anchor + insertion.length;
-    setCaretPosition(caret);
+  const isCurrentVoiceAttempt = useCallback((attempt: VoiceAttempt) => mounted.current && voiceAttempt.current === attempt, []);
+  const applyVoiceText = useCallback((attempt: VoiceAttempt, committed: string) => {
     const input = textarea.current;
-    if (input) { input.focus({ preventScroll: true }); input.setSelectionRange(caret, caret); }
-  }, [updateDraft]);
+    const runtimeNow = useRuntimeStore.getState().runtime;
+    if (!input || !isCurrentVoiceAttempt(attempt) || activeDraftKey.current !== attempt.draftKey
+      || runtimeNow.sessionId !== attempt.sessionId || (runtimeNow.project?.path ?? null) !== attempt.projectPath) return;
+    const pending = input.value !== draftRef.current && pendingDraftSelection.current?.text === draftRef.current ? pendingDraftSelection.current : null;
+    const next = attempt.range.apply(committed, pending?.start ?? input.selectionStart, pending?.end ?? input.selectionEnd);
+    if (!next || next.text === draftRef.current) return;
+    pendingDraftSelection.current = { ...next, key: attempt.draftKey, scrollTop: pending?.scrollTop ?? input.scrollTop, direction: pending?.direction ?? input.selectionDirection };
+    updateDraftForKey(attempt.draftKey, next.text);
+    setCaretPosition(next.start);
+  }, [isCurrentVoiceAttempt, updateDraftForKey]);
 
-  const teardownLiveRecording = () => {
-    const recording = liveRecording.current;
-    if (recording) {
+  const endVoiceAttempt = useCallback((attempt: VoiceAttempt, cancel = false) => {
+    if (voiceAttempt.current !== attempt) return;
+    voiceAttempt.current = null;
+    const live = liveRecording.current;
+    if (live?.attempt === attempt) {
       liveRecording.current = null;
-      recording.feedQueue.cancel();
-      void Promise.resolve(recording.controller.stop()).catch(() => undefined);
+      window.clearTimeout(live.timeout);
+      live.feedQueue.cancel();
+      if (!live.stopping) void Promise.resolve(live.controller.stop()).catch(() => undefined);
     }
-    liveAnchorRef.current = null;
-    liveSpanLenRef.current = 0;
-  };
+    const batch = activeRecording.current;
+    if (batch?.attempt === attempt) {
+      activeRecording.current = null;
+      batch.cancelled = true;
+      window.clearTimeout(batch.timeout);
+      batch.stream.getTracks().forEach((track) => track.stop());
+      if (batch.recorder.state !== 'inactive') batch.recorder.stop();
+      batch.chunks.length = 0;
+    }
+    const desktop = getDesktopApiOptional();
+    if (cancel) {
+      if (attempt.live) void desktop?.cancelSpeechStream?.(attempt.id).catch(() => undefined);
+      else void desktop?.cancelSpeechTranscription?.(attempt.id).catch(() => undefined);
+    }
+    void desktop?.releaseSpeechAttempt?.(attempt.id).catch(() => undefined);
+    if (mounted.current) setVoiceLag(false);
+    updateVoiceState('idle');
+  }, [updateVoiceState]);
 
   const commandContext = slashCommandContext(editorDraft, caretPosition);
   const commandQuery = commandContext?.query ?? null;
@@ -1034,6 +1046,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   useLayoutEffect(() => {
     const synchronize = (key: string, next: SessionDraft) => {
       if (activeDraftKey.current !== key) return;
+      if (voiceAttempt.current?.draftKey === key) voiceAttempt.current.range.rebase(next.text);
       draftRef.current = next.text;
       draftRevision.current = next.textRevision;
       imagesRef.current = next.images;
@@ -1126,7 +1139,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     const input = textarea.current;
     if (!pending || !input || pending.key !== activeDraftKey.current || input.value !== pending.text) return;
     if (pending.focus) input.focus({ preventScroll: true });
-    input.setSelectionRange(pending.start, pending.end);
+    input.setSelectionRange(pending.start, pending.end, pending.direction);
     input.scrollTop = pending.scrollTop;
     caretPositionRef.current = pending.start;
     selectionEndRef.current = pending.end;
@@ -1283,111 +1296,21 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     mounted.current = true;
     return () => {
       mounted.current = false;
-      voiceAttempt.current += 1;
-      voiceStateRef.current = 'idle';
-      useUiStore.getState().setVoiceCapturing(false);
+      if (voiceAttempt.current) endVoiceAttempt(voiceAttempt.current, true);
       resizeCleanup.current?.();
       submittingRef.current = false;
       queueBusyRef.current = false;
       modelBusyRef.current = false;
       permissionBusyRef.current = false;
       forkingRef.current = false;
-      for (const frame of voiceRestoreFrames.current) cancelAnimationFrame(frame);
-      voiceRestoreFrames.current.clear();
-      teardownLiveRecording();
-      const recording = activeRecording.current;
-      if (recording) {
-        recording.cancelled = true;
-        window.clearTimeout(recording.timeout);
-        recording.stream.getTracks().forEach((track) => track.stop());
-        if (recording.recorder.state !== 'inactive') recording.recorder.stop();
-        recording.chunks.length = 0;
-        activeRecording.current = null;
-      }
-      if (Boolean(getFateApiOptional()) && typeof getDesktopApiOptional()?.cancelSpeechTranscription === 'function') {
-        void getDesktopApi().cancelSpeechTranscription().catch(() => undefined);
-      }
-      if (Boolean(getFateApiOptional()) && typeof getDesktopApiOptional()?.cancelSpeechStream === 'function') {
-        void getDesktopApi().cancelSpeechStream().catch(() => undefined);
-      }
     };
-  }, []);
+  }, [endVoiceAttempt]);
 
-  useEffect(() => {
-    const selectionKey = `${runtime.project?.path ?? ''}\u0000${runtime.sessionId ?? ''}`;
-    if (voiceSelectionKey.current === null) {
-      voiceSelectionKey.current = selectionKey;
-      return;
-    }
-    if (voiceSelectionKey.current === selectionKey) return;
-    voiceSelectionKey.current = selectionKey;
-    if (voiceStateRef.current === 'idle') return;
-    voiceAttempt.current += 1;
-    teardownLiveRecording();
-    const recording = activeRecording.current;
-    if (recording) {
-      recording.cancelled = true;
-      window.clearTimeout(recording.timeout);
-      recording.stream.getTracks().forEach((track) => track.stop());
-      activeRecording.current = null;
-      if (recording.recorder.state !== 'inactive') recording.recorder.stop();
-      recording.chunks.length = 0;
-    }
-    updateVoiceState('idle');
-    if (Boolean(getFateApiOptional()) && typeof getDesktopApiOptional()?.cancelSpeechTranscription === 'function') {
-      void getDesktopApi().cancelSpeechTranscription().catch(() => undefined);
-    }
-    if (Boolean(getFateApiOptional()) && typeof getDesktopApiOptional()?.cancelSpeechStream === 'function') {
-      void getDesktopApi().cancelSpeechStream().catch(() => undefined);
-    }
-  }, [runtime.project?.path, runtime.sessionId, updateVoiceState]);
+  useLayoutEffect(() => {
+    const attempt = voiceAttempt.current;
+    if (attempt && (attempt.draftKey !== activeSessionDraftKey || attempt.sessionId !== runtime.sessionId || attempt.projectPath !== (runtime.project?.path ?? null))) endVoiceAttempt(attempt, true);
+  }, [activeSessionDraftKey, runtime.project?.path, runtime.sessionId, endVoiceAttempt]);
 
-  // Live transcription updates: committed text writes straight into the input box.
-  useEffect(() => {
-    if (!hasCapability('microphone') || typeof getDesktopApiOptional()?.onSpeechStreamUpdate !== 'function') return;
-    return getDesktopApi().onSpeechStreamUpdate((update: SpeechStreamUpdate) => {
-      if (update.state === 'active' || update.state === 'final') {
-        if (update.state === 'active' && !update.committed.trim() && liveSpanLenRef.current > 0) {
-          setVoiceLag((update.backlogSeconds ?? 0) >= VOICE_LAG_WARN_SECONDS);
-          return;
-        }
-        applyLiveText(update.committed);
-        setVoiceLag(update.state === 'active' && (update.backlogSeconds ?? 0) >= VOICE_LAG_WARN_SECONDS);
-      } else if (update.state === 'finalizing') {
-        // Input is closed: stop was pressed, or the main process sealed the
-        // stream at the three-minute limit. Stop the microphone; the finished
-        // text arrives with the final update.
-        setVoiceLag(false);
-        if (voiceStateRef.current === 'recording') void stopLiveRecording();
-      } else if (update.state === 'error') {
-        // Keep every word the user already saw before reporting the failure.
-        if (update.committed) applyLiveText(update.committed);
-        setVoiceLag(false);
-        teardownLiveRecording();
-        if (voiceStateRef.current !== 'idle') updateVoiceState('idle');
-        setComposerError(update.error ?? 'Live transcription failed.');
-      } else if (update.state === 'cancelled') {
-        setVoiceLag(false);
-        teardownLiveRecording();
-        if (voiceStateRef.current !== 'idle') updateVoiceState('idle');
-      }
-    });
-  // stopLiveRecording is a stable closure over refs + state setters, matching
-  // the voice hotkey effect below.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyLiveText, updateVoiceState]);
-
-  // Global voice hotkey (registered by the main process): start/stop from anywhere.
-  useEffect(() => {
-    if (!hasCapability('hotkeys') || !hasCapability('microphone') || typeof getDesktopApiOptional()?.onVoiceHotkey !== 'function') return;
-    return getDesktopApi().onVoiceHotkey((event) => {
-      if (event.source !== 'hotkey') return;
-      if (event.action === 'start') { if (voiceStateRef.current === 'idle') void startVoiceRecording(); }
-      else { if (voiceStateRef.current === 'recording') stopVoiceRecording(); }
-    });
-  // startVoiceRecording/stopVoiceRecording are stable closures over refs + state setters.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (!compactToolbar) setUtilityMenuOpen(false);
@@ -1440,6 +1363,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   };
 
   const submit = async (behavior: PromptInput['behavior']) => {
+    if (voiceStateRef.current !== 'idle') return;
     const runtimeNow = useRuntimeStore.getState().runtime;
     const originDraftKey = sessionDraftKey(runtimeNow.project?.path ?? null, runtimeNow.sessionId, runtimeNow.sessions);
     const submittedDraft = draftRef.current;
@@ -1455,6 +1379,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       || (submittedBrowserAnnotationIds.length > 0 ? 'Address the attached browser annotations.' : '');
     if (/^\/login(?:\s+.*)?$/iu.test(text)) {
       if (optimizingPromptRef.current) await flushPromptOptimizationForSend();
+      if (voiceAttempt.current) return;
       void openProviderLogin();
       updateDraft('');
       return;
@@ -1462,6 +1387,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     const logout = /^\/logout\s+([^\s/]+)\s*$/iu.exec(text);
     if (logout && Boolean(getFateApiOptional())) {
       if (optimizingPromptRef.current) await flushPromptOptimizationForSend();
+      if (voiceAttempt.current) return;
       updateDraft('');
       void getDesktopApi().logoutProvider(logout[1]!).then((state) => useRuntimeStore.getState().setRuntime(state)).catch((error: unknown) => {
         if (mounted.current) setComposerError(error instanceof Error ? error.message : 'The provider could not be signed out.');
@@ -1470,6 +1396,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     }
     if (/^\/logout\s*$/iu.test(text)) {
       if (optimizingPromptRef.current) await flushPromptOptimizationForSend();
+      if (voiceAttempt.current) return;
       setProviderLoginOpen(true);
       updateDraft('');
       return;
@@ -1512,6 +1439,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     };
     try {
       if (optimizingPromptRef.current) await flushPromptOptimizationForSend();
+      if (voiceAttempt.current) return;
       const goalCommand = parseGoalMaxCommand(text);
       if (goalCommand) {
         if (submittedImages.length > 0 || submittedBrowserAnnotationIds.length > 0 || submittedSessionReferences.length > 0) throw new Error('Remove image, browser annotation, and session attachments before using GoalMax commands.');
@@ -1681,6 +1609,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
   };
 
   const sendLiveAgentMessage = async () => {
+    if (voiceStateRef.current !== 'idle') return;
     const target = liveAgentTarget;
     const message = draftRef.current.trim();
     if (!target || !message || liveAgentBusy || !getFateApiOptional()) return;
@@ -1695,6 +1624,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     const origin = useRuntimeStore.getState().runtime;
     try {
       if (optimizingPromptRef.current) await flushPromptOptimizationForSend();
+      if (voiceAttempt.current) return;
       let state;
       if (target.kind === 'team-node') {
         if (typeof getFateApiOptional()?.controlAgentTeam !== 'function') throw new Error('Restart Fate UI to message Agent Team sessions.');
@@ -1789,6 +1719,10 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     const shouldSend = sendMessageWithModifier
       ? modifierPressed
       : !event.shiftKey && !event.altKey;
+    if (event.key === 'Enter' && shouldSend && voiceStateRef.current !== 'idle') {
+      event.preventDefault();
+      return;
+    }
     if (event.key === 'Enter' && shouldSend && liveAgentTarget && liveAgentTarget.kind !== 'session') {
       event.preventDefault();
       void sendLiveAgentMessage();
@@ -2042,36 +1976,28 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     };
   }, [addImageFiles]);
 
-  const startLiveRecording = async () => {
-    const runtimeNow = useRuntimeStore.getState().runtime;
-    if (!hasCapability('microphone') || !speech.enabled || speechDownload || voiceStateRef.current !== 'idle' || runtimeNow.status !== 'ready' || !getFateApiOptional()) return;
-    const attempt = voiceAttempt.current + 1;
-    voiceAttempt.current = attempt;
-    const input = textarea.current;
-    liveAnchorRef.current = input ? Math.max(0, input.selectionStart ?? draftRef.current.length) : draftRef.current.length;
-    liveSpanLenRef.current = 0;
-    updateVoiceState('preparing');
-    setComposerError(null);
+  const startLiveRecording = async (attempt: VoiceAttempt) => {
     let feedQueue: VoiceStreamFeedQueue | null = null;
     try {
       if (typeof getDesktopApiOptional()?.startSpeechStream !== 'function') throw new Error('Restart Fate UI to activate live transcription.');
-      await afterNextPaint();
-      if (!isCurrentVoiceAttempt(attempt)) return;
-      updateVoiceState('downloading');
-      await getDesktopApi().ensureSpeechModel(speech.modelId);
-      if (!isCurrentVoiceAttempt(attempt)) return;
-      updateVoiceState('preparing');
-      await getDesktopApi().startSpeechStream(speech.modelId, speech.language === 'auto' ? undefined : speech.language, speech.finalAccuracyPass);
-      if (!isCurrentVoiceAttempt(attempt)) { await getDesktopApi().cancelSpeechStream().catch(() => undefined); return; }
+      await getDesktopApi().startSpeechStream(speech.modelId, speech.language === 'auto' ? undefined : speech.language, speech.finalAccuracyPass, attempt.id);
+      if (!isCurrentVoiceAttempt(attempt)) {
+        void getDesktopApiOptional()?.cancelSpeechStream?.(attempt.id).catch(() => undefined);
+        return;
+      }
       feedQueue = new VoiceStreamFeedQueue(
-        (audio) => getDesktopApi().feedSpeechStream(audio),
+        (audio) => getDesktopApi().feedSpeechStream(audio, attempt.id),
         (error) => {
           if (!isCurrentVoiceAttempt(attempt)) return;
           feedQueue?.cancel();
-          teardownLiveRecording();
-          void getDesktopApi().cancelSpeechStream().catch(() => undefined);
           setComposerError(error instanceof Error ? error.message : 'Live transcription failed.');
-          updateVoiceState('idle');
+          endVoiceAttempt(attempt, true);
+        },
+        undefined,
+        (seconds: number) => {
+          if (!isCurrentVoiceAttempt(attempt)) return;
+          attempt.rendererLag = seconds >= VOICE_LAG_WARN_SECONDS;
+          setVoiceLag(attempt.rendererLag || attempt.backendLag);
         },
       );
       const controller = await startVoiceStream(speech.inputDeviceId, STREAM_CHUNK_SAMPLES, (pcm) => {
@@ -2083,83 +2009,52 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       if (!isCurrentVoiceAttempt(attempt)) {
         feedQueue.cancel();
         void Promise.resolve(controller.stop()).catch(() => undefined);
-        await getDesktopApi().cancelSpeechStream().catch(() => undefined);
         return;
       }
-      liveRecording.current = { controller, feedQueue, attempt };
+      const timeout = window.setTimeout(() => {
+        if (isCurrentVoiceAttempt(attempt)) void stopLiveRecording(attempt);
+      }, MAX_VOICE_DURATION_MS);
+      liveRecording.current = { controller, feedQueue, attempt, timeout, stopping: false, stopDone: false, finalSeen: false };
       updateVoiceState('recording');
     } catch (error) {
       feedQueue?.cancel();
-      teardownLiveRecording();
-      await getDesktopApi().cancelSpeechStream().catch(() => undefined);
       if (isCurrentVoiceAttempt(attempt)) {
         setComposerError(error instanceof Error ? error.message : 'Could not start live transcription.');
-        updateVoiceState('idle');
+        endVoiceAttempt(attempt, true);
       }
     }
   };
 
-  const stopLiveRecording = async () => {
+  const stopLiveRecording = useCallback(async (attempt: VoiceAttempt) => {
     const recording = liveRecording.current;
-    if (!recording) return;
-    liveRecording.current = null;
-    if (voiceStateRef.current === 'recording') updateVoiceState('transcribing');
-    try { await recording.controller.stop(); } catch { /* best-effort teardown */ }
+    if (recording?.attempt !== attempt || recording.stopping) return;
+    recording.stopping = true;
+    window.clearTimeout(recording.timeout);
+    updateVoiceState('transcribing');
     try {
+      await recording.controller.stop();
+      if (!isCurrentVoiceAttempt(attempt)) return;
       await recording.feedQueue.closeAndDrain();
-      await getDesktopApi().stopSpeechStream();
-    } catch (error) {
-      if (isCurrentVoiceAttempt(recording.attempt)) setComposerError(error instanceof Error ? error.message : 'Live transcription failed to finalize.');
-    } finally {
-      if (isCurrentVoiceAttempt(recording.attempt)) {
-        liveAnchorRef.current = null;
-        liveSpanLenRef.current = 0;
-        updateVoiceState('idle');
+      if (!isCurrentVoiceAttempt(attempt)) return;
+      await getDesktopApi().stopSpeechStream(attempt.id);
+      if (!isCurrentVoiceAttempt(attempt)) return;
+      recording.stopDone = true;
+      if (recording.finalSeen) endVoiceAttempt(attempt);
+      else {
+        const missingFinal = () => {
+          if (!isCurrentVoiceAttempt(attempt)) return;
+          setComposerError('The final transcript did not arrive. Review the captured words before sending.');
+          endVoiceAttempt(attempt);
+        };
+        if (typeof getDesktopApiOptional()?.onSpeechStreamUpdate === 'function') recording.timeout = window.setTimeout(missingFinal, FINAL_UPDATE_GRACE_MS);
+        else missingFinal();
       }
+    } catch (error) {
+      if (!isCurrentVoiceAttempt(attempt)) return;
+      setComposerError(error instanceof Error ? error.message : 'Live transcription could not finish capturing the microphone audio.');
+      endVoiceAttempt(attempt, true);
     }
-  };
-
-  const insertTranscript = (transcript: string, target: VoiceInsertionTarget) => {
-    const text = transcript.trim();
-    if (!text) throw new Error('The voice model returned no text. Try speaking a bit longer, then stop.');
-    const current = draftRef.current;
-    const selectionStart = Number.isFinite(target.start) ? Math.max(0, target.start) : current.length;
-    const selectionEnd = Number.isFinite(target.end) ? Math.max(selectionStart, target.end) : selectionStart;
-    const start = Math.min(current.length, selectionStart);
-    const end = Math.min(current.length, Math.max(start, selectionEnd));
-    const before = current.slice(0, start);
-    const after = current.slice(end);
-    const leading = before && !/\s$/u.test(before) ? ' ' : '';
-    const trailing = after && !/^\s/u.test(after) ? ' ' : '';
-    const insertion = `${leading}${text}${trailing}`;
-    const nextCaret = start + insertion.length;
-    const nextDraft = `${before}${insertion}${after}`;
-    updateDraft(nextDraft);
-    setCaretPosition(nextCaret);
-
-    const scheduleRestore = (callback: () => void) => {
-      let frame = 0;
-      frame = requestAnimationFrame(() => {
-        voiceRestoreFrames.current.delete(frame);
-        callback();
-      });
-      voiceRestoreFrames.current.add(frame);
-    };
-    const restoreViewport = () => {
-      const input = textarea.current;
-      if (!input || !mounted.current) return;
-      input.focus({ preventScroll: true });
-      input.setSelectionRange(nextCaret, nextCaret);
-      input.scrollTop = Math.max(0, target.scrollTop);
-      syncInputFades();
-    };
-    scheduleRestore(() => {
-      restoreViewport();
-      // Auto-sizing and focus can each adjust the textarea viewport. A second
-      // paint deterministically restores the viewport after both layout passes.
-      scheduleRestore(restoreViewport);
-    });
-  };
+  }, [isCurrentVoiceAttempt, updateVoiceState, endVoiceAttempt]);
 
   const finishVoiceRecording = async (recording: ActiveRecording) => {
     window.clearTimeout(recording.timeout);
@@ -2167,8 +2062,8 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     if (activeRecording.current === recording) activeRecording.current = null;
     const targetSelectionIsCurrent = () => {
       const current = useRuntimeStore.getState().runtime;
-      return current.sessionId === recording.insertion.sessionId
-        && (current.project?.path ?? null) === recording.insertion.projectPath;
+      return current.sessionId === recording.attempt.sessionId
+        && (current.project?.path ?? null) === recording.attempt.projectPath;
     };
     if (recording.cancelled || !isCurrentVoiceAttempt(recording.attempt)) {
       recording.chunks.length = 0;
@@ -2176,7 +2071,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
     }
     if (!targetSelectionIsCurrent()) {
       recording.chunks.length = 0;
-      updateVoiceState('idle');
+      endVoiceAttempt(recording.attempt, true);
       return;
     }
     updateVoiceState('transcribing');
@@ -2201,47 +2096,50 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       if (spoken.length === 0) throw new Error('No speech was detected. Try again closer to the microphone.');
       const audio = spoken.buffer.slice(spoken.byteOffset, spoken.byteOffset + spoken.byteLength) as ArrayBuffer;
       if (!getFateApiOptional() || typeof getDesktopApiOptional()?.transcribeSpeech !== 'function') throw new Error('Voice transcription is unavailable.');
-      const result = await getDesktopApi().transcribeSpeech(speech.modelId, audio, speech.language === 'auto' ? undefined : speech.language);
+      const result = await getDesktopApi().transcribeSpeech(speech.modelId, audio, speech.language === 'auto' ? undefined : speech.language, recording.attempt.id);
       if (recording.cancelled || !isCurrentVoiceAttempt(recording.attempt) || !targetSelectionIsCurrent()) return;
-      insertTranscript(result.text, recording.insertion);
+      if (!result.text.trim()) throw new Error('The voice model returned no text. Try speaking a bit longer, then stop.');
+      applyVoiceText(recording.attempt, result.text);
     } catch (error) {
       if (!recording.cancelled && isCurrentVoiceAttempt(recording.attempt)) {
         setComposerError(error instanceof Error ? error.message : 'Voice transcription failed.');
       }
     } finally {
-      if (isCurrentVoiceAttempt(recording.attempt)) updateVoiceState('idle');
+      endVoiceAttempt(recording.attempt);
     }
   };
 
   const stopVoiceRecording = () => {
-    if (liveRecording.current) { void stopLiveRecording(); return; }
+    if (liveRecording.current) { void stopLiveRecording(liveRecording.current.attempt); return; }
     const recording = activeRecording.current;
     if (!recording || recording.recorder.state === 'inactive') return;
     updateVoiceState('transcribing');
     recording.recorder.stop();
   };
 
-  const startVoiceRecording = async () => {
-    if (!hasCapability('microphone')) return;
-    if (isLiveModel) return startLiveRecording();
+  const startVoiceRecording = async (hotkey = false) => {
     const runtimeNow = useRuntimeStore.getState().runtime;
-    if (!speech.enabled || speechDownload || voiceStateRef.current !== 'idle' || runtimeNow.status !== 'ready' || !getFateApiOptional()) return;
-    const attempt = voiceAttempt.current + 1;
-    voiceAttempt.current = attempt;
+    if (!hasCapability('microphone') || !speech.enabled || speechDownload || voiceAttempt.current || runtimeNow.status !== 'ready' || !getFateApiOptional()
+      || submittingRef.current || liveAgentBusy || optimizingPromptRef.current) return;
     const input = textarea.current;
-    const selectionStart = input?.selectionStart ?? draftRef.current.length;
-    const insertion: VoiceInsertionTarget = {
-      start: selectionStart,
-      end: input?.selectionEnd ?? selectionStart,
-      scrollTop: Math.max(0, input?.scrollTop ?? 0),
-      sessionId: runtimeNow.sessionId,
-      projectPath: runtimeNow.project?.path ?? null,
+    const start = input?.selectionStart ?? draftRef.current.length;
+    const attempt: VoiceAttempt = {
+      id: crypto.randomUUID(), live: isLiveModel, hotkey, draftKey: activeDraftKey.current,
+      sessionId: runtimeNow.sessionId, projectPath: runtimeNow.project?.path ?? null,
+      range: new VoiceDraftRange(draftRef.current, start, input?.selectionEnd ?? start), rendererLag: false, backendLag: false,
     };
+    voiceAttempt.current = attempt;
     updateVoiceState('preparing');
     setComposerError(null);
     let acquiredStream: MediaStream | null = null;
     try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('Microphone recording is not supported on this system.');
+      const desktop = getDesktopApi();
+      await desktop.claimSpeechAttempt?.(attempt.id);
+      if (!isCurrentVoiceAttempt(attempt)) {
+        void desktop.releaseSpeechAttempt?.(attempt.id).catch(() => undefined);
+        return;
+      }
+      if (!attempt.live && (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')) throw new Error('Microphone recording is not supported on this system.');
       if (typeof getDesktopApiOptional()?.ensureSpeechModel !== 'function') throw new Error('Restart Fate UI to activate voice model preparation.');
       // Paint the pressed state before native/filesystem work without delaying by an arbitrary timeout.
       await afterNextPaint();
@@ -2250,6 +2148,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       await getDesktopApi().ensureSpeechModel(speech.modelId);
       if (!isCurrentVoiceAttempt(attempt)) return;
       updateVoiceState('preparing');
+      if (attempt.live) return await startLiveRecording(attempt);
       // Keep the device's native format so capture does not reconfigure shared audio hardware.
       const audioConstraints: MediaTrackConstraints = {
         echoCancellation: true,
@@ -2279,7 +2178,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         return;
       }
       const recorder = new MediaRecorder(stream);
-      const recording: ActiveRecording = { recorder, stream, chunks: [], timeout: 0, cancelled: false, insertion, attempt };
+      const recording: ActiveRecording = { recorder, stream, chunks: [], timeout: 0, cancelled: false, attempt };
       recorder.addEventListener('dataavailable', (event) => {
         if (!recording.cancelled && isCurrentVoiceAttempt(attempt) && event.data.size > 0) recording.chunks.push(event.data);
       });
@@ -2293,7 +2192,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         if (activeRecording.current === recording) activeRecording.current = null;
         if (isCurrentVoiceAttempt(attempt)) {
           setComposerError('The microphone stopped unexpectedly.');
-          updateVoiceState('idle');
+          endVoiceAttempt(attempt, true);
         }
       }, { once: true });
       recording.timeout = window.setTimeout(() => {
@@ -2315,10 +2214,50 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
       }
       if (isCurrentVoiceAttempt(attempt)) {
         setComposerError(error instanceof Error ? error.message : 'Could not start voice transcription.');
-        updateVoiceState('idle');
+        endVoiceAttempt(attempt, true);
       }
     }
   };
+
+  useEffect(() => {
+    if (!hasCapability('microphone') || typeof getDesktopApiOptional()?.onSpeechStreamUpdate !== 'function') return;
+    return getDesktopApi().onSpeechStreamUpdate((update: SpeechStreamUpdate) => {
+      const attempt = voiceAttempt.current;
+      if (!attempt?.live || update.attemptId !== attempt.id) return;
+      if (update.state !== 'cancelled') applyVoiceText(attempt, update.committed);
+      if (update.state === 'active') {
+        attempt.backendLag = (update.backlogSeconds ?? 0) >= VOICE_LAG_WARN_SECONDS;
+        setVoiceLag(attempt.rendererLag || attempt.backendLag);
+      } else if (update.state === 'finalizing') {
+        void stopLiveRecording(attempt);
+      } else if (update.state === 'error') {
+        setComposerError(update.error ?? 'Live transcription failed.');
+        endVoiceAttempt(attempt, true);
+      } else if (update.state === 'cancelled') {
+        endVoiceAttempt(attempt);
+      } else if (update.state === 'final') {
+        const recording = liveRecording.current;
+        if (!recording?.stopping || recording.stopDone) endVoiceAttempt(attempt);
+        else recording.finalSeen = true;
+      }
+    });
+  }, [applyVoiceText, endVoiceAttempt, stopLiveRecording]);
+
+  const hotkeyActions = useRef({ startVoiceRecording, stopVoiceRecording });
+  useLayoutEffect(() => { hotkeyActions.current = { startVoiceRecording, stopVoiceRecording }; });
+  useEffect(() => {
+    if (!hasCapability('hotkeys') || !hasCapability('microphone') || typeof getDesktopApiOptional()?.onVoiceHotkey !== 'function') return;
+    return getDesktopApi().onVoiceHotkey((event) => {
+      if (event.source !== 'hotkey') return;
+      const attempt = voiceAttempt.current;
+      if (!attempt) {
+        if (event.action !== 'stop') void hotkeyActions.current.startVoiceRecording(true);
+      } else if (event.action === 'toggle' || event.action === 'stop' && attempt.hotkey) {
+        if (voiceStateRef.current === 'recording') hotkeyActions.current.stopVoiceRecording();
+        else if (voiceStateRef.current === 'preparing' || voiceStateRef.current === 'downloading') endVoiceAttempt(attempt, true);
+      }
+    });
+  }, [endVoiceAttempt]);
 
   const mutateQueuedMessage = async (id: string, action: QueueMutationInput['action']) => {
     if (!getFateApiOptional() || queueBusyRef.current) return;
@@ -2804,7 +2743,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         }}
         inputRef={textarea} inputShellRef={inputShell} inputPrefix={<PromptPrefix />}
         input={{
-          id: 'pi-composer', 'aria-label': 'Message Pi',
+          id: 'pi-composer', 'aria-label': 'Message Pi', 'aria-describedby': voiceState !== 'idle' ? 'voice-send-instructions' : undefined,
           'aria-controls': resourceMenuOpen ? 'file-tag-suggestions' : mentionMenuOpen ? 'agent-suggestions' : slashMenuOpen ? 'slash-suggestions' : undefined,
           'aria-expanded': resourceMenuOpen || mentionMenuOpen || slashMenuOpen, 'aria-autocomplete': 'list',
           'aria-activedescendant': resourceMenuOpen && resourceSuggestions.length > 0
@@ -2841,9 +2780,9 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         }}
         action={{
           label: liveAgentMessageTarget ? 'Send message to live agent' : sendButtonStops ? goalCancelable ? 'Cancel goal' : 'Stop Pi' : runtime.streaming || runtime.activeSessionRunning ? 'Queue follow-up message' : 'Send message',
-          disabled: agentTurnedOff || (!connected && runtime.status !== 'auth-required') || liveAgentBusy || (!runtime.streaming && submitting) || (!liveAgentMessageTarget && !runtime.streaming && !activeSessionRunning && !goalCancelable && !childWorkActive && !hasPendingPrompt),
+          disabled: (voiceState !== 'idle' && !sendButtonStops) || agentTurnedOff || (!connected && runtime.status !== 'auth-required') || liveAgentBusy || (!runtime.streaming && submitting) || (!liveAgentMessageTarget && !runtime.streaming && !activeSessionRunning && !goalCancelable && !childWorkActive && !hasPendingPrompt),
           attributes: { className: 'send-button', 'data-mode': sendButtonStops ? 'stop' : 'send',
-            'aria-describedby': sendButtonStops ? 'streaming-send-instructions' : undefined, 'aria-busy': submitting || liveAgentBusy },
+            'aria-describedby': sendButtonStops ? 'streaming-send-instructions' : voiceState !== 'idle' ? 'voice-send-instructions' : undefined, 'aria-busy': submitting || liveAgentBusy },
           content: <ActionContent text={submitting && !runtime.streaming ? 'sending' : liveAgentMessageTarget ? 'send' : sendButtonStops ? 'stop' : activeSessionRunning ? 'queue' : 'send'}>{submitting && !runtime.streaming ? <LoaderCircle className="tool-spinner" size={16} /> : sendButtonStops ? <Square size={16} strokeWidth={2.5} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}</ActionContent>,
         }}
         submitKey={sendMessageWithModifier ? 'modifier-enter' : 'enter'}
@@ -3209,8 +3148,9 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
                   </button>
                 </AppTooltip>
               )}
+              {voiceState !== 'idle' && <span id="voice-send-instructions" role="status" className="visually-hidden">{voiceSendReason}</span>}
               {sendButtonStops && <span id="streaming-send-instructions" className="visually-hidden">Click to {goalCancelable ? 'cancel the persistent goal and stop its work' : 'stop Pi'}.</span>}
-              <AppTooltip content={liveAgentMessageTarget ? `Send directly to @${liveAgentTarget.handle}` : sendButtonStops ? goalCancelable ? 'Click to cancel goal' : 'Click to stop Pi' : runtime.streaming || runtime.activeSessionRunning ? 'Click queues the follow-up message' : sendMessageWithModifier ? 'Send · Ctrl/⌘ Enter' : 'Send · Enter'}>
+              <AppTooltip content={voiceState !== 'idle' && !sendButtonStops ? voiceSendReason : liveAgentMessageTarget ? `Send directly to @${liveAgentTarget.handle}` : sendButtonStops ? goalCancelable ? 'Click to cancel goal' : 'Click to stop Pi' : runtime.streaming || runtime.activeSessionRunning ? 'Click queues the follow-up message' : sendMessageWithModifier ? 'Send · Ctrl/⌘ Enter' : 'Send · Enter'}>
                 <span className="send-tooltip-trigger">
                   {sendAction}
                 </span>
@@ -3220,6 +3160,7 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         </>}
       </ComposerPresentation>
       <RecoveryReview />
+      {voiceLag && voiceState === 'recording' && <p className="bounded-note" role="status">Live transcription is falling behind. Stop recording to let it catch up.</p>}
       {composerError && <p className="composer-error" role="alert">{composerError}</p>}
       <ProviderConnectDialog open={providerLoginOpen} onOpenChange={setProviderLoginOpen} />
       <Dialog.Root open={Boolean(previewImage)} onOpenChange={(open) => { if (!open) setPreviewImage(null); }}>

@@ -15,9 +15,10 @@ const smokeArguments = process.platform === 'darwin' && process.arch === 'x64' &
   ? ['--disable-gpu', ...applicationArguments]
   : applicationArguments;
 
+const { TRANSCRIBE_LIBRARY: _hostSpeechLibrary, ...smokeEnv } = process.env;
 const child = spawn(executable, smokeArguments, {
   cwd: path.resolve(import.meta.dirname, '..'),
-  env: { ...process.env, FATE_NEW_INSTANCE: '1', PI_DESKTOP_SMOKE: '1', PI_OFFLINE: '1' },
+  env: { ...smokeEnv, FATE_NEW_INSTANCE: '1', PI_DESKTOP_SMOKE: '1', PI_OFFLINE: '1' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 const requiredMarkers = ['PI_DESKTOP_RENDERER_OK', 'PI_DESKTOP_SPEECH_OK', 'PI_DESKTOP_YT_DLP_OK', 'PI_DESKTOP_THEMES_OK', 'PI_DESKTOP_TERMINAL_OK', 'PI_DESKTOP_SMOKE_OK'];

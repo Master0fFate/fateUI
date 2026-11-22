@@ -250,6 +250,8 @@ export const ipcChannels = {
   skinsExport: 'skins:export',
   skinsOpenFolder: 'skins:open-folder',
   speechGetStatus: 'speech:get-status',
+  speechClaimAttempt: 'speech:claim-attempt',
+  speechReleaseAttempt: 'speech:release-attempt',
   speechEnsureModel: 'speech:ensure-model',
   speechDownloadModel: 'speech:download-model',
   speechCancelDownload: 'speech:cancel-download',
@@ -1383,7 +1385,10 @@ export const speechStatusSchema = z.object({
 }).strict();
 export const speechModelInputSchema = z.object({ modelId: speechModelIdSchema }).strict();
 const arrayBufferSchema = z.custom<ArrayBuffer>((value) => Object.prototype.toString.call(value) === '[object ArrayBuffer]' && typeof (value as ArrayBuffer).byteLength === 'number');
+const speechAttemptIdSchema = z.string().uuid();
+export const speechAttemptInputSchema = z.object({ attemptId: speechAttemptIdSchema }).strict();
 export const speechTranscribeInputSchema = z.object({
+  attemptId: speechAttemptIdSchema,
   modelId: speechModelIdSchema,
   audio: arrayBufferSchema.refine((value) => value.byteLength > 0 && value.byteLength <= 16_000 * 180 * 4 && value.byteLength % 4 === 0, 'Audio must be bounded 16 kHz Float32 PCM.'),
   language: z.string().trim().min(2).max(16).optional(),
@@ -1404,6 +1409,7 @@ export const speechDownloadProgressSchema = z.object({
 export const speechCancelResultSchema = z.object({ cancelled: z.boolean() }).strict();
 export const speechStreamStateSchema = z.enum(['active', 'finalizing', 'final', 'error', 'cancelled']);
 export const speechStreamStartInputSchema = z.object({
+  attemptId: speechAttemptIdSchema,
   modelId: speechModelIdSchema,
   language: z.string().trim().min(2).max(16).optional(),
   /** Run the full-recording accuracy pass at stop. Off by default — the pass
@@ -1411,9 +1417,11 @@ export const speechStreamStartInputSchema = z.object({
   refine: z.boolean().default(false),
 }).strict();
 export const speechStreamFeedInputSchema = z.object({
+  attemptId: speechAttemptIdSchema,
   audio: arrayBufferSchema.refine((value) => value.byteLength > 0 && value.byteLength <= MAX_SPEECH_STREAM_FEED_SAMPLES * SPEECH_PCM_BYTES_PER_SAMPLE && value.byteLength % SPEECH_PCM_BYTES_PER_SAMPLE === 0, 'Audio must be bounded 16 kHz Float32 PCM.'),
 }).strict();
 export const speechStreamUpdateSchema = z.object({
+  attemptId: speechAttemptIdSchema.optional(),
   state: speechStreamStateSchema,
   committed: z.string().max(200_000),
   tentative: z.string().max(200_000),
@@ -1424,7 +1432,7 @@ export const speechStreamUpdateSchema = z.object({
   backlogSeconds: z.number().min(0).max(600).optional(),
 }).strict();
 export const voiceHotkeyEventSchema = z.object({
-  action: z.enum(['start', 'stop']),
+  action: z.enum(['start', 'stop', 'toggle']),
   source: z.enum(['hotkey', 'button']).default('hotkey'),
 }).strict();
 export const speechHotkeyStatusSchema = z.object({
@@ -1870,12 +1878,14 @@ export interface PiDesktopApi extends LearningApi, AgentsApi, DesktopConnectionA
   downloadSpeechModel: (modelId: SpeechModelId) => Promise<SpeechStatus>;
   cancelSpeechModelDownload: (modelId: SpeechModelId) => Promise<boolean>;
   removeSpeechModel: (modelId: SpeechModelId) => Promise<SpeechStatus>;
-  transcribeSpeech: (modelId: SpeechModelId, audio: ArrayBuffer, language?: string) => Promise<SpeechTranscription>;
-  cancelSpeechTranscription: () => Promise<boolean>;
-  startSpeechStream: (modelId: SpeechModelId, language?: string, refine?: boolean) => Promise<void>;
-  feedSpeechStream: (audio: ArrayBuffer) => Promise<void>;
-  stopSpeechStream: () => Promise<void>;
-  cancelSpeechStream: () => Promise<void>;
+  claimSpeechAttempt: (attemptId: string) => Promise<void>;
+  releaseSpeechAttempt: (attemptId: string) => Promise<void>;
+  transcribeSpeech: (modelId: SpeechModelId, audio: ArrayBuffer, language: string | undefined, attemptId: string) => Promise<SpeechTranscription>;
+  cancelSpeechTranscription: (attemptId: string) => Promise<boolean>;
+  startSpeechStream: (modelId: SpeechModelId, language: string | undefined, refine: boolean | undefined, attemptId: string) => Promise<void>;
+  feedSpeechStream: (audio: ArrayBuffer, attemptId: string) => Promise<void>;
+  stopSpeechStream: (attemptId: string) => Promise<void>;
+  cancelSpeechStream: (attemptId: string) => Promise<void>;
   getSpeechHotkeyStatus: () => Promise<SpeechHotkeyStatus>;
   onSpeechDownload: (listener: (progress: SpeechDownloadProgress) => void) => () => void;
   onSpeechStreamUpdate: (listener: (update: SpeechStreamUpdate) => void) => () => void;

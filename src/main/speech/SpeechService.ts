@@ -39,7 +39,15 @@ type LoadedModel = Awaited<ReturnType<TranscribeModule['TranscribeModel']['load'
 type SpeechSession = ReturnType<LoadedModel['createSession']>;
 type SpeechStream = Awaited<ReturnType<SpeechSession['stream']>>;
 type QueuedStreamFeed = { pcm: Float32Array; resolve: () => void; reject: (error: unknown) => void };
+type NativeSlot = {
+  kind: 'batch' | 'live';
+  modelId: SpeechModelId;
+  controller: AbortController;
+  settled: Promise<void>;
+  release: () => void;
+};
 type ActiveSpeechStream = {
+  slot: NativeSlot;
   definition: SpeechModelDefinition;
   session: SpeechSession;
   stream: SpeechStream;
@@ -48,8 +56,6 @@ type ActiveSpeechStream = {
   /** Whether streamStop runs the full-recording accuracy pass. Off unless the
    *  user enabled it: the pass doubles decode work on long dictations. */
   refineFinal: boolean;
-  settled: Promise<void>;
-  resolveSettled: () => void;
   accepting: boolean;
   /** Last committed text seen from the native stream. Failure and cancellation
    *  events carry it so the UI never loses text the user already saw. */
@@ -71,9 +77,9 @@ export class SpeechService {
   private readonly installedModels = new Set<SpeechModelId>();
   private loaded: { id: SpeechModelId; model: LoadedModel } | null = null;
   private unloadTimer: NodeJS.Timeout | null = null;
-  private activeRun: AbortController | null = null;
-  private activeSettled: Promise<void> | null = null;
-  private resolveActiveSettled: (() => void) | null = null;
+  private slot: NativeSlot | null = null;
+  private disposed = false;
+  private readonly removing = new Set<SpeechModelId>();
   private eventSink: ((progress: SpeechDownloadProgress) => void) | null = null;
   private streamSink: ((update: SpeechStreamUpdate) => void) | null = null;
   private activeStream: ActiveSpeechStream | null = null;
@@ -105,6 +111,10 @@ export class SpeechService {
     this.streamSink = sink;
   }
 
+  async verifyRuntime(): Promise<void> {
+    (await this.runtime()).version();
+  }
+
   async getStatus(): Promise<SpeechStatus> {
     await this.cleanupLegacyModels();
     const models = await Promise.all(this.definitions.map(async (definition) => {
@@ -119,12 +129,16 @@ export class SpeechService {
   }
 
   async download(modelId: SpeechModelId): Promise<void> {
-    if (await this.isInstalled(this.definition(modelId))) return;
+    if (this.disposed) throw new Error('Speech service is disposed.');
+    if (this.removing.has(modelId)) throw new Error('The voice model is being removed.');
+    const definition = this.definition(modelId);
     const existing = this.downloads.get(modelId);
     if (existing) return existing;
     const controller = new AbortController();
     this.downloadControllers.set(modelId, controller);
-    const operation = this.downloadModel(this.definition(modelId), controller.signal).finally(() => {
+    const operation = this.isInstalled(definition).then((installed) => {
+      if (!installed) return this.downloadModel(definition, controller.signal);
+    }).finally(() => {
       this.downloads.delete(modelId);
       this.downloadControllers.delete(modelId);
     });
@@ -141,43 +155,49 @@ export class SpeechService {
 
   async remove(modelId: SpeechModelId): Promise<void> {
     if (this.downloads.has(modelId)) throw new Error('Wait for this model download to finish before removing it.');
-    this.installedModels.delete(modelId);
-    if (this.loaded?.id === modelId) this.unload();
+    if (this.slot?.modelId === modelId) throw new Error('The voice model is in use.');
+    if (this.removing.has(modelId)) throw new Error('The voice model is being removed.');
     const definition = this.definition(modelId);
-    await Promise.all([
-      fs.rm(this.modelPath(definition), { force: true }),
-      fs.rm(`${this.modelPath(definition)}.partial`, { force: true }),
-      fs.rm(`${this.modelPath(definition)}.verified`, { force: true }),
-    ]);
+    this.removing.add(modelId);
+    try {
+      this.installedModels.delete(modelId);
+      if (this.loaded?.id === modelId) this.unload();
+      await Promise.all([
+        fs.rm(this.modelPath(definition), { force: true }),
+        fs.rm(`${this.modelPath(definition)}.partial`, { force: true }),
+        fs.rm(`${this.modelPath(definition)}.verified`, { force: true }),
+      ]);
+    } finally {
+      this.installedModels.delete(modelId);
+      this.removing.delete(modelId);
+    }
   }
 
   async transcribe(modelId: SpeechModelId, audio: ArrayBuffer, language?: string): Promise<SpeechTranscription> {
     if (audio.byteLength === 0 || audio.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) throw new Error('The captured audio is malformed.');
     const pcm = new Float32Array(audio);
     if (pcm.length > MAX_AUDIO_SAMPLES) throw new Error('Voice recordings are limited to three minutes.');
-    if (!(await this.isInstalled(this.definition(modelId)))) throw new Error('Download the selected voice model before transcribing.');
-    if (this.activeRun || this.activeStream) throw new Error('Another voice transcription is already running.');
-
-    const controller = new AbortController();
-    this.activeRun = controller;
-    this.activeSettled = new Promise<void>((resolve) => { this.resolveActiveSettled = resolve; });
+    const definition = this.definition(modelId);
+    const slot = this.reserve('batch', modelId);
+    const { signal } = slot.controller;
     try {
-      const definition = this.definition(modelId);
+      if (!(await this.isInstalled(definition))) throw new Error('Download the selected voice model before transcribing.');
+      signal.throwIfAborted();
       const startedAt = performance.now();
       const warm = this.loaded?.id === modelId;
-      const model = await this.load(definition);
+      const model = await this.load(definition, signal);
+      signal.throwIfAborted();
       const loadMs = performance.now() - startedAt;
+      const runLanguage = resolveModelLanguage(definition, language);
       const session = model.createSession({ nThreads: CPU_THREADS });
       let result: Awaited<ReturnType<typeof session.run>>;
       try {
-        // 'auto' has no meaning for batch models without detection; explicit
-        // short codes map (Nemotron needs en-US style locales).
-        const runLanguage = resolveModelLanguage(definition, language) ?? resolveModelLanguage(definition, 'en') ?? 'en';
         result = await session.run(pcm, {
-          signal: controller.signal,
+          signal,
           timestamps: 'none',
-          language: runLanguage,
+          ...(runLanguage ? { language: runLanguage } : {}),
         });
+        signal.throwIfAborted();
       } finally {
         session.dispose();
       }
@@ -185,22 +205,38 @@ export class SpeechService {
       this.logs.write('info', 'speech', `${definition.model} transcribed ${(pcm.length / 16_000).toFixed(1)}s of audio in ${Math.round(elapsedMs)}ms (${warm ? 'warm' : `${Math.round(loadMs)}ms load`}, ${model.device.name || model.backend}).`);
       return {
         text: result.text.trim(),
-        language: result.language || language || 'unknown',
+        language: result.language || runLanguage || 'unknown',
         backend: model.device.name || model.device.description || model.backend,
         accelerated: model.device.deviceType !== 'cpu',
       };
     } finally {
-      if (this.loaded?.id === modelId) this.scheduleUnload();
-      if (this.activeRun === controller) this.activeRun = null;
-      this.resolveActiveSettled?.();
-      this.resolveActiveSettled = null;
-      this.activeSettled = null;
+      slot.release();
     }
   }
 
+  private reserve(kind: NativeSlot['kind'], modelId: SpeechModelId): NativeSlot {
+    if (this.disposed) throw new Error('Speech service is disposed.');
+    if (this.slot) throw new Error('Another voice transcription is already running.');
+    if (this.removing.has(modelId)) throw new Error('The voice model is being removed.');
+    let resolveSettled!: () => void;
+    const slot = {
+      kind, modelId,
+      controller: new AbortController(),
+      settled: new Promise<void>((resolve) => { resolveSettled = resolve; }),
+      release: () => {
+        if (this.slot !== slot) return;
+        this.slot = null;
+        if (this.loaded?.id === modelId) this.scheduleUnload();
+        resolveSettled();
+      },
+    };
+    this.slot = slot;
+    return slot;
+  }
+
   cancel(): boolean {
-    if (!this.activeRun) return false;
-    this.activeRun.abort();
+    if (this.slot?.kind !== 'batch') return false;
+    this.slot.controller.abort();
     return true;
   }
 
@@ -209,11 +245,23 @@ export class SpeechService {
    *  single compute slot until streamStop/streamCancel, so batch transcribe()
    *  is refused while it is active. */
   async streamStart(modelId: SpeechModelId, language?: string, refine = false): Promise<void> {
-    if (this.activeRun || this.activeStream) throw new Error('Another voice transcription is already running.');
     const definition = this.definition(modelId);
     if (!definition.streaming) throw new Error('Live transcription is only supported by streaming voice models.');
+    const slot = this.reserve('live', modelId);
+    try {
+      await this.openStream(slot, definition, language, refine);
+    } catch (error) {
+      slot.release();
+      throw error;
+    }
+  }
+
+  private async openStream(slot: NativeSlot, definition: SpeechModelDefinition, language: string | undefined, refine: boolean): Promise<void> {
+    const { signal } = slot.controller;
     if (!(await this.isInstalled(definition))) throw new Error('Download the selected voice model before transcribing.');
-    const model = await this.load(definition);
+    signal.throwIfAborted();
+    const model = await this.load(definition, signal);
+    signal.throwIfAborted();
     const session = model.createSession({ nThreads: CPU_THREADS });
     const streamLanguage = resolveModelLanguage(definition, language);
     let stream: SpeechStream;
@@ -230,20 +278,18 @@ export class SpeechService {
         // the engine's default stream slot.
         ...(definition.streamFamily ? { family: definition.streamFamily } : {}),
       });
+      signal.throwIfAborted();
     } catch (error) {
       session.dispose();
       throw new Error(`Live transcription could not start: ${this.message(error)}`);
     }
-    let resolveSettled!: () => void;
-    const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
     this.activeStream = {
+      slot,
       definition,
       session,
       stream,
       language: streamLanguage,
       refineFinal: refine,
-      settled,
-      resolveSettled,
       accepting: true,
       lastCommitted: '',
       pendingFeeds: [],
@@ -289,7 +335,7 @@ export class SpeechService {
       if (remaining > 0) {
         // Keep the part of this capture that still fits, then seal.
         const trimmed = pcm.subarray(0, remaining);
-        active.recordedAudio.push(trimmed);
+        if (active.refineFinal) active.recordedAudio.push(trimmed);
         active.recordedSamples += trimmed.length;
         active.pendingFeeds.push({ pcm: trimmed, resolve: () => {}, reject: () => {} });
         active.pendingSamples += trimmed.length;
@@ -303,7 +349,7 @@ export class SpeechService {
       this.failStream(active, error);
       throw error;
     }
-    active.recordedAudio.push(pcm);
+    if (active.refineFinal) active.recordedAudio.push(pcm);
     active.recordedSamples += pcm.length;
     return new Promise<void>((resolve, reject) => {
       active.pendingFeeds.push({ pcm, resolve, reject });
@@ -364,20 +410,26 @@ export class SpeechService {
       }
     } catch (error) {
       // Carry the last committed text so the UI keeps everything the user saw.
-      this.emitStream({ state: 'error', committed: active.lastCommitted, tentative: '', error: this.message(error) });
+      if (this.activeStream === active) this.emitStream({ state: 'error', committed: active.lastCommitted, tentative: '', error: this.message(error) });
+      else if (!active.failure) return;
       throw error;
     } finally {
       this.endStream(active);
+      active.slot.release();
     }
   }
 
   /** Abort the active stream without finalizing. Safe to call when idle. */
   async streamCancel(): Promise<void> {
-    const active = this.activeStream;
-    if (!active) return;
-    active.refinementAbort?.abort();
-    this.emitStream({ state: 'cancelled', committed: active.lastCommitted, tentative: '' });
-    this.endStream(active);
+    const slot = this.slot;
+    if (slot?.kind !== 'live') return;
+    if (!slot.controller.signal.aborted) {
+      slot.controller.abort(new Error('Live transcription cancelled.'));
+      const active = this.activeStream;
+      this.emitStream({ state: 'cancelled', committed: active?.lastCommitted ?? '', tentative: '' });
+      if (active) this.endStream(active);
+    }
+    await slot.settled;
   }
 
   private startStreamDrain(active: ActiveSpeechStream): void {
@@ -412,14 +464,12 @@ export class SpeechService {
           for (const queued of batch) queued.resolve(); // disposal is safe during a native call
           return;
         }
-        active.accepting = false;
-        active.failure = error;
         for (const queued of batch) queued.reject(error);
-        for (const queued of active.pendingFeeds.splice(0)) queued.reject(error);
-        active.pendingSamples = 0;
+        this.failStream(active, error instanceof Error ? error : new Error(this.message(error)));
         return;
       } finally {
         active.inFlightSamples = 0;
+        if (this.activeStream !== active && !active.stopping) active.slot.release();
       }
     }
   }
@@ -457,6 +507,7 @@ export class SpeechService {
     if (this.activeStream !== active) return;
     active.accepting = false;
     active.failure = error;
+    active.slot.controller.abort(error);
     for (const queued of active.pendingFeeds.splice(0)) queued.reject(error);
     active.pendingSamples = 0;
     // Keep the committed text in the failure event: the user keeps every word
@@ -521,6 +572,8 @@ export class SpeechService {
   }
 
   private endStream(active: ActiveSpeechStream): void {
+    if (this.activeStream !== active) return;
+    this.activeStream = null;
     active.accepting = false;
     active.refinementAbort?.abort();
     active.refinementAbort = null;
@@ -528,10 +581,8 @@ export class SpeechService {
     active.pendingSamples = 0;
     active.recordedAudio.length = 0;
     active.recordedSamples = 0;
-    if (this.activeStream === active) this.activeStream = null;
     try { active.session.dispose(); } catch { /* teardown is best-effort */ }
-    if (this.loaded?.id === active.definition.id) this.scheduleUnload();
-    active.resolveSettled();
+    if (!active.inFlightSamples && !active.stopping) active.slot.release();
   }
 
   private emitStream(update: SpeechStreamUpdate): void {
@@ -539,75 +590,70 @@ export class SpeechService {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     for (const controller of this.downloadControllers.values()) controller.abort();
-    this.cancel();
-    if (this.activeStream) await this.streamCancel();
-    const activeSettled = this.activeSettled;
-    if (activeSettled) await activeSettled.catch(() => undefined);
+    if (this.slot?.kind === 'live') await this.streamCancel();
+    else if (this.slot) {
+      this.cancel();
+      await this.slot.settled;
+    }
     this.unload();
   }
 
   private async downloadModel(definition: SpeechModelDefinition, signal: AbortSignal): Promise<void> {
-    await fs.mkdir(this.modelRoot, { recursive: true });
     const target = this.modelPath(definition);
     const partial = `${target}.partial`;
-    const present = await fs.stat(partial).then((stat) => Math.min(stat.size, definition.bytes), () => 0);
-    if (present === definition.bytes && await this.verify(partial, definition.sha256)) {
-      await this.installVerified(partial, target, definition);
-      return;
-    }
-    if (present >= definition.bytes) await fs.rm(partial, { force: true });
-    const offset = present >= definition.bytes ? 0 : present;
-    const freeBytes = await fs.statfs(this.modelRoot).then((stats) => stats.bavail * stats.bsize, () => Number.POSITIVE_INFINITY);
-    const requiredBytes = definition.bytes - offset + 64 * 1024 * 1024;
-    if (freeBytes < requiredBytes) throw new Error(`Not enough disk space for ${definition.name}. Free at least ${Math.ceil(requiredBytes / 1024 / 1024)} MB and try again.`);
-    this.emit({ modelId: definition.id, state: 'downloading', downloadedBytes: offset, totalBytes: definition.bytes });
-
-    let response: Response;
+    let downloaded = 0;
     try {
-      response = await this.fetcher(definition.url, {
+      signal.throwIfAborted();
+      await fs.mkdir(this.modelRoot, { recursive: true });
+      downloaded = await fs.stat(partial).then((stat) => Math.min(stat.size, definition.bytes), () => 0);
+      if (downloaded === definition.bytes && await this.verify(partial, definition.sha256, signal)) {
+        signal.throwIfAborted();
+        await this.installVerified(partial, target, definition);
+        return;
+      }
+      if (downloaded >= definition.bytes) {
+        await fs.rm(partial, { force: true });
+        downloaded = 0;
+      }
+      const offset = downloaded;
+      const freeBytes = await fs.statfs(this.modelRoot).then((stats) => stats.bavail * stats.bsize, () => Number.POSITIVE_INFINITY);
+      const requiredBytes = definition.bytes - offset + 64 * 1024 * 1024;
+      if (freeBytes < requiredBytes) throw new Error(`Not enough disk space for ${definition.name}. Free at least ${Math.ceil(requiredBytes / 1024 / 1024)} MB and try again.`);
+      this.emit({ modelId: definition.id, state: 'downloading', downloadedBytes: offset, totalBytes: definition.bytes });
+      signal.throwIfAborted();
+      const response = await this.fetcher(definition.url, {
         redirect: 'follow',
         signal,
         ...(offset > 0 ? { headers: { Range: `bytes=${offset}-` } } : {}),
       });
-    } catch (error) {
-      if (!signal.aborted) throw error;
-      this.emit({ modelId: definition.id, state: 'cancelled', downloadedBytes: offset, totalBytes: definition.bytes });
-      throw new Error('Model download cancelled.');
-    }
-    if (!response.ok || !response.body) throw new Error(`Model download failed with HTTP ${response.status}.`);
-    const append = offset > 0 && response.status === 206;
-    const start = append ? offset : 0;
-    const hash = createHash('sha256');
-    if (append) {
-      try {
+      if (!response.ok || !response.body) throw new Error(`Model download failed with HTTP ${response.status}.`);
+      const append = offset > 0 && response.status === 206;
+      const hash = createHash('sha256');
+      if (append) {
         await pipeline(createReadStream(partial), new Transform({ transform(chunk: Buffer, _encoding, callback) { hash.update(chunk); callback(); } }), { signal });
-      } catch (error) {
-        if (!signal.aborted) throw error;
-        this.emit({ modelId: definition.id, state: 'cancelled', downloadedBytes: offset, totalBytes: definition.bytes });
-        throw new Error('Model download cancelled.');
       }
-    }
-    let downloaded = start;
-    let lastUpdate = 0;
-    const progress = new Transform({
-      transform: (chunk: Buffer, _encoding, callback) => {
-        downloaded += chunk.length;
-        hash.update(chunk);
-        if (downloaded > definition.bytes) return callback(new Error('The model download exceeded its declared size.'));
-        const now = Date.now();
-        if (now - lastUpdate > 150 || downloaded === definition.bytes) {
-          lastUpdate = now;
-          this.emit({ modelId: definition.id, state: 'downloading', downloadedBytes: downloaded, totalBytes: definition.bytes });
-        }
-        callback(null, chunk);
-      },
-    });
-    try {
+      downloaded = append ? offset : 0;
+      let lastUpdate = 0;
+      const progress = new Transform({
+        transform: (chunk: Buffer, _encoding, callback) => {
+          downloaded += chunk.length;
+          hash.update(chunk);
+          if (downloaded > definition.bytes) return callback(new Error('The model download exceeded its declared size.'));
+          const now = Date.now();
+          if (now - lastUpdate > 150 || downloaded === definition.bytes) {
+            lastUpdate = now;
+            this.emit({ modelId: definition.id, state: 'downloading', downloadedBytes: downloaded, totalBytes: definition.bytes });
+          }
+          callback(null, chunk);
+        },
+      });
       await pipeline(Readable.fromWeb(response.body as never), progress, createWriteStream(partial, { flags: append ? 'a' : 'w', mode: 0o600 }), { signal });
       if (downloaded !== definition.bytes) throw new Error(`Model download was incomplete (${downloaded} of ${definition.bytes} bytes).`);
       this.emit({ modelId: definition.id, state: 'verifying', downloadedBytes: downloaded, totalBytes: definition.bytes });
       if (hash.digest('hex') !== definition.sha256) throw new Error('Model checksum verification failed. Delete the partial download and try again.');
+      signal.throwIfAborted();
       await this.installVerified(partial, target, definition);
       this.logs.write('info', 'speech', `${definition.model} installed and checksum verified.`);
     } catch (error) {
@@ -615,7 +661,7 @@ export class SpeechService {
         this.emit({ modelId: definition.id, state: 'cancelled', downloadedBytes: downloaded, totalBytes: definition.bytes });
         throw new Error('Model download cancelled.');
       }
-      this.emit({ modelId: definition.id, state: 'error', downloadedBytes: downloaded, totalBytes: definition.bytes, error: this.message(error) });
+      this.emit({ modelId: definition.id, state: 'error', downloadedBytes: Math.min(downloaded, definition.bytes), totalBytes: definition.bytes, error: this.message(error).slice(0, 1000) || 'Model download failed.' });
       throw error;
     }
   }
@@ -628,9 +674,9 @@ export class SpeechService {
     this.emit({ modelId: definition.id, state: 'installed', downloadedBytes: definition.bytes, totalBytes: definition.bytes });
   }
 
-  private async verify(file: string, expected: string): Promise<boolean> {
+  private async verify(file: string, expected: string, signal: AbortSignal): Promise<boolean> {
     const hash = createHash('sha256');
-    await pipeline(createReadStream(file), new Transform({ transform(chunk: Buffer, _encoding, callback) { hash.update(chunk); callback(); } }));
+    await pipeline(createReadStream(file), new Transform({ transform(chunk: Buffer, _encoding, callback) { hash.update(chunk); callback(); } }), { signal });
     return hash.digest('hex') === expected;
   }
 
@@ -660,25 +706,27 @@ export class SpeechService {
     this.backendProbe ??= this.runtime().then((runtime) => {
       const available = runtime.getAvailableBackends();
       const gpu = available.find((candidate) => candidate.deviceType === 'gpu' || candidate.deviceType === 'igpu' || candidate.deviceType === 'accel');
+      if (!available.length) throw new Error('No speech devices were detected.');
       if (!gpu) return { backend: 'CPU', accelerated: false };
       const name = gpu.name || gpu.description || gpu.kind;
-      return gpu.kind === 'vulkan'
-        ? { backend: `${name} detected · CPU safety mode active`, accelerated: false }
-        : { backend: name, accelerated: true };
+      if (available.some((candidate) => candidate.kind === 'vulkan')) return { backend: `${name} detected · all models use CPU for Vulkan safety`, accelerated: false };
+      if (available.some((candidate) => candidate.kind === 'metal')) return { backend: `${name} detected · batch models can use Metal; live models use CPU`, accelerated: true };
+      return { backend: `${name} detected · automatic model backend selection`, accelerated: true };
     }).catch((error: unknown) => {
-      this.logs.write('warn', 'speech', `Speech acceleration probe fell back to CPU: ${this.message(error)}`);
-      return { backend: 'CPU', accelerated: false };
+      this.logs.write('warn', 'speech', `Speech runtime unavailable: ${this.message(error)}`);
+      return { backend: 'Speech runtime unavailable', accelerated: false };
     });
     return this.backendProbe;
   }
 
-  private async load(definition: SpeechModelDefinition): Promise<LoadedModel> {
+  private async load(definition: SpeechModelDefinition, signal: AbortSignal): Promise<LoadedModel> {
     if (this.loaded?.id === definition.id) {
       this.clearUnloadTimer();
       return this.loaded.model;
     }
     this.unload();
     const runtime = await this.runtime();
+    signal.throwIfAborted();
     try {
       const backend = this.selectBackend(runtime, definition);
       const model = await runtime.TranscribeModel.load(this.modelPath(definition), { backend });
@@ -746,7 +794,7 @@ export class SpeechService {
   }
 
   private publicModel(definition: SpeechModelDefinition) {
-    const { fileName: _fileName, url: _url, sha256: _sha256, streamFamily: _streamFamily, languageMap: _languageMap, ...model } = definition;
+    const { fileName: _fileName, url: _url, sha256: _sha256, streamFamily: _streamFamily, languageMap: _languageMap, defaultLanguage: _defaultLanguage, ...model } = definition;
     return model;
   }
 

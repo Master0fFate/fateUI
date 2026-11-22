@@ -96,6 +96,7 @@ import {
   type ProjectSessionTarget,
   projectSessionListInputSchema,
   projectDeleteSessionsResultSchema,
+  speechAttemptInputSchema,
   speechCancelResultSchema,
   speechDownloadProgressSchema,
   speechHotkeyStatusSchema,
@@ -103,7 +104,6 @@ import {
   speechStatusSchema,
   speechStreamFeedInputSchema,
   speechStreamStartInputSchema,
-  speechStreamUpdateSchema,
   speechTranscribeInputSchema,
   speechTranscriptionSchema,
   setPermissionInputSchema,
@@ -162,6 +162,7 @@ import type { MusicService } from '../music/MusicService';
 import type { ComputerUseService } from '../computer/ComputerUseService';
 import type { SpeechService } from '../speech/SpeechService';
 import type { GlobalHotkeyService } from '../speech/GlobalHotkeyService';
+import { SpeechOwnership } from '../speech/SpeechOwnership';
 import type { UpdateService } from '../updates/UpdateService';
 import type { RecoverySnapshotService } from '../bootstrap/RecoverySnapshot';
 import { buildSessionExport } from '../pi/SessionExport';
@@ -653,10 +654,8 @@ export function registerIpc({ runtime, core, monitorCore, connections, connectio
     const payload = speechDownloadProgressSchema.parse(progress);
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send(ipcChannels.speechEvents, payload);
   });
-  speech.setStreamSink((update) => {
-    const payload = speechStreamUpdateSchema.parse(update);
-    for (const window of BrowserWindow.getAllWindows()) window.webContents.send(ipcChannels.speechStreamEvents, payload);
-  });
+  const voice = new SpeechOwnership(speech, (error) => logs.write('warn', 'speech', `Voice cleanup failed: ${error instanceof Error ? error.message : String(error)}`));
+  speech.setStreamSink((update) => voice.update(update));
   music.setDurationSink((updates) => {
     const payload = musicDurationsEventSchema.parse({ updates });
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send(ipcChannels.musicDurations, payload);
@@ -1656,31 +1655,42 @@ export function registerIpc({ runtime, core, monitorCore, connections, connectio
     await speech.remove(modelId);
     return speechStatusSchema.parse(await speech.getStatus());
   });
-  handle(ipcChannels.speechTranscribe, async (_event, input) => {
-    const parsed = speechTranscribeInputSchema.parse(input);
-    return speechTranscriptionSchema.parse(await speech.transcribe(parsed.modelId, parsed.audio, parsed.language));
+  const voiceGuard = (event: Electron.IpcMainInvokeEvent) => {
+    const valid = invocationGuards.get(event);
+    const sender = event.sender;
+    return () => valid?.() === true && BrowserWindow.fromWebContents(sender)?.webContents === sender;
+  };
+  handle(ipcChannels.speechClaimAttempt, (event, input) => {
+    const { attemptId } = speechAttemptInputSchema.parse(input);
+    voice.claim(event.sender, attemptId, voiceGuard(event));
   });
-  handle(ipcChannels.speechCancel, (_event, input) => {
-    emptyInputSchema.parse(input);
-    return speechCancelResultSchema.parse({ cancelled: speech.cancel() });
+  handle(ipcChannels.speechReleaseAttempt, (event, input) => {
+    const { attemptId } = speechAttemptInputSchema.parse(input);
+    return voice.release(event.sender, attemptId);
   });
-  handle(ipcChannels.speechStreamStart, async (_event, input) => {
-    const { modelId, language, refine } = speechStreamStartInputSchema.parse(input);
-    await speech.streamStart(modelId, language, refine);
+  handle(ipcChannels.speechTranscribe, async (event, input) => {
+    const { modelId, audio, language, attemptId } = speechTranscribeInputSchema.parse(input);
+    return speechTranscriptionSchema.parse(await voice.transcribe(event.sender, attemptId, voiceGuard(event), modelId, audio, language));
   });
-  handle(ipcChannels.speechStreamFeed, async (_event, input) => {
-    const { audio } = speechStreamFeedInputSchema.parse(input);
-    await speech.streamFeed(audio);
+  handle(ipcChannels.speechCancel, async (event, input) => {
+    const { attemptId } = speechAttemptInputSchema.parse(input);
+    return speechCancelResultSchema.parse({ cancelled: await voice.cancelBatch(event.sender, attemptId) });
   });
-  handle(ipcChannels.speechStreamStop, async (_event, input) => {
-    emptyInputSchema.parse(input);
-    await speech.streamStop();
-    hotkey.resetActive();
+  handle(ipcChannels.speechStreamStart, (event, input) => {
+    const { modelId, language, refine, attemptId } = speechStreamStartInputSchema.parse(input);
+    return voice.start(event.sender, attemptId, voiceGuard(event), modelId, language, refine);
   });
-  handle(ipcChannels.speechStreamCancel, async (_event, input) => {
-    emptyInputSchema.parse(input);
-    await speech.streamCancel();
-    hotkey.resetActive();
+  handle(ipcChannels.speechStreamFeed, (event, input) => {
+    const { audio, attemptId } = speechStreamFeedInputSchema.parse(input);
+    return voice.feed(event.sender, attemptId, audio);
+  });
+  handle(ipcChannels.speechStreamStop, (event, input) => {
+    const { attemptId } = speechAttemptInputSchema.parse(input);
+    return voice.stop(event.sender, attemptId);
+  });
+  handle(ipcChannels.speechStreamCancel, (event, input) => {
+    const { attemptId } = speechAttemptInputSchema.parse(input);
+    return voice.cancelStream(event.sender, attemptId);
   });
   handle(ipcChannels.speechHotkeyStatus, (_event, input) => {
     emptyInputSchema.parse(input);
@@ -1797,5 +1807,5 @@ export function registerIpc({ runtime, core, monitorCore, connections, connectio
     };
     return connections ? connections.local(open) : open();
   };
-  return { openProjectPath: openRecoveredProjectPath, focusProjectPath };
+  return { openProjectPath: openRecoveredProjectPath, focusProjectPath, voiceTarget: () => voice.target() };
 }

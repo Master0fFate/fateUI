@@ -314,16 +314,29 @@ jobs:
             echo "PKG smoke attempt $attempt failed; retrying in 5 seconds."
             sleep 5
           done
+      - name: Verify packaged spoken transcript
+        if: runner.os == 'Linux' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          PI_DESKTOP_SPEECH_STREAM_SMOKE: '1'
+          INSTALLED_SMOKE_TIMEOUT_MS: '600000'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          appimage="artifacts/Fate-UI-$version-Linux-${{ matrix.arch }}.AppImage"
+          chmod +x "$appimage"
+          xvfb-run -a node scripts/smoke-executable.mjs "$appimage" --appimage-extract-and-run
       - name: Run, install, and smoke Linux installers
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
-          appimage="artifacts/Fate-UI-$version-Linux-${{ matrix.arch }}.AppImage"
           deb="artifacts/Fate-UI-$version-Linux-${{ matrix.arch }}.deb"
-          chmod +x "$appimage"
-          xvfb-run -a node scripts/smoke-executable.mjs "$appimage" --appimage-extract-and-run
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            appimage="artifacts/Fate-UI-$version-Linux-${{ matrix.arch }}.AppImage"
+            chmod +x "$appimage"
+            xvfb-run -a node scripts/smoke-executable.mjs "$appimage" --appimage-extract-and-run
+          fi
 
           package_name=$(dpkg-deb -f "$deb" Package)
           trap 'sudo apt-get purge -y "$package_name" >/dev/null 2>&1 || true' EXIT
@@ -497,6 +510,8 @@ jobs:
           test "$run_conclusion" = success
           test "$run_workflow" = .github/workflows/cross-platform.yml
           test "$run_head" = "$tag_head"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROMOTE_RUN_ID/jobs?per_page=100" |
+            jq -e 'any(.jobs[]; .name == "Linux x64 / Node 22" and .conclusion == "success" and any(.steps[]; .name == "Verify packaged spoken transcript" and .conclusion == "success"))'
           git merge-base --is-ancestor "$tag_head" origin/main
           git checkout --detach "$PROMOTE_TAG"
           node scripts/release-artifacts.mjs validate-tag --tag "$PROMOTE_TAG"

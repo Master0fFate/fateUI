@@ -44,6 +44,8 @@ A Monitor watch uses a separate, one-shot connection to a named, enabled **local
 
 ## Watch CI from chat
 
-In a trusted desktop project, ask: “Watch this PR’s CI and tell me when it finishes.” Fate resolves the branch’s pull request and pins its current commit. You can also include a GitHub pull request or Actions run link in the request. An authenticated local `gh` CLI with access to the repository is required. No workflow is started or modified.
+In a trusted desktop project, ask: “Watch this PR’s CI and tell me when it finishes.” Fate resolves the branch’s pull request and pins its current commit. You can also include a GitHub pull request or Actions run link in the request. An authenticated local `gh` CLI with access to the repository is required.
 
-The turn ends normally. **Run → Monitor → Watches** shows the status and lets you stop the watch. When checks finish, Fate posts a text-only update in the original chat, without tools or chat history. Switching projects does not stop the watch. Watches expire after one hour and do not resume after quitting.
+You can also say “Hey, set up a watcher as soon as the CI passes.” The watch reports the result, including failures. Asking for a merge or a release in the same message does not schedule either action.
+
+The turn ends normally. **Run → Monitor → Watches** shows the status and lets you stop the watch. Fate reports the first confirmed failure for the pinned commit, even if other checks are still running. A success report waits for the complete set of checks. Chat watches post directly in the original chat without calling a model; if the chat is busy, the update waits until it is idle. Switching projects does not stop the watch. Watches expire after one hour and do not resume after quitting.

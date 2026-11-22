@@ -2,7 +2,7 @@ import { app, BrowserWindow, protocol } from 'electron';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appCommandSchema, appSettingsSchema, ipcChannels, type AppSettings, type ProjectState, type TerminalEvent } from '../../src/shared/contracts/ipc';
+import { appCommandSchema, appSettingsSchema, ipcChannels, type AppSettings, type ProjectState, type SpeechModelId, type SpeechStreamUpdate, type TerminalEvent } from '../../src/shared/contracts/ipc';
 import { browserEventBatchSchema } from '../../src/shared/contracts/browser';
 import { builtInThemes } from '../../src/shared/themes';
 import { LegacyAutomations } from '../../src/main/automations/LegacyAutomations';
@@ -27,7 +27,7 @@ import { SkinPackService } from '../../src/main/settings/SkinPackService';
 import { preparePackBackground } from '../../src/main/settings/DesktopSkinImage';
 import { skinPackThemeId } from '../../src/shared/skins';
 import { removePackFontPreferences } from '../../src/shared/skinAppearance';
-import type { SpeechService } from '../../src/main/speech/SpeechService';
+import { speechModel, speechModels } from '../../src/main/speech/speechModels';
 import type { TerminalService } from '../../src/main/terminal/TerminalService';
 import { installWindowZoomShortcuts } from '../../src/main/windowZoom';
 import { MINIMUM_WINDOW_SIZE } from '../../src/main/windowState';
@@ -120,25 +120,49 @@ const music = {
   reset: () => undefined,
   setDurationSink: () => undefined,
 } as unknown as MusicService;
-const speechModels = [
-  { id: 'parakeet-unified', tier: 'mini', name: 'Mini', model: 'Test Mini', description: 'Test model', detail: '1 MB', bytes: 1, installed: true, downloadedBytes: 1, streaming: true },
-  { id: 'canary-flash', tier: 'balanced', name: 'Medium', model: 'Test Medium', description: 'Test model', detail: '2 MB', bytes: 2, installed: false, downloadedBytes: 0, streaming: false },
-  { id: 'nemotron-stream', tier: 'max', name: 'Max', model: 'Test Max', description: 'Test model', detail: '3 MB', bytes: 3, installed: false, downloadedBytes: 0, streaming: false },
-] as const;
-const speech = {
+const installedSpeechModels = new Set<SpeechModelId>(['canary-flash', 'parakeet-unified']);
+let emitSpeechUpdate = (_update: SpeechStreamUpdate): void => {};
+let streamDraft: string | null = null;
+const speech: Parameters<typeof registerIpc>[0]['speech'] = {
   setEventSink: () => undefined,
-  setStreamSink: () => undefined,
-  getStatus: async () => ({ models: speechModels, backend: 'E2E CPU', accelerated: false }),
-  download: async () => undefined,
+  setStreamSink: (sink) => { emitSpeechUpdate = sink; },
+  getStatus: async () => ({
+    models: speechModels.map(({ id, tier, name, model, description, detail, bytes, streaming }) => ({
+      id, tier, name, model, description, detail, bytes, streaming,
+      installed: installedSpeechModels.has(id), downloadedBytes: installedSpeechModels.has(id) ? bytes : 0,
+    })),
+    backend: 'E2E CPU', accelerated: false,
+  }),
+  download: async (id) => { installedSpeechModels.add(id); },
   cancelDownload: () => false,
-  remove: async () => undefined,
-  transcribe: async () => ({ text: 'voice test', language: 'en', backend: 'E2E CPU', accelerated: false }),
+  remove: async (id) => { installedSpeechModels.delete(id); },
+  transcribe: async (id) => {
+    if (!installedSpeechModels.has(id)) throw new Error('Voice model not installed.');
+    return { text: 'voice test', language: 'en', backend: 'E2E CPU', accelerated: false };
+  },
   cancel: () => false,
-  streamStart: async () => undefined,
-  streamFeed: async () => undefined,
-  streamStop: async () => undefined,
-  streamCancel: async () => undefined,
-} as unknown as SpeechService;
+  streamStart: async (id) => {
+    if (!installedSpeechModels.has(id) || !speechModel(id).streaming) throw new Error('Live model unavailable.');
+    if (streamDraft !== null) throw new Error('Live transcription already active.');
+    streamDraft = '';
+    emitSpeechUpdate({ state: 'active', committed: '', tentative: '' });
+  },
+  streamFeed: async () => {
+    if (streamDraft === null) throw new Error('No live transcription.');
+    streamDraft = 'voice test';
+    emitSpeechUpdate({ state: 'active', committed: 'voice', tentative: ' test' });
+  },
+  streamStop: async () => {
+    if (streamDraft === null) return;
+    emitSpeechUpdate({ state: 'finalizing', committed: streamDraft, tentative: '' });
+    emitSpeechUpdate({ state: 'final', committed: streamDraft, tentative: '' });
+    streamDraft = null;
+  },
+  streamCancel: async () => {
+    if (streamDraft !== null) emitSpeechUpdate({ state: 'cancelled', committed: '', tentative: '' });
+    streamDraft = null;
+  },
+};
 const updates = {
   check: async () => ({ status: 'current' as const, message: 'FateGUI is up to date.' }),
   openDownload: async () => undefined,

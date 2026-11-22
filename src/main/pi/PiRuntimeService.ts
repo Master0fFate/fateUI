@@ -1446,9 +1446,10 @@ export class PiRuntimeService {
     const slot = this.findLiveSlot(sessionId);
     const turn = slot && this.chatWatchTurns.get(slot);
     const starter = this.chatWatchStarter;
-    if (!starter || !turn?.bound || turn.used || !turn.current() || signal?.aborted) {
-      throw new Error('Send a direct request in this chat, such as “Watch CI on my PR and tell me when it finishes”, when the chat is idle.');
-    }
+    if (!starter) throw new Error('CI watching is unavailable in this session.');
+    if (!turn?.bound) throw new Error('No direct watch request was recognized for this turn. In an idle chat in a trusted desktop project, send “Watch CI on my PR”.');
+    if (!turn.current() || signal?.aborted) throw new Error('The watch request is no longer current.');
+    if (turn.used) throw new Error('This turn has already attempted to start a watch.');
     turn.used = true;
     const combined = signal ? AbortSignal.any([signal, turn.signal]) : turn.signal;
     const current = () => !combined.aborted && turn.current();
@@ -4048,8 +4049,7 @@ export class PiRuntimeService {
         return original.path === file.path && original.ino === file.ino && original.dev === file.dev;
       },
     };
-    if (!project?.trusted || !selected || !modelRuntime || !model || !permission || !modelAvailable()
-      || (coldChoice && (model.provider !== coldChoice.provider || model.id !== coldChoice.id))) return target;
+    if (!project?.trusted || !selected || !permission) return target;
     const scope = () => {
       const live = this.findLiveSlot(sessionId);
       const cold = this.coldSession?.snapshot.summary.id === sessionId ? this.coldSession : null;
@@ -4076,7 +4076,7 @@ export class PiRuntimeService {
       admit(fence);
       return idle();
     };
-    target.answer = async ({ source, result, followUp }, fence, onStart) => {
+    if (modelRuntime && model && modelAvailable() && (!coldChoice || (model.provider === coldChoice.provider && model.id === coldChoice.id))) target.answer = async ({ source, result, followUp }, fence, onStart) => {
       if (!await ready(fence)) return null;
       admit(fence);
       if (!idle()) return null;
@@ -4130,7 +4130,7 @@ export class PiRuntimeService {
 
   private monitorSessionIdle(sessionId: string): boolean {
     if (!this.project || this.sessionWriterUnavailable(this.sessionClaimKey(this.project.path, sessionId))
-      || this.replacementActive || this.monitorBusyPrompts.has(sessionId) || this.hasOwnedAgentWork(sessionId)
+      || this.replacementActive || this.monitorBusyPrompts.has(sessionId) || this.hasActiveAgentWork(sessionId)
       || this.goalMax.hasRunnableGoal(sessionId) || (this.selectedSessionId === sessionId && this.promptOptimizationActive)) return false;
     const slots = [...this.liveSlots].filter((slot) => !slot.disposed && slot.runtime.session.sessionId === sessionId);
     if (slots.length === 0) return true;
