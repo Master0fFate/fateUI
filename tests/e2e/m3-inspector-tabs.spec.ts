@@ -33,9 +33,9 @@ test('M3 resized Run tabs keep full labels and icons at the responsive boundary'
     for (let index = 0; index < 4; index += 1) await page.keyboard.press('ArrowLeft');
     await expect(separator).toHaveAttribute('aria-valuenow', '380');
     const tabs = page.getByRole('tablist', { name: 'Run views' });
-    await expect(tabs.getByRole('tab')).toHaveCount(5);
+    await expect(tabs.getByRole('tab')).toHaveCount(4);
     await page.evaluate(async () => {
-      await document.fonts.load('500 11px "Roboto Flex Variable"', 'Monitor Goal Agents Tools Activity');
+      await document.fonts.load('500 11px "Roboto Flex Variable"', 'Agents Goal Monitor Activity');
       await document.fonts.ready;
     });
     for (const width of [1600, 1100, 948]) {
@@ -47,7 +47,7 @@ test('M3 resized Run tabs keep full labels and icons at the responsive boundary'
       })).toBe(true);
       await expect.poll(() => page.evaluate(() => {
         const labels = [...document.querySelectorAll<HTMLElement>('.inspector-secondary-label')];
-        return labels.length === 5 && labels.every(label => getComputedStyle(label).display !== 'none'
+        return labels.length === 4 && labels.every(label => getComputedStyle(label).display !== 'none'
           && label.scrollWidth <= label.clientWidth + 1);
       })).toBe(true);
       if (width === 1100) {
@@ -65,14 +65,13 @@ test('M3 resized Run tabs keep full labels and icons at the responsive boundary'
       }
     }
     // At the application's minimum width the inspector is only 186 CSS pixels.
-    // Label hiding must reveal icons, and all five targets must still fit.
     for (const width of [835, 800, 600]) {
       await app.evaluate(({ BrowserWindow }, nextWidth) => BrowserWindow.getAllWindows()[0]!.setSize(nextWidth, 760), width);
       await expect.poll(() => tabs.evaluate(list => {
         const boundary = list.getBoundingClientRect();
         const inspector = list.closest('.inspector')!.getBoundingClientRect();
         const buttons = [...list.querySelectorAll<HTMLElement>('[role="tab"]')];
-        return inspector.width <= 259 && buttons.length === 5 && buttons.every(button => {
+        return inspector.width <= 259 && buttons.length === 4 && buttons.every(button => {
           const label = button.querySelector<HTMLElement>('.inspector-secondary-label');
           const icon = button.querySelector('svg');
           if (!label || !icon || !button.getAttribute('aria-label')) return false;

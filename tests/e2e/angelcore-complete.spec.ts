@@ -170,7 +170,6 @@ test('Angelcore styles populated surfaces and never wraps the composer toolbar w
     await squareSurface(page, '.subagent-chat-preview');
     await page.screenshot({ path: await evidenceOutputPath('angelcore-agent-preview.png'), animations: 'disabled' });
     await page.getByRole('button', { name: 'Close sub-agent chat preview', exact: true }).click();
-    await page.getByRole('tablist', { name: 'Run views' }).getByRole('tab', { name: 'Tools', exact: true }).click();
     await squareSurface(page, '.tool-card');
     await page.getByRole('tablist', { name: 'Run views' }).getByRole('tab', { name: 'Activity', exact: true }).click();
     await squareSurface(page, '.activity-panel');

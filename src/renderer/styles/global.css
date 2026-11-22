@@ -1397,11 +1397,6 @@ body.is-resizing-composer { cursor: ns-resize; user-select: none; }
 .tool-details pre { max-height: 220px; margin: 0; overflow: auto; color: var(--theme-muted); font: 10px/1.5 var(--font-interface); white-space: pre-wrap; word-break: break-word; }
 .tool-spinner { animation: tool-spin 900ms linear infinite; }
 @keyframes tool-spin { to { transform: rotate(360deg); } }
-.tool-history { height: 100%; }
-.tool-history-row { padding: 5px 8px; }
-.tool-card--compact { width: 100%; max-width: 100%; }
-.tool-card--compact .tool-heading small { max-width: 145px; }
-.tool-card--compact .tool-details { padding-left: 10px; }
 .tool-subagent-link {
   display: inline-flex; align-items: center; gap: 4px; margin: 0 11px 7px 30px; padding: 3px 5px;
   border-radius: 7px; color: var(--theme-accent); background: transparent; cursor: pointer; font-size: 9px; font-weight: 600;
@@ -1697,7 +1692,6 @@ body.is-resizing-horizontal-pane { cursor: row-resize; user-select: none; }
 }
 @container (max-width: 259px) {
   .inspector-secondary-tabs { gap: 8px; }
-  /* Five Run tabs must also fit the 186px viewport-capped inspector. */
   .inspector-secondary-tooltip { flex: 0 1 38px; }
   .inspector-secondary-trigger { width: 100%; padding: 0; }
   .inspector-secondary-trigger > svg { display: block; }
@@ -3084,8 +3078,6 @@ body.is-resizing-horizontal-pane { cursor: row-resize; user-select: none; }
 :root[data-compact-mode="true"] .tool-details, :root[data-compact-mode="true"] .tool-images { padding: 0 8px 6px 26px; }
 :root[data-compact-mode="true"] .tool-details section + section { margin-top: 6px; }
 :root[data-compact-mode="true"] .tool-subagent-link { margin: 0 8px 5px 26px; }
-:root[data-compact-mode="true"] .tool-history-row { padding: 3px 6px; }
-:root[data-compact-mode="true"] .tool-card--compact .tool-card-header { padding: 4px 6px; }
 :root[data-compact-mode="true"] .inspector-empty { padding: 18px 12px; }
 :root[data-compact-mode="true"] .inspector-empty strong { margin-top: 8px; font-size: 11px; }
 :root[data-compact-mode="true"] .inspector-empty p { margin: 3px 0; font-size: 9px; }

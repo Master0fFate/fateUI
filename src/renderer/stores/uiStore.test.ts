@@ -14,7 +14,7 @@ describe('UI store', () => {
       sendMessageWithModifier: false,
       toast: null,
       inspectorTab: 'changes',
-      inspectorLastViews: { work: 'changes', run: 'goal', system: 'context' },
+      inspectorLastViews: { work: 'changes', run: 'sessions', system: 'context' },
       selectedAgent: null,
       flightDeckJump: null,
     });
@@ -64,13 +64,13 @@ describe('UI store', () => {
   it('remembers the last view within each Inspector destination', () => {
     useUiStore.getState().setInspectorTab('files');
     useUiStore.getState().openInspectorDestination('run');
-    expect(useUiStore.getState().inspectorTab).toBe('goal');
+    expect(useUiStore.getState().inspectorTab).toBe('sessions');
 
-    useUiStore.getState().setInspectorTab('sessions');
+    useUiStore.getState().setInspectorTab('goal');
     useUiStore.getState().openInspectorDestination('work');
     expect(useUiStore.getState().inspectorTab).toBe('files');
     useUiStore.getState().openInspectorDestination('run');
-    expect(useUiStore.getState()).toMatchObject({ inspectorTab: 'sessions', inspectorCollapsed: false });
+    expect(useUiStore.getState()).toMatchObject({ inspectorTab: 'goal', inspectorCollapsed: false });
 
     useUiStore.setState({ inspectorCollapsed: true });
     useUiStore.getState().openInspectorTab('resources');
