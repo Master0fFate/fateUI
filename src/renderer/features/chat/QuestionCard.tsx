@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react';
 import type { PendingQuestionnaire, QuestionnaireAnswerInput, QuestionnaireBackInput } from '../../../shared/contracts/ipc';
 
 export interface QuestionCardProps {
@@ -16,6 +16,8 @@ export function QuestionCard(props: QuestionCardProps) {
 function CurrentQuestion({ questionnaire, onAnswer, onBack }: QuestionCardProps) {
   const headingId = useId();
   const progressId = useId();
+  const bodyId = useId();
+  const [collapsed, setCollapsed] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const card = useRef<HTMLElement>(null);
   const locked = useRef(false);
@@ -92,47 +94,57 @@ function CurrentQuestion({ questionnaire, onAnswer, onBack }: QuestionCardProps)
       locked.current = false;
       setBusy(false);
       setError(true);
+      setCollapsed(false);
     }
   }
 
   return (
-    <section ref={card} className="question-card" aria-labelledby={headingId} aria-describedby={progressId} aria-busy={busy}>
+    <section ref={card} className="question-card" data-collapsed={collapsed || undefined} aria-labelledby={collapsed ? progressId : headingId} aria-describedby={progressId} aria-busy={busy}>
       <div className="question-card-header">
         <p className="question-card-progress" id={progressId}>Question {questionnaire.index + 1} / {questionnaire.total}</p>
+        {collapsed && <span className="question-card-preview" title={questionnaire.question}>{questionnaire.question}</span>}
         <div className="question-card-nav">
-          <button className="question-card-nav-button" type="button" aria-label="Previous question" title="Previous question" disabled={busy || isFirst} onClick={goBack}>
-            <ChevronLeft size={14} aria-hidden="true" />
-          </button>
-          <button className="question-card-nav-button" type="button" aria-label="Next question" title={canGoForward ? 'Next question' : isLast ? 'Last question' : 'Answer to continue'} disabled={busy || !canGoForward} onClick={goForward}>
-            <ChevronRight size={14} aria-hidden="true" />
+          {!collapsed && <>
+            <button className="question-card-nav-button" type="button" aria-label="Previous question" title="Previous question" disabled={busy || isFirst} onClick={goBack}>
+              <ChevronLeft size={14} aria-hidden="true" />
+            </button>
+            <button className="question-card-nav-button" type="button" aria-label="Next question" title={canGoForward ? 'Next question' : isLast ? 'Last question' : 'Answer to continue'} disabled={busy || !canGoForward} onClick={goForward}>
+              <ChevronRight size={14} aria-hidden="true" />
+            </button>
+          </>}
+          <button className="question-card-nav-button question-card-toggle" type="button" aria-expanded={!collapsed} aria-controls={bodyId} aria-label={collapsed ? 'Expand question' : 'Collapse question'} onClick={() => setCollapsed(!collapsed)}>
+            {collapsed ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+            {collapsed ? 'Expand' : 'Collapse'}
           </button>
         </div>
       </div>
-      <h3 className="question-card-question" id={headingId} ref={heading} tabIndex={-1}>{questionnaire.question}</h3>
-      <div className="question-card-options">
-        {questionnaire.options.map((option, index) => (
-          <button className="question-card-option" type="button" key={index} aria-pressed={option.label === selected} disabled={busy} onClick={() => answer(option.label, 'option')}>
-            <span>{option.label}</span>
-            {option.description && <small>{option.description}</small>}
-          </button>
-        ))}
-        <input
-          className="question-card-custom"
-          aria-label="Write your own answer..."
-          value={draft}
-          maxLength={2000}
-          placeholder="Write your own answer..."
-          disabled={busy}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
-            event.preventDefault();
-            event.stopPropagation();
-            answer(draft, 'custom');
-          }}
-        />
+      <div id={bodyId} hidden={collapsed}>
+        <h3 className="question-card-question" id={headingId} ref={heading} tabIndex={-1}>{questionnaire.question}</h3>
+        <div className="question-card-options">
+          {questionnaire.options.map((option, index) => (
+            <button className="question-card-option" type="button" key={index} aria-pressed={option.label === selected} disabled={busy} onClick={() => answer(option.label, 'option')}>
+              <span>{option.label}</span>
+              {option.description && <small>{option.description}</small>}
+            </button>
+          ))}
+          <input
+            className="question-card-custom"
+            aria-label="Write your own answer..."
+            value={draft}
+            maxLength={2000}
+            placeholder="Write your own answer..."
+            disabled={busy}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
+              event.preventDefault();
+              event.stopPropagation();
+              answer(draft, 'custom');
+            }}
+          />
+        </div>
+        {error && <p className="question-card-error" role="alert">Could not send answer. Try again.</p>}
       </div>
-      {error && <p className="question-card-error" role="alert">Could not send answer. Try again.</p>}
     </section>
   );
 }

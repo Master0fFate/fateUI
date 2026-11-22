@@ -44,6 +44,11 @@
   color: var(--theme-text);
   cursor: pointer;
 }
+.question-card[data-collapsed] { padding-block: 4px; }
+.question-card[data-collapsed] .question-card-header { margin-bottom: 0; }
+.question-card .question-card-progress { flex: none; }
+.question-card .question-card-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.question-card .question-card-toggle { display: inline-flex; align-items: center; gap: 4px; width: auto; padding-inline: 7px; }
 .question-card .question-card-nav-button:hover:not(:disabled) { background: var(--theme-raised-hover); }
 .question-card .question-card-nav-button:disabled { color: var(--theme-muted); opacity: .4; }
 .question-card .question-card-option[aria-pressed='true'] { background: var(--theme-raised-hover); box-shadow: inset 2px 0 0 var(--theme-accent); }
