@@ -72,7 +72,6 @@ interface UiState {
   settingsOpen: boolean;
   /** A one-time request to show a section. The dialog owns the section it shows. */
   settingsSectionRequest: SettingsSection | null;
-  dismissedRecoveryNotices: string[];
   terminalOpen: boolean;
   browserOpen: boolean;
   browserPaneWidth: number;
@@ -191,7 +190,6 @@ export const useUiStore = create<UiState>()(
       paletteOpen: false,
       settingsOpen: false,
       settingsSectionRequest: null,
-      dismissedRecoveryNotices: [],
       terminalOpen: false,
       browserOpen: false,
       browserPaneWidth: 520,
@@ -300,7 +298,6 @@ export const useUiStore = create<UiState>()(
         browserOpen,
         browserPaneWidth,
         reasoningMenu,
-        dismissedRecoveryNotices,
       }) => ({
         leftWidth,
         rightWidth,
@@ -312,7 +309,6 @@ export const useUiStore = create<UiState>()(
         browserOpen,
         browserPaneWidth,
         reasoningMenu,
-        dismissedRecoveryNotices,
       }),
     },
   ),

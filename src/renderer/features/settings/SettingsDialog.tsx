@@ -40,7 +40,6 @@ import { builtInSkins, builtInSkinName, skinPackThemeId, type SkinId, type SkinC
 import { getSkinDefinitions, persistAppliedSkin, setSkinDefinitions } from '../../skin';
 import { SkinPackSettings, type RemovedSkin } from './SkinPackSettings';
 import { McpSettings } from './McpSettings';
-import { RecoveryReview } from '../chat/RecoveryReviewNotice';
 import { GoogleSettings } from './GoogleSettings';
 import { SavedAgentsSettings } from './SavedAgentsSettings';
 import { HookSettings } from './HookSettings';
@@ -980,7 +979,6 @@ export function SettingsDialog({ themeCatalog: initialThemeCatalog = fallbackThe
 
               {activeSection === 'workspace' && (
                 <div className="settings-panel" role="tabpanel" id="settings-panel-workspace" aria-labelledby="settings-tab-workspace">
-                  <RecoveryReview details />
                   <div className="settings-title"><div><h3>Project trust</h3></div></div>
                   <div className="settings-notice"><ShieldCheck size={14} /><div><strong>Project-confined by default</strong><p>Read only and Edit files stay inside the trusted project. Full access explicitly unlocks host files and shell execution, is saved per session, and is not sandboxed.</p></div></div>
                   {computerUse.supported && <div className="settings-group">

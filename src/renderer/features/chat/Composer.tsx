@@ -6,7 +6,6 @@ import { unavailableExplanation } from '../../platform/capabilityPolicy';
 import * as Dialog from '@radix-ui/react-dialog';
 import { LearningDraftsRail } from '../learning/LearningDraftsRail';
 import { LearningIndicator } from '../learning/LearningIndicator';
-import { RecoveryReview } from './RecoveryReviewNotice';
 import { learningDraftKey, useLearningStore } from '../learning/learningStore';
 import * as Popover from '@radix-ui/react-popover';
 import { ArrowRight, ArrowUp, AtSign, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, FileText, FolderOpen, GitFork, Globe2, Hash, History, ImagePlus, LoaderCircle, MessageSquarePlus, Mic, Paperclip, Pencil, Plug, Shield, ShieldCheck, Sparkles, Square, Target, Trash2, TriangleAlert, X, Zap } from 'lucide-react';
@@ -3159,7 +3158,6 @@ function DesktopComposer({ onOpenProject, connectRequest = 0 }: { onOpenProject:
         </div>
         </>}
       </ComposerPresentation>
-      <RecoveryReview />
       {voiceLag && voiceState === 'recording' && <p className="bounded-note" role="status">Live transcription is falling behind. Stop recording to let it catch up.</p>}
       {composerError && <p className="composer-error" role="alert">{composerError}</p>}
       <ProviderConnectDialog open={providerLoginOpen} onOpenChange={setProviderLoginOpen} />

@@ -1317,9 +1317,6 @@ body.is-resizing-composer { cursor: ns-resize; user-select: none; }
 }
 .welcome--conversation .composer { margin: 0; }
 .composer-error { margin: 6px 3px 0; color: var(--theme-danger); font-size: 10px; }
-.recovery-notice { display: flex; align-items: baseline; gap: 8px; margin: 4px 3px 0; color: var(--theme-muted); font-size: 11px; line-height: 1.4; }
-.recovery-notice button { flex: none; padding: 2px; background: transparent; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-.recovery-notice button:hover { color: var(--theme-text); }
 .composer-fork-notice { display: grid; min-width: 0; margin: -3px 0 10px; padding: 7px 8px; grid-template-columns: 18px minmax(0, 1fr) 22px; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--theme-accent) 30%, var(--theme-border)); border-radius: 8px; color: var(--theme-muted); background: var(--theme-accent-soft); }
 .composer-fork-notice > svg { color: var(--theme-accent); }
 .composer-fork-notice > span { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
