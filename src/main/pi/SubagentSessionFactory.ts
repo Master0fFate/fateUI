@@ -20,6 +20,7 @@ import type {
   ThinkingLevel,
 } from '../../shared/contracts/ipc';
 import { INTELLIGENT_UI_PROMPT } from '../../shared/intelligentUiPrompt';
+import { assertSessionFitsInMemory } from './multi-agent/TeamCheckpoints';
 import { createProjectConfinedTools, type ProjectToolAccess } from './PiToolPolicy';
 import type { ImageGenerationSettingsResolver } from './PiImageTool';
 import { filterSkillsForChild, type SelectedSubagentSkill } from './SubagentSkills';
@@ -222,6 +223,7 @@ export async function createSdkChildSession(input: ChildSessionInput): Promise<A
     ],
     { searchTools: true, ...(input.agentDir ? { imageAgentDir: input.agentDir } : {}), ...(input.attestationSink ? { attestations: input.attestationSink } : {}), ...(input.getImageGenerationSettings ? { getImageGenerationSettings: input.getImageGenerationSettings } : {}) },
   );
+  if (input.sessionFile) assertSessionFitsInMemory(input.sessionFile);
   const sessionManager = input.sessionFile
     ? SessionManager.open(input.sessionFile, input.sessionDirectory, input.projectPath)
     : input.sessionDirectory

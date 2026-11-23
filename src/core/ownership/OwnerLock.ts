@@ -133,24 +133,26 @@ function parseRecord(content: string): OwnerRecord | null {
 
 const execFileAsync = promisify(execFile);
 
-async function windowsProcessCreatedAfter(pid: number, time: number): Promise<boolean> {
+async function windowsOwnerHasStopped(pid: number, startedAt: number): Promise<boolean> {
+  if (pid === process.pid) return false;
   try {
     const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-      `$env:PSModulePath = "$PSHOME\\Modules"; (Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CreationDate.ToUniversalTime().ToString('o')`], { windowsHide: true, timeout: 15_000 });
-    const created = Date.parse(stdout.trim());
-    return Number.isFinite(created) && created > time;
+      `$ErrorActionPreference = 'Stop'; $owners = [Diagnostics.Process]::GetProcesses().Where({ $_.Id -eq ${pid} }); `
+      + `if ($owners.Count -eq 0) { 'absent' } else { ([DateTimeOffset]$owners[0].StartTime).ToUnixTimeMilliseconds() }`],
+    { windowsHide: true, timeout: 15_000 });
+    const identity = stdout.trim();
+    return identity === 'absent' || (/^\d+$/u.test(identity) && Number(identity) > startedAt);
   } catch { return false; }
 }
 
 /**
  * Proof that the recorded owner no longer exists. A record from another host or platform, an
- * unreadable record, and a PID that any process holds (a reused PID included, except on Linux
- * where the kernel start time tells them apart) all leave the owner standing.
+ * unreadable record, or a live PID without proof of reuse leaves the owner standing.
  */
 async function ownerHasStopped(record: OwnerRecord): Promise<boolean> {
   if (record.host !== os.hostname() || record.platform !== process.platform) return false;
   if (process.platform === 'win32') {
-    return noSuchProcess(record.pid) || windowsProcessCreatedAfter(record.pid, record.startedAt);
+    return noSuchProcess(record.pid) || windowsOwnerHasStopped(record.pid, record.startedAt);
   }
   if (process.platform !== 'linux') return noSuchProcess(record.pid);
   const here = linuxIdentity();

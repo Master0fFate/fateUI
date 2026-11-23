@@ -14,7 +14,8 @@ import {
 import type { SessionBranch, SessionSummary } from '../../shared/contracts/ipc';
 import type { SnapshotItem } from '../../shared/protocol/snapshots';
 import { messageText } from './PiEventNormalizer';
-import { agentTeamSchema, type AgentTeam } from '../../shared/contracts/multiAgent';
+import { agentTeamSchema, TEAM_CHECKPOINT_PRUNED, type AgentTeam } from '../../shared/contracts/multiAgent';
+import { assertSessionFitsInMemory, MAX_LIVE_SESSION_BYTES } from './multi-agent/TeamCheckpoints';
 import { OversizedRecordFields, readSessionSnapshot, SessionSnapshotLimitError, type SnapshotRecord } from './SessionSnapshotReader';
 import { sessionProjectMatches } from './SessionProjectIdentity';
 import { HYP3RC0D3_CUSTOM_TYPE, hyp3rc0d3EntryEnabled } from './context/Hyp3rc0d3';
@@ -64,8 +65,14 @@ export interface SessionSnapshot {
 }
 
 const sdkMutationSource: Omit<SessionRepositorySource, 'list'> = {
-  rename: (sessionPath, name) => { SessionManager.open(sessionPath).appendSessionInfo(name); },
-  setHyp3rc0d3: (sessionPath, enabled) => { persistHyp3rc0d3Session(SessionManager.open(sessionPath), enabled); },
+  rename: (sessionPath, name) => {
+    assertSessionFitsInMemory(sessionPath);
+    SessionManager.open(sessionPath).appendSessionInfo(name);
+  },
+  setHyp3rc0d3: (sessionPath, enabled) => {
+    assertSessionFitsInMemory(sessionPath);
+    persistHyp3rc0d3Session(SessionManager.open(sessionPath), enabled);
+  },
   remove: (sessionPath) => rm(sessionPath),
 };
 
@@ -132,7 +139,7 @@ const MAX_COLD_TEAM_INDEX_BYTES = 16 * 1024 * 1024;
 const MAX_COLD_TEAM_RESULT_BYTES = 16 * 1024 * 1024;
 // Legacy export until HomeOwnership no longer conflates preview with resume.
 // This is NOT a preview limit: destructive rewrites have a separate, lower cap.
-export const MAX_SESSION_SNAPSHOT_BYTES = 128 * 1024 * 1024;
+export const MAX_SESSION_SNAPSHOT_BYTES = MAX_LIVE_SESSION_BYTES;
 const MAX_SESSION_BRANCH_REWRITE_BYTES = 32 * 1024 * 1024;
 const MAX_SESSION_DISCOVERY_CONCURRENCY = 8;
 const sessionEntryTypes = new Set(['message', 'thinking_level_change', 'model_change', 'usage', 'compaction', 'branch_summary', 'custom', 'custom_message', 'context_edit', 'label', 'session_info']);
@@ -322,7 +329,7 @@ function coldTeamEvent(entry: JsonRecord, sessionId: string) {
     || event.kind !== 'fate-agent-team-event' || event.version !== 1 || typeof event.teamId !== 'string'
     || !Number.isSafeInteger(event.sequence) || !isRecord(event.payload)) return null;
   let team: AgentTeam | null = null;
-  if (event.type !== 'team.deleted') {
+  if (event.type !== 'team.deleted' && event.type !== TEAM_CHECKPOINT_PRUNED) {
     const parsed = agentTeamSchema.safeParse(event.payload.team);
     if (!parsed.success || parsed.data.id !== event.teamId || parsed.data.rootSessionId !== sessionId) return null;
     team = parsed.data;

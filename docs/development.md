@@ -56,7 +56,7 @@ The cross-platform GitHub Actions package matrix runs for pull requests, pushes 
 - Native hosted runners build, install or mount, and smoke-test Windows x64, macOS Apple Silicon and Intel, and Linux x64 packages: Windows NSIS, macOS DMG and PKG, Linux AppImage and DEB.
 - The version in `package.json` and `PRODVER` must match. The release tag is `v<version>`, and `node scripts/release-artifacts.mjs metadata --field display-version` combines that version with the optional `package.json.releaseName` for the display title.
 
-The current source version is `2.4.2` (Watcher).
+The current source version is `2.4.3` (Watcher).
 
 1. Merge the version bump and `.github/release-notes/v<version>.md` into `main`.
 2. Manually run **Cross-platform installers** on `main` with the promotion inputs empty. Confirm the run used the intended commit, all four native jobs passed, and `verified-release-installers` contains seven installers and `SHA256SUMS`. This artifact is retained for 14 days. This run does not publish anything.

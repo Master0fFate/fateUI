@@ -168,6 +168,7 @@ import { COMPUTER_TOOL_NAME, createComputerTool } from './PiComputerTool';
 import type { SnapshotView } from '../../core/views/WorkspaceSnapshotService';
 import type { FatePaths } from '../../core/FatePaths';
 import { projectSessionDirectory } from './PiSessionRepository';
+import { assertSessionFitsInMemory, persistTeamCheckpoint } from './multi-agent/TeamCheckpoints';
 
 export interface SessionDefaults {
   thinkingLevel: ThinkingLevel;
@@ -803,6 +804,7 @@ export const createPiSdkAdapter = (paths?: FatePaths, options: PiSdkAdapterOptio
         diagnostics: services.diagnostics,
       };
     };
+    if (sessionPath) assertSessionFitsInMemory(sessionPath);
     return createAgentSessionRuntime(factory, {
       cwd,
       agentDir,
@@ -1675,7 +1677,7 @@ export class PiRuntimeService {
       persist: (rootSessionId, event) => {
         const slot = this.findLiveSlot(rootSessionId);
         if (!slot || slot.disposed) return;
-        slot.runtime.session.sessionManager.appendCustomEntry('fate-agent-team-event', event);
+        persistTeamCheckpoint(slot.runtime.session.sessionManager, event);
       },
       settled: (rootSessionId) => {
         const slot = this.findLiveSlot(rootSessionId);
@@ -5001,7 +5003,10 @@ export class PiRuntimeService {
         newSession: async (options) => replaceFromExtension('New session', async () => runtime.newSession(options)),
         fork: async (entryId, options) => replaceFromExtension('Session fork', async () => this.forkWithHyp3rc0d3(runtime, entryId, options)),
         navigateTree: async (targetId, options) => replaceFromExtension('Branch navigation', () => session.navigateTree(targetId, options)),
-        switchSession: async (sessionPath, options) => replaceFromExtension('Session switch', async () => runtime.switchSession(sessionPath, { ...options, cwdOverride: this.project!.path })),
+        switchSession: async (sessionPath, options) => replaceFromExtension('Session switch', async () => {
+          assertSessionFitsInMemory(sessionPath);
+          return runtime.switchSession(sessionPath, { ...options, cwdOverride: this.project!.path });
+        }),
         reload: async () => {
           if (!ownsSession() || this.selectedSlot !== slot) throw this.replacementSuperseded();
           await this.reloadSession(slot, undefined, extensionCommandRunIds.get(session));

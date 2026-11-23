@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { mkdirSync, promises as fs, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -37,6 +37,15 @@ export class CrashTelemetryService {
     private readonly writeFile: (filePath: string, contents: string) => Promise<void> = (filePath, contents) => fs.writeFile(filePath, contents, { encoding: 'utf8', mode: 0o600 }),
     private readonly ensureDir: (directory: string) => Promise<void> = (directory) => fs.mkdir(directory, { recursive: true }).then(() => undefined),
   ) {}
+
+  recordLocalFault(slot: number, event: string, details?: { reason: string; exitCode: number }): void {
+    try {
+      mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+      writeFileSync(path.join(this.directory, `last-fault-slot-${slot}.json`), `${JSON.stringify({
+        event, ...details, version: this.version(), writtenAt: Date.now(), ...process.memoryUsage(),
+      })}\n`, { encoding: 'utf8', mode: 0o600 });
+    } catch { console.error(`Fate UI could not record ${event} locally.`); }
+  }
 
   async record(stack: string): Promise<string | null> {
     if (!this.enabled()) return null;

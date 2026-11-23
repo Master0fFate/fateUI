@@ -123,14 +123,21 @@ const crashTelemetry = new CrashTelemetryService(
   () => app.getVersion(),
 );
 process.on('uncaughtException', (error) => {
+  crashTelemetry.recordLocalFault(instanceProfile.slot, 'uncaughtException');
   void crashTelemetry.record(error.stack ?? String(error)).catch(() => undefined);
 });
 process.on('unhandledRejection', (reason) => {
+  crashTelemetry.recordLocalFault(instanceProfile.slot, 'unhandledRejection');
   const stack = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
   void crashTelemetry.record(stack).catch(() => undefined);
 });
-app.on('render-process-gone', (_event, _contents, details) => {
-  void crashTelemetry.record(`render-process-gone ${details.reason} ${details.exitCode}`).catch(() => undefined);
+app.on('render-process-gone', (_event, _contents, { reason, exitCode }) => {
+  if (reason === 'clean-exit') return;
+  crashTelemetry.recordLocalFault(instanceProfile.slot, 'render-process-gone', { reason, exitCode });
+  void crashTelemetry.record(`render-process-gone ${reason} ${exitCode}`).catch(() => undefined);
+});
+app.on('child-process-gone', (_event, { reason, exitCode }) => {
+  if (reason !== 'clean-exit') crashTelemetry.recordLocalFault(instanceProfile.slot, 'child-process-gone', { reason, exitCode });
 });
 const legacyAutomations = new LegacyAutomations(logs);
 let browserHost: BrowserHost | null = null;

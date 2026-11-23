@@ -8,6 +8,7 @@ export const AGENT_TEAM_MAX_NODES = Number.MAX_SAFE_INTEGER;
 export const AGENT_TEAM_MAX_ACTIVE_TURNS = Number.MAX_SAFE_INTEGER;
 export const AGENT_TEAM_MAX_MESSAGES = Number.MAX_SAFE_INTEGER;
 export const AGENT_TEAM_MAX_MESSAGE_BYTES = 32 * 1024;
+export const TEAM_CHECKPOINT_PRUNED = 'team.checkpoint-pruned';
 export const AGENT_TEAM_DEFAULT_WAIT_MS = 30_000;
 export const AGENT_TEAM_MAX_WAIT_MS = 5 * 60_000;
 export const AGENT_TEAM_MAX_HISTORY_NODES = Number.MAX_SAFE_INTEGER;

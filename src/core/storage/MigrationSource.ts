@@ -8,7 +8,7 @@ import { queuedMessageSchema } from '../../shared/contracts/ipc';
 import { taskListSchema } from '../../shared/contracts/tasks';
 import { goalMaxStateSchema, type GoalMaxState } from '../../shared/contracts/goalmaxxing';
 import { migrateGoalMaxSnapshot } from '../../main/pi/goalmaxxing/GoalMaxMigrations';
-import { agentTeamSchema } from '../../shared/contracts/multiAgent';
+import { agentTeamSchema, TEAM_CHECKPOINT_PRUNED } from '../../shared/contracts/multiAgent';
 import { readSessionSnapshot } from '../../main/pi/SessionSnapshotReader';
 import { assertMigrationPath, fingerprintMigrationFile, listMigrationFiles, migrationHash, readMigrationJson, type MigrationFile } from './MigrationFiles';
 
@@ -177,7 +177,7 @@ export async function readMigrationSource(paths: FatePaths): Promise<MigrationSo
             if (record.type !== 'custom' || record.customType !== 'fate-agent-team-event' || record.data === undefined) continue;
             const data = z.object({ kind: z.literal('fate-agent-team-event'), version: z.literal(1), teamId: z.string().min(1),
               type: z.string().min(1), payload: z.object({ team: z.unknown().optional() }).passthrough() }).passthrough().parse(record.data);
-            const team = data.type === 'team.deleted' ? null : agentTeamSchema.parse(data.payload.team);
+            const team = data.type === 'team.deleted' || data.type === TEAM_CHECKPOINT_PRUNED ? null : agentTeamSchema.parse(data.payload.team);
             if (team && (team.id !== data.teamId || team.rootSessionId !== header.id || canonical(team.projectPath) !== project)) throw new Error('Retained Team identity is inconsistent.');
             teams.set(data.teamId, team);
           }

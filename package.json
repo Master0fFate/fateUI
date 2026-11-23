@@ -1,6 +1,6 @@
 {
   "name": "pi-fategui",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "releaseName": "Watcher",
   "description": "A local-first desktop interface for the Pi coding agent",
   "type": "module",
